@@ -1,3 +1,27 @@
+Immediate problems and open questions:
+
+- Problem: Handling different addressing modes in load/stores ([offset/post-indexing/pre-indexing](https://developer.arm.com/documentation/102374/0102/Loads-and-stores---addressing)) during instruction building
+- Question: Exposing register read/writes to JIT during instruction building
+  Cranelift's JIT instruction builder can use "variables" as `Value`s.
+  * We can perhaps model registers as global variables which will allow setting
+    initial values, retrieving values when trapping back to the emulator?
+- Question(s): Exposing system memory
+  1. Problem: MMU/Virtual memory/TLB. lol
+  2. Problem: protecting emulator's memory from emulated CPU
+    * Idea: use
+      [`madvise(MADV_DONTNEED)`](https://man7.org/linux/man-pages/man2/madvise.2.html)
+      for emulator memory before exec'ing JIT'ed code and monitor page faults with
+      [`userfaultfd(2)`](https://man7.org/linux/man-pages/man2/userfaultfd.2.html)
+      to detect unauthorized accesses.
+- Problem: Some basic introspection as a starting build block.
+  The JIT should be able to print state of CPU registers.
+  The JIT should be able to dump contents of memory regions.
+- Question: Handling system traps and exceptions. Is instrumentation the only
+  approach?
+  * And/or Catching `SIGSEGV` for memory traps?
+- Question: modelling architectural limits such as [stack pointer 16-byte alignment checks](https://community.arm.com/arm-community-blogs/b/architectures-and-processors-blog/posts/using-the-stack-in-aarch64-implementing-push-and-pop).
+
+<!--
 Hello!
 
 This is a simple demo that JIT-compiles a toy language, using Cranelift.
@@ -407,3 +431,4 @@ issues](https://github.com/bytecodealliance/wasmtime/issues?q=is%3Aissue+is%3Aop
 or just stop by the [gitter chat](https://gitter.im/CraneStation/Lobby/~chat).
 Very few things in Cranelift's design are set in stone at this time, and we're
 really interested to hear from people about what makes sense what doesn't.
+-->
