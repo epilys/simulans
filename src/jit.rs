@@ -1,52 +1,59 @@
 //
-// ____
+// simulans
 //
-// Copyright 2025 Emmanouil Pitsidianakis <manos@pitsidianak.is>
+// Copyright 2025- Manos Pitsidianakis
 //
-// This file is part of ____.
+// This file is part of simulans.
 //
-// ____ is free software: you can redistribute it and/or modify
+// simulans is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// ____ is distributed in the hope that it will be useful,
+// simulans is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
-// along with ____. If not, see <http://www.gnu.org/licenses/>.
+// along with simulans. If not, see <http://www.gnu.org/licenses/>.
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use crate::frontend::*;
+// use crate::frontend::*;
 use capstone::prelude::*;
+use cranelift::codegen::ir::immediates::Offset32;
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{DataDescription, Linkage, Module};
 use indexmap::IndexMap;
-use std::slice;
+use std::{pin::Pin, slice};
 
-macro_rules! I64 {
-    () => {{
-        cranelift::prelude::Type::int(64).expect("Could not create I64 type")
-    }};
-}
+use crate::cpu_state::*;
 
 struct Stack {
-    //data: Box<[u8; 1_000_000 * 4096]>,
-    data: Box<[u8; 100 * 4096]>,
+    data: Pin<Box<[u8; Stack::SIZE]>>,
     offset: usize,
 }
 
 impl Stack {
-    fn addr_as_value(&self, offset: usize, builder: &mut FunctionBuilder<'_>) -> Value {
+    const SIZE: usize = 100 * 4096;
+
+    fn new() -> Self {
+        let stack_vec = vec![0; Self::SIZE];
+        let ptr = Box::into_raw(stack_vec.into_boxed_slice()) as *mut [u8; Self::SIZE];
+
+        // SAFETY: The underlying array of a slice has the exact same layout as an actual array `[T; N]` if `N` is equal to the slice's length.
+        let data = Pin::new(unsafe { Box::from_raw(ptr) });
+        Self {
+            offset: data.as_slice().len() - 1,
+            data,
+        }
+    }
+
+    fn addr(&self, offset: usize) -> usize {
         assert!(offset < self.data.as_slice().len(), "offset was {offset}");
-        builder.ins().iconst(
-            I64! {},
-            i64::try_from(unsafe { self.data.as_ptr().add(self.offset) }.addr()).unwrap(),
-        )
+        (unsafe { self.data.as_ptr().add(self.offset) }) as usize
     }
 }
 
@@ -64,6 +71,7 @@ pub struct JIT {
     /// The data description, which is to data objects what `ctx` is to functions.
     data_description: DataDescription,
     stack: Stack,
+    cpu_state: Pin<Box<CpuState>>,
 
     /// The module, with the jit backend, which manages the JIT'd
     /// functions.
@@ -83,23 +91,13 @@ impl Default for JIT {
             .unwrap();
         let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
 
-        let stack_vec = vec![0; 100 * 4096];
-        let ptr = Box::into_raw(stack_vec.into_boxed_slice()) as *mut [u8; 100 * 4096];
-
-        // SAFETY: The underlying array of a slice has the exact same layout as an actual array `[T; N]` if `N` is equal to the slice's length.
-        let stack_data = unsafe { Box::from_raw(ptr) };
-        let offset = stack_data.as_slice().len();
-        let stack = Stack {
-            data: stack_data,
-            offset,
-        };
-
         let module = JITModule::new(builder);
         Self {
+            cpu_state: Box::pin(CpuState::default()),
             builder_context: FunctionBuilderContext::new(),
             ctx: module.make_context(),
+            stack: Stack::new(),
             data_description: DataDescription::new(),
-            stack,
             module,
         }
     }
@@ -210,15 +208,13 @@ impl JIT {
         //     declare_variables(int, &mut builder, &params, &the_return, &stmts, entry_block);
 
         let mut variables = IndexMap::new();
-        let zero = builder.ins().iconst(int, 0);
-        let return_variable = declare_variable(int, &mut builder, &mut variables, bad64::Reg::X0);
-        builder.def_var(return_variable, zero);
+        self.cpu_state.registers.sp_el0 = self.stack.addr(self.stack.offset).try_into().unwrap();
+        self.cpu_state.load_cpu_state(&mut builder, &mut variables);
         // Now translate the statements of the function body.
         let mut trans = FunctionTranslator {
             int,
             builder,
             variables,
-            stack: &mut self.stack,
             module: &mut self.module,
         };
         for insn in decoded_iter {
@@ -227,18 +223,25 @@ impl JIT {
             println!("{}", insn);
             trans.translate_instruction(insn);
         }
+        let FunctionTranslator {
+            int: _,
+            mut builder,
+            variables,
+            module: _,
+        } = trans;
 
+        self.cpu_state.save_cpu_state(&mut builder, &variables);
         // Set up the return variable of the function. Above, we declared a
         // variable to hold the return value. Here, we just do a use of that
         // variable.
-        let return_variable = trans.variables.get(&bad64::Reg::X0).unwrap();
-        let return_value = trans.builder.use_var(*return_variable);
+        let return_variable = variables.get(&bad64::Reg::X0).unwrap();
+        let return_value = builder.use_var(*return_variable);
 
         // Emit the return instruction.
-        trans.builder.ins().return_(&[return_value]);
+        builder.ins().return_(&[return_value]);
 
         // Tell the builder we're done with this function.
-        trans.builder.finalize();
+        builder.finalize();
         Ok(())
     }
 }
@@ -249,11 +252,69 @@ struct FunctionTranslator<'a> {
     int: types::Type,
     builder: FunctionBuilder<'a>,
     variables: IndexMap<bad64::Reg, Variable>,
-    stack: &'a mut Stack,
     module: &'a mut JITModule,
 }
 
 impl<'a> FunctionTranslator<'a> {
+    fn addressing(&mut self, operand: &bad64::Operand) -> Value {
+        use bad64::Operand;
+
+        match operand {
+            Operand::Reg {
+                ref reg,
+                arrspec: None,
+            } => self.reg_to_var(reg),
+            bad64::Operand::MemPreIdx { ref reg, imm } => {
+                let reg = self.reg_to_var(reg);
+                match imm {
+                    bad64::Imm::Unsigned(imm) => {
+                        let imm_value = self
+                            .builder
+                            .ins()
+                            .iconst(self.int, i64::try_from(*imm).unwrap());
+                        let value = self.builder.ins().uadd_overflow_trap(
+                            reg,
+                            imm_value,
+                            TrapCode::IntegerOverflow,
+                        );
+                        value
+                    }
+                    bad64::Imm::Signed(imm) => {
+                        let imm_value = self.builder.ins().iconst(self.int, *imm);
+                        let (value, _overflow_flag) =
+                            self.builder.ins().sadd_overflow(reg, imm_value);
+                        value
+                    }
+                }
+            }
+            bad64::Operand::MemPostIdxImm { ref reg, imm } => {
+                let reg = self.reg_to_var(reg);
+                _ = match imm {
+                    bad64::Imm::Unsigned(imm) => {
+                        let imm_value = self
+                            .builder
+                            .ins()
+                            .iconst(self.int, i64::try_from(*imm).unwrap());
+                        let value = self.builder.ins().uadd_overflow_trap(
+                            reg,
+                            imm_value,
+                            TrapCode::IntegerOverflow,
+                        );
+                        value
+                    }
+                    bad64::Imm::Signed(imm) => {
+                        let imm_value = self.builder.ins().iconst(self.int, *imm);
+                        let (value, _overflow_flag) =
+                            self.builder.ins().sadd_overflow(reg, imm_value);
+                        value
+                    }
+                };
+                reg
+            }
+            other => unimplemented!("unexpected rhs in store: {:?}", other),
+        }
+    }
+
     // /// When you write out instructions in Cranelift, you get back `Value`s. You
     // /// can then use these references in other instructions.
     // fn translate_expr(&mut self, expr: Expr) -> Value {
@@ -452,15 +513,17 @@ impl<'a> FunctionTranslator<'a> {
     //     self.builder.ins().symbol_value(pointer, local_id)
     // }
 
+    #[inline]
     fn reg_to_var(&mut self, reg: &bad64::Reg) -> Value {
-        let Some(var) = self.variables.get(reg) else {
-            let var = Variable::new(self.variables.len());
-            self.variables.insert(*reg, var);
-            let zero = self.builder.ins().iconst(self.int, 0);
-            self.builder.def_var(var, zero);
-            //self.builder.declare_var(var, self.int);
-            return self.builder.use_var(var);
-        };
+        let var = &self.variables[reg];
+        //{
+        //    let var = Variable::new(self.variables.len());
+        //    self.variables.insert(*reg, var);
+        //    let zero = self.builder.ins().iconst(self.int, 0);
+        //    self.builder.def_var(var, zero);
+        //    //self.builder.declare_var(var, self.int);
+        //    return self.builder.use_var(var);
+        //};
         self.builder.use_var(*var)
     }
 
@@ -482,98 +545,12 @@ impl<'a> FunctionTranslator<'a> {
                     } => self.reg_to_var(reg),
                     other => panic!("unexpected lhs in store: {:?}", other),
                 };
-                let (target, offset) = match instruction.operands()[1] {
-                    bad64::Operand::Reg {
-                        ref reg,
-                        arrspec: None,
-                    } => {
-                        let reg_target = self.reg_to_var(reg);
-                        // FIXME ??? huh
-                        self.builder.ins().store(
-                            cranelift::prelude::MemFlags::new(),
-                            value,
-                            reg_target,
-                            0,
-                        );
-                        return;
-                    }
-                    bad64::Operand::MemPreIdx {
-                        reg: bad64::Reg::SP,
-                        imm: bad64::Imm::Signed(imm),
-                    } => {
-                        // FIXME: pre-update SP
-                        let stack_offset = todo!();
-                        let stack_ptr = self.stack.addr_as_value(stack_offset, &mut self.builder);
-                        (stack_ptr, imm)
-                    }
-                    bad64::Operand::MemPreIdx {
-                        reg: bad64::Reg::SP,
-                        imm: bad64::Imm::Unsigned(imm),
-                    } => {
-                        // FIXME: pre-update SP
-                        let stack_offset = todo!();
-                        let stack_ptr = self.stack.addr_as_value(stack_offset, &mut self.builder);
-                        (
-                            stack_ptr, imm as i64, // FIXME
-                        )
-                    }
-                    bad64::Operand::MemPreIdx { ref reg, imm } => {
-                        // FIXME: pre-update reg
-                        let imm = match imm {
-                            bad64::Imm::Unsigned(imm) => imm as i64, // FIXME
-                            bad64::Imm::Signed(imm) => imm,
-                        };
-                        let var = self.reg_to_var(reg);
-                        let addr = self.builder.ins().load(
-                            cranelift::prelude::Type::int(64).unwrap(),
-                            cranelift::prelude::MemFlags::new(),
-                            var,
-                            codegen::ir::immediates::Offset32::try_from_i64(imm).unwrap(),
-                        );
-                        (addr, 0)
-                    }
-                    bad64::Operand::MemPostIdxImm {
-                        reg: bad64::Reg::SP,
-                        imm: bad64::Imm::Signed(imm),
-                    } => {
-                        // FIXME; post-update SP value
-                        let stack_offset = todo!();
-                        let stack_ptr = self.stack.addr_as_value(stack_offset, &mut self.builder);
-                        (stack_ptr, imm)
-                    }
-                    bad64::Operand::MemPostIdxImm {
-                        reg: bad64::Reg::SP,
-                        imm: bad64::Imm::Unsigned(imm),
-                    } => {
-                        // FIXME; post-update SP value
-                        let stack_offset = todo!();
-                        let stack_ptr = self.stack.addr_as_value(stack_offset, &mut self.builder);
-                        (
-                            stack_ptr, imm as i64, // FIXME
-                        )
-                    }
-                    bad64::Operand::MemPostIdxImm { ref reg, imm } => {
-                        // FIXME; post-update reg value
-                        let imm = match imm {
-                            bad64::Imm::Unsigned(imm) => imm as i64, // FIXME
-                            bad64::Imm::Signed(imm) => imm,
-                        };
-                        let var = self.reg_to_var(reg);
-                        let addr = self.builder.ins().load(
-                            cranelift::prelude::Type::int(64).unwrap(),
-                            cranelift::prelude::MemFlags::new(),
-                            var,
-                            codegen::ir::immediates::Offset32::try_from_i64(imm).unwrap(),
-                        );
-                        (addr, 0)
-                    }
-                    other => panic!("unexpected rhs in store: {:?}", other),
-                };
+                let target = self.addressing(&instruction.operands()[1]);
                 self.builder.ins().store(
                     cranelift::prelude::MemFlags::new(),
                     value,
                     target,
-                    codegen::ir::immediates::Offset32::try_from_i64(offset).unwrap(),
+                    Offset32::new(0),
                 );
             }
             Op::LDR => {
@@ -584,98 +561,16 @@ impl<'a> FunctionTranslator<'a> {
                     } => self.reg_to_var(reg),
                     other => panic!("unexpected lhs in load: {:?}", other),
                 };
-                let (source, offset) = match instruction.operands()[1] {
-                    bad64::Operand::Reg {
-                        ref reg,
-                        arrspec: None,
-                    } => {
-                        let reg_target = self.reg_to_var(reg);
-                        (reg_target, 0)
-                    }
-                    bad64::Operand::MemPreIdx {
-                        reg: bad64::Reg::SP,
-                        imm: bad64::Imm::Signed(imm),
-                    } => {
-                        // FIXME: pre-update SP
-                        let stack_offset = todo!();
-                        let stack_ptr = self.stack.addr_as_value(stack_offset, &mut self.builder);
-                        (stack_ptr, imm)
-                    }
-                    bad64::Operand::MemPreIdx {
-                        reg: bad64::Reg::SP,
-                        imm: bad64::Imm::Unsigned(imm),
-                    } => {
-                        // FIXME: pre-update SP
-                        let stack_offset = todo!();
-                        let stack_ptr = self.stack.addr_as_value(stack_offset, &mut self.builder);
-                        (
-                            stack_ptr, imm as i64, // FIXME
-                        )
-                    }
-                    bad64::Operand::MemPreIdx { ref reg, imm } => {
-                        // FIXME: pre-update reg
-                        let imm = match imm {
-                            bad64::Imm::Unsigned(imm) => imm as i64, // FIXME
-                            bad64::Imm::Signed(imm) => imm,
-                        };
-                        let var = self.reg_to_var(reg);
-                        let addr = self.builder.ins().load(
-                            cranelift::prelude::Type::int(64).unwrap(),
-                            cranelift::prelude::MemFlags::new(),
-                            var,
-                            codegen::ir::immediates::Offset32::try_from_i64(imm).unwrap(),
-                        );
-                        (addr, 0)
-                    }
-                    bad64::Operand::MemPostIdxImm {
-                        reg: bad64::Reg::SP,
-                        imm: bad64::Imm::Signed(imm),
-                    } => {
-                        // FIXME; post-update SP value
-                        let stack_offset = todo!();
-                        let stack_ptr = self.stack.addr_as_value(stack_offset, &mut self.builder);
-                        (stack_ptr, imm)
-                    }
-                    bad64::Operand::MemPostIdxImm {
-                        reg: bad64::Reg::SP,
-                        imm: bad64::Imm::Unsigned(imm),
-                    } => {
-                        // FIXME; post-update SP value
-                        let stack_offset = todo!();
-                        let stack_ptr = self.stack.addr_as_value(stack_offset, &mut self.builder);
-                        (
-                            stack_ptr, imm as i64, // FIXME
-                        )
-                    }
-                    bad64::Operand::MemPostIdxImm { ref reg, imm } => {
-                        // FIXME; post-update reg value
-                        let imm = match imm {
-                            bad64::Imm::Unsigned(imm) => imm as i64, // FIXME
-                            bad64::Imm::Signed(imm) => imm,
-                        };
-                        let var = self.reg_to_var(reg);
-                        let addr = self.builder.ins().load(
-                            cranelift::prelude::Type::int(64).unwrap(),
-                            cranelift::prelude::MemFlags::new(),
-                            var,
-                            codegen::ir::immediates::Offset32::try_from_i64(imm).unwrap(),
-                        );
-                        (addr, 0)
-                    }
-                    other => panic!("unexpected rhs in store: {:?}", other),
-                };
+                let source_address = self.addressing(&instruction.operands()[1]);
                 let value = self.builder.ins().load(
                     cranelift::prelude::Type::int(64).unwrap(),
                     cranelift::prelude::MemFlags::new(),
-                    source,
-                    codegen::ir::immediates::Offset32::try_from_i64(offset).unwrap(),
+                    source_address,
+                    Offset32::new(0),
                 );
-                self.builder.ins().store(
-                    cranelift::prelude::MemFlags::new(),
-                    value,
-                    target,
-                    codegen::ir::immediates::Offset32::try_from_i64(offset).unwrap(),
-                );
+                self.builder
+                    .ins()
+                    .store(MemFlags::trusted(), value, target, Offset32::new(0));
             }
             // Moves
             Op::MOV => todo!(),
