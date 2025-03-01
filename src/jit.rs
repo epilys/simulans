@@ -20,8 +20,6 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-// use crate::frontend::*;
-use capstone::prelude::*;
 use cranelift::codegen::ir::immediates::Offset32;
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
@@ -40,13 +38,13 @@ impl Stack {
     const SIZE: usize = 100 * 4096;
 
     fn new() -> Self {
-        let stack_vec = vec![0; Self::SIZE];
+        let stack_vec = vec![0xba; Self::SIZE];
         let ptr = Box::into_raw(stack_vec.into_boxed_slice()) as *mut [u8; Self::SIZE];
 
         // SAFETY: The underlying array of a slice has the exact same layout as an actual array `[T; N]` if `N` is equal to the slice's length.
         let data = Pin::new(unsafe { Box::from_raw(ptr) });
         Self {
-            offset: data.as_slice().len() - 1,
+            offset: data.as_slice().len() - 3 * 16,
             data,
         }
     }
@@ -71,7 +69,7 @@ pub struct JIT {
     /// The data description, which is to data objects what `ctx` is to functions.
     data_description: DataDescription,
     stack: Stack,
-    cpu_state: Pin<Box<CpuState>>,
+    pub cpu_state: Pin<Box<CpuState>>,
 
     /// The module, with the jit backend, which manages the JIT'd
     /// functions.
@@ -209,14 +207,22 @@ impl JIT {
 
         let mut variables = IndexMap::new();
         self.cpu_state.registers.sp_el0 = self.stack.addr(self.stack.offset).try_into().unwrap();
+        println!(
+            "stack pointer starts at 0x{:x}",
+            self.cpu_state.registers.sp_el0
+        );
+        // unsafe {
+        //     *(self.cpu_state.registers.sp_el0 as *mut u8) = 0xba;
+        //     *((self.cpu_state.registers.sp_el0 - 16) as *mut u8) = 0xdb;
+        // }
+        // Load register values into Variables.
         self.cpu_state.load_cpu_state(&mut builder, &mut variables);
-        // Now translate the statements of the function body.
         let mut trans = FunctionTranslator {
             int,
             builder,
             variables,
-            module: &mut self.module,
         };
+        // Translate each decoded instruction
         for insn in decoded_iter {
             let insn = insn.map_err(|err| err.to_string())?;
             println!("{:#?}", insn);
@@ -227,14 +233,11 @@ impl JIT {
             int: _,
             mut builder,
             variables,
-            module: _,
         } = trans;
 
+        // Add JIT code to read register values back to cpu_state fields
         self.cpu_state.save_cpu_state(&mut builder, &variables);
-        // Set up the return variable of the function. Above, we declared a
-        // variable to hold the return value. Here, we just do a use of that
-        // variable.
-        let return_variable = variables.get(&bad64::Reg::X0).unwrap();
+        let return_variable = variables.get(&bad64::Reg::SP).unwrap();
         let return_value = builder.use_var(*return_variable);
 
         // Emit the return instruction.
@@ -252,278 +255,93 @@ struct FunctionTranslator<'a> {
     int: types::Type,
     builder: FunctionBuilder<'a>,
     variables: IndexMap<bad64::Reg, Variable>,
-    module: &'a mut JITModule,
 }
 
-impl<'a> FunctionTranslator<'a> {
-    fn addressing(&mut self, operand: &bad64::Operand) -> Value {
-        use bad64::Operand;
+impl FunctionTranslator<'_> {
+    fn translate_operand(&mut self, operand: &bad64::Operand) -> Value {
+        use bad64::{Imm, Operand};
 
         match operand {
             Operand::Reg {
                 ref reg,
                 arrspec: None,
-            } => self.reg_to_var(reg),
-            bad64::Operand::MemPreIdx { ref reg, imm } => {
-                let reg = self.reg_to_var(reg);
+            } => self.reg_to_value(reg),
+            Operand::MemPreIdx { ref reg, imm } => {
+                let reg_val = self.reg_to_value(reg);
                 match imm {
-                    bad64::Imm::Unsigned(imm) => {
+                    Imm::Unsigned(imm) => {
                         let imm_value = self
                             .builder
                             .ins()
                             .iconst(self.int, i64::try_from(*imm).unwrap());
                         let value = self.builder.ins().uadd_overflow_trap(
-                            reg,
+                            reg_val,
                             imm_value,
                             TrapCode::IntegerOverflow,
                         );
+                        let reg_var = *self.reg_to_var(reg);
+                        self.builder.def_var(reg_var, value);
                         value
                     }
-                    bad64::Imm::Signed(imm) => {
+                    Imm::Signed(imm) => {
                         let imm_value = self.builder.ins().iconst(self.int, *imm);
                         let (value, _overflow_flag) =
-                            self.builder.ins().sadd_overflow(reg, imm_value);
+                            self.builder.ins().sadd_overflow(reg_val, imm_value);
+                        let reg_var = *self.reg_to_var(reg);
+                        self.builder.def_var(reg_var, value);
                         value
                     }
                 }
             }
-            bad64::Operand::MemPostIdxImm { ref reg, imm } => {
-                let reg = self.reg_to_var(reg);
-                _ = match imm {
-                    bad64::Imm::Unsigned(imm) => {
+            Operand::MemPostIdxImm { ref reg, imm } => {
+                let reg_val = self.reg_to_value(reg);
+                match imm {
+                    Imm::Unsigned(imm) => {
                         let imm_value = self
                             .builder
                             .ins()
                             .iconst(self.int, i64::try_from(*imm).unwrap());
-                        let value = self.builder.ins().uadd_overflow_trap(
-                            reg,
+                        let post_value = self.builder.ins().uadd_overflow_trap(
+                            reg_val,
                             imm_value,
                             TrapCode::IntegerOverflow,
                         );
-                        value
+                        let reg_var = *self.reg_to_var(reg);
+                        self.builder.def_var(reg_var, post_value);
                     }
-                    bad64::Imm::Signed(imm) => {
+                    Imm::Signed(imm) => {
                         let imm_value = self.builder.ins().iconst(self.int, *imm);
-                        let (value, _overflow_flag) =
-                            self.builder.ins().sadd_overflow(reg, imm_value);
-                        value
+                        let (post_value, _overflow_flag) =
+                            self.builder.ins().sadd_overflow(reg_val, imm_value);
+                        let reg_var = *self.reg_to_var(reg);
+                        self.builder.def_var(reg_var, post_value);
                     }
-                };
-                reg
+                }
+                reg_val
             }
+            Operand::Imm64 { imm, shift: None } => match imm {
+                Imm::Unsigned(imm) => self
+                    .builder
+                    .ins()
+                    .iconst(self.int, i64::try_from(*imm).unwrap()),
+                Imm::Signed(imm) => self.builder.ins().iconst(self.int, *imm),
+            },
+            // bad64::Operand::Imm32 {
+            //     imm,
+            //     shift: Option<Shift>,
+            // },
             other => unimplemented!("unexpected rhs in store: {:?}", other),
         }
     }
 
-    // /// When you write out instructions in Cranelift, you get back `Value`s. You
-    // /// can then use these references in other instructions.
-    // fn translate_expr(&mut self, expr: Expr) -> Value {
-    //     match expr {
-    //         Expr::Literal(literal) => {
-    //             let imm: i32 = literal.parse().unwrap();
-    //             self.builder.ins().iconst(self.int, i64::from(imm))
-    //         }
-
-    //         Expr::Add(lhs, rhs) => {
-    //             let lhs = self.translate_expr(*lhs);
-    //             let rhs = self.translate_expr(*rhs);
-    //             self.builder.ins().iadd(lhs, rhs)
-    //         }
-
-    //         Expr::Sub(lhs, rhs) => {
-    //             let lhs = self.translate_expr(*lhs);
-    //             let rhs = self.translate_expr(*rhs);
-    //             self.builder.ins().isub(lhs, rhs)
-    //         }
-
-    //         Expr::Mul(lhs, rhs) => {
-    //             let lhs = self.translate_expr(*lhs);
-    //             let rhs = self.translate_expr(*rhs);
-    //             self.builder.ins().imul(lhs, rhs)
-    //         }
-
-    //         Expr::Div(lhs, rhs) => {
-    //             let lhs = self.translate_expr(*lhs);
-    //             let rhs = self.translate_expr(*rhs);
-    //             self.builder.ins().udiv(lhs, rhs)
-    //         }
-
-    //         Expr::Eq(lhs, rhs) => self.translate_icmp(IntCC::Equal, *lhs, *rhs),
-    //         Expr::Ne(lhs, rhs) => self.translate_icmp(IntCC::NotEqual, *lhs, *rhs),
-    //         Expr::Lt(lhs, rhs) => self.translate_icmp(IntCC::SignedLessThan, *lhs, *rhs),
-    //         Expr::Le(lhs, rhs) => self.translate_icmp(IntCC::SignedLessThanOrEqual, *lhs, *rhs),
-    //         Expr::Gt(lhs, rhs) => self.translate_icmp(IntCC::SignedGreaterThan, *lhs, *rhs),
-    //         Expr::Ge(lhs, rhs) => self.translate_icmp(IntCC::SignedGreaterThanOrEqual, *lhs, *rhs),
-    //         Expr::Call(name, args) => self.translate_call(name, args),
-    //         Expr::GlobalDataAddr(name) => self.translate_global_data_addr(name),
-    //         Expr::Identifier(name) => {
-    //             // `use_var` is used to read the value of a variable.
-    //             let variable = self.variables.get(&name).expect("variable not defined");
-    //             self.builder.use_var(*variable)
-    //         }
-    //         Expr::Assign(name, expr) => self.translate_assign(name, *expr),
-    //         Expr::IfElse(condition, then_body, else_body) => {
-    //             self.translate_if_else(*condition, then_body, else_body)
-    //         }
-    //         Expr::WhileLoop(condition, loop_body) => {
-    //             self.translate_while_loop(*condition, loop_body)
-    //         }
-    //     }
-    // }
-
-    // fn translate_assign(&mut self, name: String, expr: Expr) -> Value {
-    //     // `def_var` is used to write the value of a variable. Note that
-    //     // variables can have multiple definitions. Cranelift will
-    //     // convert them into SSA form for itself automatically.
-    //     let new_value = self.translate_expr(expr);
-    //     let variable = self.variables.get(&name).unwrap();
-    //     self.builder.def_var(*variable, new_value);
-    //     new_value
-    // }
-
-    // fn translate_icmp(&mut self, cmp: IntCC, lhs: Expr, rhs: Expr) -> Value {
-    //     let lhs = self.translate_expr(lhs);
-    //     let rhs = self.translate_expr(rhs);
-    //     self.builder.ins().icmp(cmp, lhs, rhs)
-    // }
-
-    // fn translate_if_else(
-    //     &mut self,
-    //     condition: Expr,
-    //     then_body: Vec<Expr>,
-    //     else_body: Vec<Expr>,
-    // ) -> Value {
-    //     let condition_value = self.translate_expr(condition);
-
-    //     let then_block = self.builder.create_block();
-    //     let else_block = self.builder.create_block();
-    //     let merge_block = self.builder.create_block();
-
-    //     // If-else constructs in the toy language have a return value.
-    //     // In traditional SSA form, this would produce a PHI between
-    //     // the then and else bodies. Cranelift uses block parameters,
-    //     // so set up a parameter in the merge block, and we'll pass
-    //     // the return values to it from the branches.
-    //     self.builder.append_block_param(merge_block, self.int);
-
-    //     // Test the if condition and conditionally branch.
-    //     self.builder
-    //         .ins()
-    //         .brif(condition_value, then_block, &[], else_block, &[]);
-
-    //     self.builder.switch_to_block(then_block);
-    //     self.builder.seal_block(then_block);
-    //     let mut then_return = self.builder.ins().iconst(self.int, 0);
-    //     for expr in then_body {
-    //         then_return = self.translate_expr(expr);
-    //     }
-
-    //     // Jump to the merge block, passing it the block return value.
-    //     self.builder.ins().jump(merge_block, &[then_return]);
-
-    //     self.builder.switch_to_block(else_block);
-    //     self.builder.seal_block(else_block);
-    //     let mut else_return = self.builder.ins().iconst(self.int, 0);
-    //     for expr in else_body {
-    //         else_return = self.translate_expr(expr);
-    //     }
-
-    //     // Jump to the merge block, passing it the block return value.
-    //     self.builder.ins().jump(merge_block, &[else_return]);
-
-    //     // Switch to the merge block for subsequent statements.
-    //     self.builder.switch_to_block(merge_block);
-
-    //     // We've now seen all the predecessors of the merge block.
-    //     self.builder.seal_block(merge_block);
-
-    //     // Read the value of the if-else by reading the merge block
-    //     // parameter.
-    //     let phi = self.builder.block_params(merge_block)[0];
-
-    //     phi
-    // }
-
-    // fn translate_while_loop(&mut self, condition: Expr, loop_body: Vec<Expr>) -> Value {
-    //     let header_block = self.builder.create_block();
-    //     let body_block = self.builder.create_block();
-    //     let exit_block = self.builder.create_block();
-
-    //     self.builder.ins().jump(header_block, &[]);
-    //     self.builder.switch_to_block(header_block);
-
-    //     let condition_value = self.translate_expr(condition);
-    //     self.builder
-    //         .ins()
-    //         .brif(condition_value, body_block, &[], exit_block, &[]);
-
-    //     self.builder.switch_to_block(body_block);
-    //     self.builder.seal_block(body_block);
-
-    //     for expr in loop_body {
-    //         self.translate_expr(expr);
-    //     }
-    //     self.builder.ins().jump(header_block, &[]);
-
-    //     self.builder.switch_to_block(exit_block);
-
-    //     // We've reached the bottom of the loop, so there will be no
-    //     // more backedges to the header to exits to the bottom.
-    //     self.builder.seal_block(header_block);
-    //     self.builder.seal_block(exit_block);
-
-    //     // Just return 0 for now.
-    //     self.builder.ins().iconst(self.int, 0)
-    // }
-
-    // fn translate_call(&mut self, name: String, args: Vec<Expr>) -> Value {
-    //     let mut sig = self.module.make_signature();
-
-    //     // Add a parameter for each argument.
-    //     for _arg in &args {
-    //         sig.params.push(AbiParam::new(self.int));
-    //     }
-
-    //     // For simplicity for now, just make all calls return a single I64.
-    //     sig.returns.push(AbiParam::new(self.int));
-
-    //     // TODO: Streamline the API here?
-    //     let callee = self
-    //         .module
-    //         .declare_function(&name, Linkage::Import, &sig)
-    //         .expect("problem declaring function");
-    //     let local_callee = self.module.declare_func_in_func(callee, self.builder.func);
-
-    //     let mut arg_values = Vec::new();
-    //     for arg in args {
-    //         arg_values.push(self.translate_expr(arg))
-    //     }
-    //     let call = self.builder.ins().call(local_callee, &arg_values);
-    //     self.builder.inst_results(call)[0]
-    // }
-
-    // fn translate_global_data_addr(&mut self, name: String) -> Value {
-    //     let sym = self
-    //         .module
-    //         .declare_data(&name, Linkage::Export, true, false)
-    //         .expect("problem declaring data object");
-    //     let local_id = self.module.declare_data_in_func(sym, self.builder.func);
-
-    //     let pointer = self.module.target_config().pointer_type();
-    //     self.builder.ins().symbol_value(pointer, local_id)
-    // }
+    #[inline]
+    fn reg_to_var(&mut self, reg: &bad64::Reg) -> &Variable {
+        &self.variables[reg]
+    }
 
     #[inline]
-    fn reg_to_var(&mut self, reg: &bad64::Reg) -> Value {
+    fn reg_to_value(&mut self, reg: &bad64::Reg) -> Value {
         let var = &self.variables[reg];
-        //{
-        //    let var = Variable::new(self.variables.len());
-        //    self.variables.insert(*reg, var);
-        //    let zero = self.builder.ins().iconst(self.int, 0);
-        //    self.builder.def_var(var, zero);
-        //    //self.builder.declare_var(var, self.int);
-        //    return self.builder.use_var(var);
-        //};
         self.builder.use_var(*var)
     }
 
@@ -542,10 +360,10 @@ impl<'a> FunctionTranslator<'a> {
                     bad64::Operand::Reg {
                         ref reg,
                         arrspec: None,
-                    } => self.reg_to_var(reg),
+                    } => self.reg_to_value(reg),
                     other => panic!("unexpected lhs in store: {:?}", other),
                 };
-                let target = self.addressing(&instruction.operands()[1]);
+                let target = self.translate_operand(&instruction.operands()[1]);
                 self.builder.ins().store(
                     cranelift::prelude::MemFlags::new(),
                     value,
@@ -558,26 +376,49 @@ impl<'a> FunctionTranslator<'a> {
                     bad64::Operand::Reg {
                         ref reg,
                         arrspec: None,
-                    } => self.reg_to_var(reg),
+                    } => *self.reg_to_var(reg),
                     other => panic!("unexpected lhs in load: {:?}", other),
                 };
-                let source_address = self.addressing(&instruction.operands()[1]);
+                let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().load(
                     cranelift::prelude::Type::int(64).unwrap(),
-                    cranelift::prelude::MemFlags::new(),
+                    MemFlags::new(),
                     source_address,
                     Offset32::new(0),
                 );
-                self.builder
-                    .ins()
-                    .store(MemFlags::trusted(), value, target, Offset32::new(0));
+                self.builder.def_var(target, value);
+                // self.builder
+                //     .ins()
+                //     .store(MemFlags::new(), value, target, Offset32::new(0));
             }
             // Moves
-            Op::MOV => todo!(),
+            Op::MOV => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg),
+                    other => panic!("unexpected lhs in load: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                self.builder.def_var(target, value);
+            }
             Op::MOVK => todo!(),
             Op::MOVZ => todo!(),
             // Int-ops
-            Op::ADD => todo!(),
+            Op::ADD => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg),
+                    other => panic!("unexpected lhs in load: {:?}", other),
+                };
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let (value, _ignore_overflow) = self.builder.ins().sadd_overflow(a, b);
+                self.builder.def_var(target, value);
+            }
             Op::SUB => todo!(),
             Op::MUL => todo!(),
             // Branches
@@ -1759,6 +1600,207 @@ impl<'a> FunctionTranslator<'a> {
     }
 }
 
+// Code from the cranelift JIT demo:
+//
+// impl<'a> FunctionTranslator<'a> {
+// /// When you write out instructions in Cranelift, you get back `Value`s. You
+// /// can then use these references in other instructions.
+// fn translate_expr(&mut self, expr: Expr) -> Value {
+//     match expr {
+//         Expr::Literal(literal) => {
+//             let imm: i32 = literal.parse().unwrap();
+//             self.builder.ins().iconst(self.int, i64::from(imm))
+//         }
+
+//         Expr::Add(lhs, rhs) => {
+//             let lhs = self.translate_expr(*lhs);
+//             let rhs = self.translate_expr(*rhs);
+//             self.builder.ins().iadd(lhs, rhs)
+//         }
+
+//         Expr::Sub(lhs, rhs) => {
+//             let lhs = self.translate_expr(*lhs);
+//             let rhs = self.translate_expr(*rhs);
+//             self.builder.ins().isub(lhs, rhs)
+//         }
+
+//         Expr::Mul(lhs, rhs) => {
+//             let lhs = self.translate_expr(*lhs);
+//             let rhs = self.translate_expr(*rhs);
+//             self.builder.ins().imul(lhs, rhs)
+//         }
+
+//         Expr::Div(lhs, rhs) => {
+//             let lhs = self.translate_expr(*lhs);
+//             let rhs = self.translate_expr(*rhs);
+//             self.builder.ins().udiv(lhs, rhs)
+//         }
+
+//         Expr::Eq(lhs, rhs) => self.translate_icmp(IntCC::Equal, *lhs, *rhs),
+//         Expr::Ne(lhs, rhs) => self.translate_icmp(IntCC::NotEqual, *lhs, *rhs),
+//         Expr::Lt(lhs, rhs) => self.translate_icmp(IntCC::SignedLessThan, *lhs, *rhs),
+//         Expr::Le(lhs, rhs) => self.translate_icmp(IntCC::SignedLessThanOrEqual, *lhs, *rhs),
+//         Expr::Gt(lhs, rhs) => self.translate_icmp(IntCC::SignedGreaterThan, *lhs, *rhs),
+//         Expr::Ge(lhs, rhs) => self.translate_icmp(IntCC::SignedGreaterThanOrEqual, *lhs, *rhs),
+//         Expr::Call(name, args) => self.translate_call(name, args),
+//         Expr::GlobalDataAddr(name) => self.translate_global_data_addr(name),
+//         Expr::Identifier(name) => {
+//             // `use_var` is used to read the value of a variable.
+//             let variable = self.variables.get(&name).expect("variable not defined");
+//             self.builder.use_var(*variable)
+//         }
+//         Expr::Assign(name, expr) => self.translate_assign(name, *expr),
+//         Expr::IfElse(condition, then_body, else_body) => {
+//             self.translate_if_else(*condition, then_body, else_body)
+//         }
+//         Expr::WhileLoop(condition, loop_body) => {
+//             self.translate_while_loop(*condition, loop_body)
+//         }
+//     }
+// }
+
+// fn translate_assign(&mut self, name: String, expr: Expr) -> Value {
+//     // `def_var` is used to write the value of a variable. Note that
+//     // variables can have multiple definitions. Cranelift will
+//     // convert them into SSA form for itself automatically.
+//     let new_value = self.translate_expr(expr);
+//     let variable = self.variables.get(&name).unwrap();
+//     self.builder.def_var(*variable, new_value);
+//     new_value
+// }
+
+// fn translate_icmp(&mut self, cmp: IntCC, lhs: Expr, rhs: Expr) -> Value {
+//     let lhs = self.translate_expr(lhs);
+//     let rhs = self.translate_expr(rhs);
+//     self.builder.ins().icmp(cmp, lhs, rhs)
+// }
+
+// fn translate_if_else(
+//     &mut self,
+//     condition: Expr,
+//     then_body: Vec<Expr>,
+//     else_body: Vec<Expr>,
+// ) -> Value {
+//     let condition_value = self.translate_expr(condition);
+
+//     let then_block = self.builder.create_block();
+//     let else_block = self.builder.create_block();
+//     let merge_block = self.builder.create_block();
+
+//     // If-else constructs in the toy language have a return value.
+//     // In traditional SSA form, this would produce a PHI between
+//     // the then and else bodies. Cranelift uses block parameters,
+//     // so set up a parameter in the merge block, and we'll pass
+//     // the return values to it from the branches.
+//     self.builder.append_block_param(merge_block, self.int);
+
+//     // Test the if condition and conditionally branch.
+//     self.builder
+//         .ins()
+//         .brif(condition_value, then_block, &[], else_block, &[]);
+
+//     self.builder.switch_to_block(then_block);
+//     self.builder.seal_block(then_block);
+//     let mut then_return = self.builder.ins().iconst(self.int, 0);
+//     for expr in then_body {
+//         then_return = self.translate_expr(expr);
+//     }
+
+//     // Jump to the merge block, passing it the block return value.
+//     self.builder.ins().jump(merge_block, &[then_return]);
+
+//     self.builder.switch_to_block(else_block);
+//     self.builder.seal_block(else_block);
+//     let mut else_return = self.builder.ins().iconst(self.int, 0);
+//     for expr in else_body {
+//         else_return = self.translate_expr(expr);
+//     }
+
+//     // Jump to the merge block, passing it the block return value.
+//     self.builder.ins().jump(merge_block, &[else_return]);
+
+//     // Switch to the merge block for subsequent statements.
+//     self.builder.switch_to_block(merge_block);
+
+//     // We've now seen all the predecessors of the merge block.
+//     self.builder.seal_block(merge_block);
+
+//     // Read the value of the if-else by reading the merge block
+//     // parameter.
+//     let phi = self.builder.block_params(merge_block)[0];
+
+//     phi
+// }
+
+// fn translate_while_loop(&mut self, condition: Expr, loop_body: Vec<Expr>) -> Value {
+//     let header_block = self.builder.create_block();
+//     let body_block = self.builder.create_block();
+//     let exit_block = self.builder.create_block();
+
+//     self.builder.ins().jump(header_block, &[]);
+//     self.builder.switch_to_block(header_block);
+
+//     let condition_value = self.translate_expr(condition);
+//     self.builder
+//         .ins()
+//         .brif(condition_value, body_block, &[], exit_block, &[]);
+
+//     self.builder.switch_to_block(body_block);
+//     self.builder.seal_block(body_block);
+
+//     for expr in loop_body {
+//         self.translate_expr(expr);
+//     }
+//     self.builder.ins().jump(header_block, &[]);
+
+//     self.builder.switch_to_block(exit_block);
+
+//     // We've reached the bottom of the loop, so there will be no
+//     // more backedges to the header to exits to the bottom.
+//     self.builder.seal_block(header_block);
+//     self.builder.seal_block(exit_block);
+
+//     // Just return 0 for now.
+//     self.builder.ins().iconst(self.int, 0)
+// }
+
+// fn translate_call(&mut self, name: String, args: Vec<Expr>) -> Value {
+//     let mut sig = self.module.make_signature();
+
+//     // Add a parameter for each argument.
+//     for _arg in &args {
+//         sig.params.push(AbiParam::new(self.int));
+//     }
+
+//     // For simplicity for now, just make all calls return a single I64.
+//     sig.returns.push(AbiParam::new(self.int));
+
+//     // TODO: Streamline the API here?
+//     let callee = self
+//         .module
+//         .declare_function(&name, Linkage::Import, &sig)
+//         .expect("problem declaring function");
+//     let local_callee = self.module.declare_func_in_func(callee, self.builder.func);
+
+//     let mut arg_values = Vec::new();
+//     for arg in args {
+//         arg_values.push(self.translate_expr(arg))
+//     }
+//     let call = self.builder.ins().call(local_callee, &arg_values);
+//     self.builder.inst_results(call)[0]
+// }
+
+// fn translate_global_data_addr(&mut self, name: String) -> Value {
+//     let sym = self
+//         .module
+//         .declare_data(&name, Linkage::Export, true, false)
+//         .expect("problem declaring data object");
+//     let local_id = self.module.declare_data_in_func(sym, self.builder.func);
+
+//     let pointer = self.module.target_config().pointer_type();
+//     self.builder.ins().symbol_value(pointer, local_id)
+// }
+// }
 // fn declare_variables(
 //     int: types::Type,
 //     builder: &mut FunctionBuilder,
@@ -1814,18 +1856,17 @@ impl<'a> FunctionTranslator<'a> {
 //         _ => (),
 //     }
 // }
-
-/// Declare a single variable declaration.
-fn declare_variable(
-    int: types::Type,
-    builder: &mut FunctionBuilder,
-    variables: &mut IndexMap<bad64::Reg, Variable>,
-    name: bad64::Reg,
-) -> Variable {
-    let var = Variable::new(variables.len());
-    if !variables.contains_key(&name) {
-        variables.insert(name, var);
-        builder.declare_var(var, int);
-    }
-    var
-}
+// / Declare a single variable declaration.
+// fn declare_variable(
+//     int: types::Type,
+//     builder: &mut FunctionBuilder,
+//     variables: &mut IndexMap<bad64::Reg, Variable>,
+//     name: bad64::Reg,
+// ) -> Variable {
+//     let var = Variable::new(variables.len());
+//     if !variables.contains_key(&name) {
+//         variables.insert(name, var);
+//         builder.declare_var(var, int);
+//     }
+//     var
+// }

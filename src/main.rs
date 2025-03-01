@@ -20,83 +20,39 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use capstone::prelude::*;
+use simulans::jit;
+
 use core::mem;
-use cranelift_jit_demo::jit;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create the JIT instance, which manages all generated functions and data.
     let mut jit = jit::JIT::default();
-    let input = b"\xe0\x0f\x1f\xf8\xe0\x07\x41\xf8";
+    //let input = b"\xe0\x0f\x1f\xf8\xe0\x07\x41\xf8";
     // 1000: str   x0, [sp, #-16]! ; "\xe0\x0f\x1f\xf8"
     // 1004: ldr   x0, [sp], #16   ; "\xe0\x07\x41\xf8"
+    let input = b"\x80\x46\x82\xd2\xe0\x0f\x1f\xf8\xe1\x07\x41\xf8\x00\x00\x01\x8b";
+
+    //0x40080000: mov x0, #0x1234
+    //0x40080004: str x0, [sp, #-0x10]!
+    //0x40080008: ldr x1, [sp], #0x10
+    //0x4008000c: add x0, x0, x1
+
     disas(input)?;
-    run_aarch64(&mut jit, input)?;
+    println!("sp_el0 = 0x{:x}", run_aarch64(&mut jit, input)?);
+    println!("cpu state after running is {:#?}", &jit.cpu_state);
     Ok(())
 }
 
-fn run_aarch64(jit: &mut jit::JIT, input: &[u8]) -> Result<isize, Box<dyn std::error::Error>> {
-    unsafe { run_code(jit, input, ())? }
-    Ok(0)
+fn run_aarch64(jit: &mut jit::JIT, input: &[u8]) -> Result<i64, Box<dyn std::error::Error>> {
+    let ret: i64 = unsafe { run_code(jit, input, ())? };
+    Ok(ret)
 }
 
-//fn run_aarch64(jit: &mut jit::JIT, input: &[u8]) -> Result<isize, Box<dyn std::error::Error>> {
-//    // 1000: str   x0, [sp, #-16]! ; "\xe0\x0f\x1f\xf8"
-//    // 1004: ldr   x0, [sp], #16   ; "\xe0\x07\x41\xf8"
-//    let mut decoded_iter = bad64::disasm(input, 0x40080000);
-
-//    let push = decoded_iter.next().unwrap().unwrap();
-
-//    // check out the push
-//    assert_eq!(push.address(), 0x1000);
-//    assert_eq!(push.operands().len(), 2);
-//    assert_eq!(push.op(), bad64::Op::STR);
-//    assert_eq!(
-//        push.operands()[0],
-//        bad64::Operand::Reg {
-//            reg: bad64::Reg::X0,
-//            arrspec: None
-//        }
-//    );
-//    assert_eq!(
-//        push.operands()[1],
-//        bad64::Operand::MemPreIdx {
-//            reg: bad64::Reg::SP,
-//            imm: bad64::Imm::Signed(-16)
-//        }
-//    );
-//    assert_eq!(push.operands().get(2), None);
-
-//    let pop = decoded_iter.next().unwrap().unwrap();
-
-//    // check out the pop
-//    assert_eq!(pop.address(), 0x1004);
-//    assert_eq!(pop.operands().len(), 2);
-//    assert_eq!(pop.op(), bad64::Op::LDR);
-//    assert_eq!(
-//        pop.operands().get(0),
-//        Some(&bad64::Operand::Reg {
-//            reg: bad64::Reg::X0,
-//            arrspec: None
-//        })
-//    );
-//    assert_eq!(
-//        pop.operands().get(1),
-//        Some(&bad64::Operand::MemPostIdxImm {
-//            reg: bad64::Reg::SP,
-//            imm: bad64::Imm::Signed(16)
-//        })
-//    );
-//    assert_eq!(pop.operands().get(2), None);
-
-//    // make sure there's nothing left
-//    assert_eq!(decoded_iter.next(), None);
-//    //jit.create_data("hello_string", "hello world!\0".as_bytes().to_vec())?;
-//    //unsafe { run_code(jit, HELLO_CODE, ()) }
-//    Ok(0)
-//}
-
+/// Dissassembles and prints each decoded aarch64 instruction using Capstone library, for
+/// debugging.
 fn disas(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    use capstone::prelude::*;
+
     let mut cs = Capstone::new()
         .arm64()
         .mode(capstone::arch::arm64::ArchMode::Arm)
@@ -113,7 +69,7 @@ fn disas(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Executes the given code using the cranelift JIT compiler.
+/// Executes the given aarch64 binary code using the cranelift JIT compiler.
 ///
 /// Feeds the given input into the JIT compiled function and returns the resulting output.
 ///
@@ -131,7 +87,7 @@ unsafe fn run_code<I, O>(
     // Cast the raw pointer to a typed function pointer. This is unsafe, because
     // this is the critical point where you have to trust that the generated code
     // is safe to be called.
-    let code_fn = mem::transmute::<_, fn(I) -> O>(code_ptr);
+    let code_fn = mem::transmute::<*const u8, fn(I) -> O>(code_ptr);
     // And now we can call it!
     Ok(code_fn(input))
 }

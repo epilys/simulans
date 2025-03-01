@@ -68,47 +68,73 @@ pub struct CpuState {
 }
 
 impl CpuState {
+    /// Add JIT instructions to assign a variable for each register and set it with its value.
     pub fn load_cpu_state(
         &self,
         builder: &mut FunctionBuilder,
         variables: &mut IndexMap<bad64::Reg, Variable>,
     ) {
+        use bad64::Reg;
+
         let int = cranelift::prelude::Type::int(64).expect("Could not create I64 type");
         macro_rules! decl_reg_field {
-                ($($field:ident => $bad_reg:expr),*$(,)?) => {{
-                    $(
-                        let value = builder.ins().iconst(int, self.registers.$field as i64);
-                        let var = Variable::new(variables.len());
-                        assert!(!variables.contains_key(&$bad_reg));
-                        variables.insert($bad_reg, var);
-                        builder.declare_var(var, int);
-                        builder.def_var(var, value);
-                    )*
-                }};
-            }
+            ($($field:ident => $bad_reg:expr),*$(,)?) => {{
+                $(
+                    let value = builder.ins().iconst(int, self.registers.$field as i64);
+                    let var = Variable::new(variables.len());
+                    assert!(!variables.contains_key(&$bad_reg));
+                    variables.insert($bad_reg, var);
+                    builder.declare_var(var, int);
+                    builder.def_var(var, value);
+                )*
+            }};
+        }
         decl_reg_field! {
-            x0=> bad64::Reg::X0,
-            x1=> bad64::Reg::X1,
-            x2=> bad64::Reg::X2,
-            x3=> bad64::Reg::X3,
-            x4=> bad64::Reg::X4,
-            x5=> bad64::Reg::X5,
-            x6=> bad64::Reg::X6,
-            x7=> bad64::Reg::X7,
-            x8=> bad64::Reg::X8,
-            x9=> bad64::Reg::X9,
+            x0 => Reg::X0,
+            x1 => Reg::X1,
+            x2 => Reg::X2,
+            x3 => Reg::X3,
+            x4 => Reg::X4,
+            x5 => Reg::X5,
+            x6 => Reg::X6,
+            x7 => Reg::X7,
+            x8 => Reg::X8,
+            x9 => Reg::X9,
+            x10 => Reg::X10,
+            x11 => Reg::X11,
+            x12 => Reg::X12,
+            x13 => Reg::X13,
+            x14 => Reg::X14,
+            x15 => Reg::X15,
+            x16 => Reg::X16,
+            x17 => Reg::X17,
+            x18 => Reg::X18,
+            x19 => Reg::X19,
+            x20 => Reg::X20,
+            x21 => Reg::X21,
+            x22 => Reg::X22,
+            x23 => Reg::X23,
+            x24 => Reg::X24,
+            x25 => Reg::X25,
+            x26 => Reg::X26,
+            x27 => Reg::X27,
+            x28 => Reg::X28,
+            x29 => Reg::X29,
+            x30 => Reg::X30,
             sp_el0 => bad64::Reg::SP,
         }
     }
 
+    /// Add JIT instructions to store register values back to `self`.
     pub fn save_cpu_state(
         &self,
         builder: &mut FunctionBuilder,
         variables: &IndexMap<bad64::Reg, Variable>,
     ) {
+        use bad64::Reg;
+
         let int = cranelift::prelude::Type::int(64).expect("Could not create I64 type");
-        let memflags = cranelift::prelude::MemFlags::trusted()
-            .with_endianness(codegen::ir::Endianness::Little);
+        let memflags = MemFlags::new().with_endianness(codegen::ir::Endianness::Little);
         macro_rules! read_reg_field {
                 ($($field:ident => $bad_reg:expr),*$(,)?) => {{
                     $(
@@ -121,17 +147,39 @@ impl CpuState {
                     )*
                 }};
             }
+
         read_reg_field! {
-            x0=> bad64::Reg::X0,
-            x1=> bad64::Reg::X1,
-            x2=> bad64::Reg::X2,
-            x3=> bad64::Reg::X3,
-            x4=> bad64::Reg::X4,
-            x5=> bad64::Reg::X5,
-            x6=> bad64::Reg::X6,
-            x7=> bad64::Reg::X7,
-            x8=> bad64::Reg::X8,
-            x9=> bad64::Reg::X9,
+            x0 => Reg::X0,
+            x1 => Reg::X1,
+            x2 => Reg::X2,
+            x3 => Reg::X3,
+            x4 => Reg::X4,
+            x5 => Reg::X5,
+            x6 => Reg::X6,
+            x7 => Reg::X7,
+            x8 => Reg::X8,
+            x9 => Reg::X9,
+            x10 => Reg::X10,
+            x11 => Reg::X11,
+            x12 => Reg::X12,
+            x13 => Reg::X13,
+            x14 => Reg::X14,
+            x15 => Reg::X15,
+            x16 => Reg::X16,
+            x17 => Reg::X17,
+            x18 => Reg::X18,
+            x19 => Reg::X19,
+            x20 => Reg::X20,
+            x21 => Reg::X21,
+            x22 => Reg::X22,
+            x23 => Reg::X23,
+            x24 => Reg::X24,
+            x25 => Reg::X25,
+            x26 => Reg::X26,
+            x27 => Reg::X27,
+            x28 => Reg::X28,
+            x29 => Reg::X29,
+            x30 => Reg::X30,
             sp_el0 => bad64::Reg::SP,
         }
     }
