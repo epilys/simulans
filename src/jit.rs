@@ -364,13 +364,97 @@ impl FunctionTranslator<'_> {
 
     #[inline]
     fn reg_to_var(&mut self, reg: &bad64::Reg) -> &Variable {
-        &self.variables[reg]
+        use bad64::Reg;
+
+        let reg_64 = match reg {
+            Reg::W0 => Reg::X0,
+            Reg::W1 => Reg::X1,
+            Reg::W2 => Reg::X2,
+            Reg::W3 => Reg::X3,
+            Reg::W4 => Reg::X4,
+            Reg::W5 => Reg::X5,
+            Reg::W6 => Reg::X6,
+            Reg::W7 => Reg::X7,
+            Reg::W8 => Reg::X8,
+            Reg::W9 => Reg::X9,
+            Reg::W10 => Reg::X10,
+            Reg::W11 => Reg::X11,
+            Reg::W12 => Reg::X12,
+            Reg::W13 => Reg::X13,
+            Reg::W14 => Reg::X14,
+            Reg::W15 => Reg::X15,
+            Reg::W16 => Reg::X16,
+            Reg::W17 => Reg::X17,
+            Reg::W18 => Reg::X18,
+            Reg::W19 => Reg::X19,
+            Reg::W20 => Reg::X20,
+            Reg::W21 => Reg::X21,
+            Reg::W22 => Reg::X22,
+            Reg::W23 => Reg::X23,
+            Reg::W24 => Reg::X24,
+            Reg::W25 => Reg::X25,
+            Reg::W26 => Reg::X26,
+            Reg::W27 => Reg::X27,
+            Reg::W28 => Reg::X28,
+            Reg::W29 => Reg::X29,
+            Reg::W30 => Reg::X30,
+            _ => {
+                return &self.variables[reg];
+            }
+        };
+        let mask = self.builder.ins().iconst(self.int, 0xffff_ffff);
+        let unmasked_value = self.builder.use_var(self.variables[&reg_64]);
+        let masked_value = self.builder.ins().band(unmasked_value, mask);
+        self.builder.def_var(self.variables[&reg_64], masked_value);
+        &self.variables[&reg_64]
     }
 
     #[inline]
     fn reg_to_value(&mut self, reg: &bad64::Reg) -> Value {
-        let var = &self.variables[reg];
-        self.builder.use_var(*var)
+        use bad64::Reg;
+
+        let reg_64 = match reg {
+            Reg::W0 => Reg::X0,
+            Reg::W1 => Reg::X1,
+            Reg::W2 => Reg::X2,
+            Reg::W3 => Reg::X3,
+            Reg::W4 => Reg::X4,
+            Reg::W5 => Reg::X5,
+            Reg::W6 => Reg::X6,
+            Reg::W7 => Reg::X7,
+            Reg::W8 => Reg::X8,
+            Reg::W9 => Reg::X9,
+            Reg::W10 => Reg::X10,
+            Reg::W11 => Reg::X11,
+            Reg::W12 => Reg::X12,
+            Reg::W13 => Reg::X13,
+            Reg::W14 => Reg::X14,
+            Reg::W15 => Reg::X15,
+            Reg::W16 => Reg::X16,
+            Reg::W17 => Reg::X17,
+            Reg::W18 => Reg::X18,
+            Reg::W19 => Reg::X19,
+            Reg::W20 => Reg::X20,
+            Reg::W21 => Reg::X21,
+            Reg::W22 => Reg::X22,
+            Reg::W23 => Reg::X23,
+            Reg::W24 => Reg::X24,
+            Reg::W25 => Reg::X25,
+            Reg::W26 => Reg::X26,
+            Reg::W27 => Reg::X27,
+            Reg::W28 => Reg::X28,
+            Reg::W29 => Reg::X29,
+            Reg::W30 => Reg::X30,
+            _ => {
+                let var = &self.variables[reg];
+                return self.builder.use_var(*var);
+            }
+        };
+        let mask = self.builder.ins().iconst(self.int, 0xffff_ffff);
+        let unmasked_value = self.builder.use_var(self.variables[&reg_64]);
+        let masked_value = self.builder.ins().band(unmasked_value, mask);
+        self.builder.def_var(self.variables[&reg_64], masked_value);
+        self.builder.use_var(self.variables[&reg_64])
     }
 
     fn translate_instruction(&mut self, instruction: bad64::Instruction) {
