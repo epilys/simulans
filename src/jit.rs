@@ -560,7 +560,9 @@ impl FunctionTranslator<'_> {
             // Branches
             Op::BR => todo!(),
             Op::BFI => todo!(),
-            Op::RET => todo!(),
+            Op::RET => {
+                // FIXME
+            }
             // Bit-ops
             Op::AND => todo!(),
 
