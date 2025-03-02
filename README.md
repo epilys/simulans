@@ -40,8 +40,21 @@ You might wish to test the emulator with custom aarch64 assembly.
    aarch64-linux-gnu-objcopy -O binary "${base}" "${base}.bin"
    ```
    Your output will be at `program.bin`.
-3. format as Rust binary string:
 
-   ```sh
-   xxd -c 1 -plain program.bin|sed -e 's/^/\\x/' |paste -s -d ""
-   ```
+You can inline the binary code directly in Rust source code by formatting it as a binary slice literal:
+
+```sh
+xxd -c 1 -plain program.bin|sed -e 's/^/\\x/' |paste -s -d ""
+```
+
+Or pass the `program.bin` path as an argument when you run the application e.g. `cargo run -- ./program.bin`.
+
+### Running a stand-alone test unikernel
+
+A unikernel in Rust that prints a "hello world" message and halts is included in the `test_kernel/` sub-directory.
+
+After building it you can run it by passing the unikernel path as an argument e.g.:
+
+```shell
+cargo run -- ./test_kernel/target/aarch64-unknown-none/release/test_kernel.bin
+```

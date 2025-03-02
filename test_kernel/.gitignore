@@ -4,3 +4,4 @@
 *.swx
 tags
 target
+qemu.log
