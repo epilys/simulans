@@ -544,7 +544,19 @@ impl FunctionTranslator<'_> {
                 let (value, _ignore_overflow) = self.builder.ins().usub_overflow(a, b);
                 self.builder.def_var(target, value);
             }
-            Op::MUL => todo!(),
+            Op::MUL => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg),
+                    other => panic!("unexpected lhs in load: {:?}", other),
+                };
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let value = self.builder.ins().imul(a, b);
+                self.builder.def_var(target, value);
+            }
             // Branches
             Op::BR => todo!(),
             Op::BFI => todo!(),
