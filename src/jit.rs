@@ -69,7 +69,7 @@ pub struct JIT {
     /// The data description, which is to data objects what `ctx` is to functions.
     data_description: DataDescription,
     stack: Stack,
-    pub cpu_state: Pin<Box<CpuState>>,
+    pub cpu_state: Pin<Box<ExecutionState>>,
 
     /// The module, with the jit backend, which manages the JIT'd
     /// functions.
@@ -91,7 +91,7 @@ impl Default for JIT {
 
         let module = JITModule::new(builder);
         Self {
-            cpu_state: Box::pin(CpuState::default()),
+            cpu_state: Box::pin(ExecutionState::default()),
             builder_context: FunctionBuilderContext::new(),
             ctx: module.make_context(),
             stack: Stack::new(),
@@ -200,12 +200,8 @@ impl JIT {
         // predecessors.
         builder.seal_block(entry_block);
 
-        // // The toy language allows variables to be declared implicitly.
-        // // Walk the AST and declare all implicitly-declared variables.
-        // let variables =
-        //     declare_variables(int, &mut builder, &params, &the_return, &stmts, entry_block);
-
-        let mut variables = IndexMap::new();
+        let mut registers = IndexMap::new();
+        let mut sys_registers = IndexMap::new();
         self.cpu_state.registers.x0 = 25;
         self.cpu_state.registers.sp_el0 = self.stack.addr(self.stack.offset).try_into().unwrap();
         println!(
@@ -217,11 +213,13 @@ impl JIT {
         //     *((self.cpu_state.registers.sp_el0 - 16) as *mut u8) = 0xdb;
         // }
         // Load register values into Variables.
-        self.cpu_state.load_cpu_state(&mut builder, &mut variables);
+        self.cpu_state
+            .load_cpu_state(&mut builder, &mut registers, &mut sys_registers);
         let mut trans = FunctionTranslator {
             int,
             builder,
-            variables,
+            registers,
+            sys_registers,
         };
         // Translate each decoded instruction
         for insn in decoded_iter {
@@ -233,12 +231,14 @@ impl JIT {
         let FunctionTranslator {
             int: _,
             mut builder,
-            variables,
+            registers,
+            sys_registers,
         } = trans;
 
         // Add JIT code to read register values back to cpu_state fields
-        self.cpu_state.save_cpu_state(&mut builder, &variables);
-        let return_variable = variables.get(&bad64::Reg::SP).unwrap();
+        self.cpu_state
+            .save_cpu_state(&mut builder, &registers, &sys_registers);
+        let return_variable = registers.get(&bad64::Reg::SP).unwrap();
         let return_value = builder.use_var(*return_variable);
 
         // Emit the return instruction.
@@ -255,10 +255,26 @@ impl JIT {
 struct FunctionTranslator<'a> {
     int: types::Type,
     builder: FunctionBuilder<'a>,
-    variables: IndexMap<bad64::Reg, Variable>,
+    registers: IndexMap<bad64::Reg, Variable>,
+    sys_registers: IndexMap<bad64::SysReg, Variable>,
 }
 
 impl FunctionTranslator<'_> {
+    #[allow(non_snake_case)]
+    fn translate_o0_op1_CRn_CRm_op2(&mut self, o0: u8, o1: u8, cm: u8, cn: u8, o2: u8) -> Value {
+        match (o0, o1, cm, cn, o2) {
+            (0b11, 0, 0, 0b111, 0) => {
+                // ID_AA64MMFR0_EL1
+                // FIXME
+                self.builder.ins().iconst(self.int, 0)
+            }
+            _other => unimplemented!(
+                "unimplemented sysreg encoding: {:?}",
+                bad64::Operand::ImplSpec { o0, o1, cm, cn, o2 }
+            ),
+        }
+    }
+
     fn translate_operand(&mut self, operand: &bad64::Operand) -> Value {
         use bad64::{Imm, Operand};
 
@@ -320,13 +336,27 @@ impl FunctionTranslator<'_> {
                 }
                 reg_val
             }
-            Operand::Imm64 { imm, shift: None } => match imm {
-                Imm::Unsigned(imm) => self
-                    .builder
-                    .ins()
-                    .iconst(self.int, i64::try_from(*imm).unwrap()),
-                Imm::Signed(imm) => self.builder.ins().iconst(self.int, *imm),
-            },
+            Operand::Imm64 { imm, shift } => {
+                let const_value = match imm {
+                    Imm::Unsigned(imm) => self
+                        .builder
+                        .ins()
+                        .iconst(self.int, i64::try_from(*imm).unwrap()),
+                    Imm::Signed(imm) => self.builder.ins().iconst(self.int, *imm),
+                };
+                match shift {
+                    None => const_value,
+                    Some(bad64::Shift::LSL(lsl)) => {
+                        let lsl = self.builder.ins().iconst(self.int, i64::from(*lsl));
+                        self.builder.ins().ishl(const_value, lsl)
+                    }
+                    other => unimplemented!("unimplemented shift {other:?}"),
+                }
+            }
+            // Operand::Imm32 {
+            //     imm,
+            //     shift: Option<Shift>,
+            // },
             Operand::MemOffset {
                 reg,
                 offset,
@@ -355,11 +385,30 @@ impl FunctionTranslator<'_> {
                     }
                 }
             }
-            // bad64::Operand::Imm32 {
-            //     imm,
-            //     shift: Option<Shift>,
-            // },
-            other => unimplemented!("unexpected rhs in store: {:?}", other),
+            Operand::Label(Imm::Unsigned(imm)) => self.builder.ins().iconst(self.int, *imm as i64),
+            Operand::Label(Imm::Signed(imm)) => self.builder.ins().iconst(self.int, *imm),
+            Operand::ImplSpec { o0, o1, cm, cn, o2 } => {
+                self.translate_o0_op1_CRn_CRm_op2(*o0, *o1, *cm, *cn, *o2)
+            }
+            Operand::SysReg(reg) => {
+                let var = *self.sysreg_to_var(reg);
+                self.builder.use_var(var)
+            }
+            other => unimplemented!("unexpected rhs in translate_operand: {:?}", other),
+        }
+    }
+
+    fn sysreg_to_var(&mut self, reg: &bad64::SysReg) -> &Variable {
+        use bad64::SysReg;
+
+        match reg {
+            SysReg::TTBR0_EL1
+            | SysReg::MAIR_EL1
+            | SysReg::TCR_EL1
+            | SysReg::SCTLR_EL1
+            | SysReg::CPACR_EL1
+            | SysReg::VBAR_EL1 => &self.sys_registers[reg],
+            other => unimplemented!("unimplemented sysreg {other:?}"),
         }
     }
 
@@ -400,14 +449,14 @@ impl FunctionTranslator<'_> {
             Reg::W29 => Reg::X29,
             Reg::W30 => Reg::X30,
             _ => {
-                return &self.variables[reg];
+                return &self.registers[reg];
             }
         };
         let mask = self.builder.ins().iconst(self.int, 0xffff_ffff);
-        let unmasked_value = self.builder.use_var(self.variables[&reg_64]);
+        let unmasked_value = self.builder.use_var(self.registers[&reg_64]);
         let masked_value = self.builder.ins().band(unmasked_value, mask);
-        self.builder.def_var(self.variables[&reg_64], masked_value);
-        &self.variables[&reg_64]
+        self.builder.def_var(self.registers[&reg_64], masked_value);
+        &self.registers[&reg_64]
     }
 
     #[inline]
@@ -446,35 +495,96 @@ impl FunctionTranslator<'_> {
             Reg::W28 => Reg::X28,
             Reg::W29 => Reg::X29,
             Reg::W30 => Reg::X30,
+            Reg::XZR | Reg::WZR => {
+                return self.builder.ins().iconst(self.int, 0);
+            }
             _ => {
-                let var = &self.variables[reg];
+                let var = &self.registers[reg];
                 return self.builder.use_var(*var);
             }
         };
         let mask = self.builder.ins().iconst(self.int, 0xffff_ffff);
-        let unmasked_value = self.builder.use_var(self.variables[&reg_64]);
+        let unmasked_value = self.builder.use_var(self.registers[&reg_64]);
         let masked_value = self.builder.ins().band(unmasked_value, mask);
-        self.builder.def_var(self.variables[&reg_64], masked_value);
-        self.builder.use_var(self.variables[&reg_64])
+        self.builder.def_var(self.registers[&reg_64], masked_value);
+        self.builder.use_var(self.registers[&reg_64])
     }
 
     fn translate_instruction(&mut self, instruction: bad64::Instruction) {
         use bad64::Op;
 
-        match instruction.op() {
+        let op = instruction.op();
+
+        match op {
             Op::NOP => {}
             // Special registers
-            Op::MSR => todo!(),
-            Op::MRS => todo!(),
+            Op::MSR => {
+                // TODO: AArch64.CheckSystemAccess
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::SysReg(ref sysreg) => *self.sysreg_to_var(sysreg),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                self.builder.def_var(target, value);
+            }
+            Op::MRS => {
+                // TODO: AArch64.CheckSystemAccess
+                // Move System register to general-purpose register
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let sys_reg_value = self.translate_operand(&instruction.operands()[1]);
+                self.builder.def_var(target, sys_reg_value);
+            }
             // Memory-ops
-            Op::ADRP => todo!(),
+            Op::ADRP => {
+                // Form PC-relative address to 4KB page
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let imm_value = self.translate_operand(&instruction.operands()[1]);
+                let twelve = self.builder.ins().iconst(self.int, 12);
+                let shifted_imm_value = self.builder.ins().ishl(imm_value, twelve);
+                let pc = self
+                    .builder
+                    .ins()
+                    .iconst(self.int, instruction.address() as i64);
+                let (value, _overflow_flag) =
+                    self.builder.ins().sadd_overflow(pc, shifted_imm_value);
+                self.builder.def_var(target, value);
+            }
+            Op::ADR => {
+                // Form PC-relative address
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let imm_value = self.translate_operand(&instruction.operands()[1]);
+                let pc = self
+                    .builder
+                    .ins()
+                    .iconst(self.int, instruction.address() as i64);
+                let (value, _overflow_flag) = self.builder.ins().sadd_overflow(pc, imm_value);
+                self.builder.def_var(target, value);
+            }
             Op::STR => {
                 let value = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
                         arrspec: None,
                     } => self.reg_to_value(reg),
-                    other => panic!("unexpected lhs in store: {:?}", other),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let target = self.translate_operand(&instruction.operands()[1]);
                 self.builder.ins().store(
@@ -490,7 +600,7 @@ impl FunctionTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg),
-                    other => panic!("unexpected lhs in load: {:?}", other),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().load(
@@ -511,13 +621,64 @@ impl FunctionTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg),
-                    other => panic!("unexpected lhs in load: {:?}", other),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 self.builder.def_var(target, value);
             }
-            Op::MOVK => todo!(),
-            Op::MOVZ => todo!(),
+            Op::MOVK => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let (imm_value, shift_mask): (Value, u64) = match &instruction.operands()[1] {
+                    bad64::Operand::Imm64 { imm, shift } => {
+                        let const_value = match imm {
+                            bad64::Imm::Unsigned(imm) => self
+                                .builder
+                                .ins()
+                                .iconst(self.int, i64::try_from(*imm).unwrap()),
+                            bad64::Imm::Signed(imm) => self.builder.ins().iconst(self.int, *imm),
+                        };
+                        match shift {
+                            None => (const_value, !0xf),
+                            Some(bad64::Shift::LSL(lsl)) => {
+                                let lsl_value =
+                                    self.builder.ins().iconst(self.int, i64::from(*lsl));
+                                let const_value = self.builder.ins().ishl(const_value, lsl_value);
+                                let shift_mask = match lsl {
+                                    16 => !0xf0,
+                                    32 => !0xf00,
+                                    48 => !0xf000,
+                                    other => panic!("other shift {other}"),
+                                };
+                                (const_value, shift_mask)
+                            }
+                            other => unimplemented!("unimplemented shift {other:?}"),
+                        }
+                    }
+                    other => panic!("other: {:?}", other),
+                };
+                let mask = self.builder.ins().iconst(self.int, shift_mask as i64);
+                let unmasked_value = self.builder.use_var(target);
+                let masked_value = self.builder.ins().band(unmasked_value, mask);
+                let value = self.builder.ins().bor(masked_value, imm_value);
+                self.builder.def_var(target, value);
+            }
+            Op::MOVZ => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let imm_value = self.translate_operand(&instruction.operands()[1]);
+                self.builder.def_var(target, imm_value);
+            }
             // Int-ops
             Op::ADD => {
                 let target = match instruction.operands()[0] {
@@ -525,7 +686,7 @@ impl FunctionTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg),
-                    other => panic!("unexpected lhs in load: {:?}", other),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
@@ -560,11 +721,69 @@ impl FunctionTranslator<'_> {
             }
             // Branches
             Op::BR => todo!(),
-            Op::BFI => todo!(),
             Op::RET => {
                 // FIXME
             }
             // Bit-ops
+            Op::BFI => {
+                // Bitfield insert
+                // This instruction copies a bitfield of <width> bits from the least significant
+                // bits of the source register to bit position <lsb> of the destination register,
+                // leaving the other destination bits unchanged.
+                /*
+                 * if sf == '1' && N != '1' then EndOfDecode(Decode_UNDEF);
+                    if sf == '0' && (N != '0' || immr<5> != '0' || imms<5> != '0') then EndOfDecode(Decode_UNDEF);
+
+                    constant integer d = UInt(Rd);
+                    constant integer n = UInt(Rn);
+                    constant integer datasize = 32 << UInt(sf);
+                    constant integer s = UInt(imms);
+                    constant integer r = UInt(immr);
+
+                    bits(datasize) wmask;
+                    bits(datasize) tmask;
+                    (wmask, tmask) = DecodeBitMasks(N, imms, immr, FALSE, datasize);
+                   constant bits(datasize) dst = X[d, datasize];
+                   constant bits(datasize) src = X[n, datasize];
+
+                // Perform bitfield move on low bits
+                constant bits(datasize) bot = (dst AND NOT(wmask)) OR (ROR(src, r) AND wmask);
+
+                // Combine extension bits and result bits
+                X[d, datasize] = (dst AND NOT(tmask)) OR (bot AND tmask);
+                 */
+                let dst = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let src = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                // TODO...
+            }
+            Op::ORR => {
+                // Bitwise OR (immediate)
+                // This instruction performs a bitwise (inclusive) OR of a register value and an
+                // immediate value, and writes the result to the destination register.
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let value = self.builder.ins().bor(a, b);
+                self.builder.def_var(target, value);
+            }
             Op::AND => todo!(),
 
             // rest
@@ -585,7 +804,6 @@ impl FunctionTranslator<'_> {
             Op::ADDV => todo!(),
             Op::ADDVA => todo!(),
             Op::ADDVL => todo!(),
-            Op::ADR => todo!(),
             Op::AESD => todo!(),
             Op::AESE => todo!(),
             Op::AESIMC => todo!(),
@@ -769,7 +987,9 @@ impl FunctionTranslator<'_> {
             Op::DGH => todo!(),
             Op::DMB => todo!(),
             Op::DRPS => todo!(),
-            Op::DSB => todo!(),
+            Op::DSB => {
+                // Data synchronization barrier
+            }
             Op::DUP => todo!(),
             Op::DUPM => todo!(),
             Op::DVP => todo!(),
@@ -907,7 +1127,9 @@ impl FunctionTranslator<'_> {
             Op::HISTSEG => todo!(),
             Op::HLT => todo!(),
             Op::HVC => todo!(),
-            Op::IC => todo!(),
+            Op::IC => {
+                // Instruction cache operation
+            }
             Op::INCB => todo!(),
             Op::INCD => todo!(),
             Op::INCH => todo!(),
@@ -917,7 +1139,9 @@ impl FunctionTranslator<'_> {
             Op::INS => todo!(),
             Op::INSR => todo!(),
             Op::IRG => todo!(),
-            Op::ISB => todo!(),
+            Op::ISB => {
+                // Instruction synchronization barrier
+            }
             Op::LASTA => todo!(),
             Op::LASTB => todo!(),
             Op::LD1 => todo!(),
@@ -1163,7 +1387,6 @@ impl FunctionTranslator<'_> {
             Op::NOTS => todo!(),
             Op::ORN => todo!(),
             Op::ORNS => todo!(),
-            Op::ORR => todo!(),
             Op::ORRS => todo!(),
             Op::ORV => todo!(),
             Op::PACDA => todo!(),
@@ -1577,7 +1800,9 @@ impl FunctionTranslator<'_> {
             Op::TBZ => todo!(),
             Op::TCANCEL => todo!(),
             Op::TCOMMIT => todo!(),
-            Op::TLBI => todo!(),
+            Op::TLBI => {
+                // TLB invalidate operation
+            }
             Op::TRN1 => todo!(),
             Op::TRN2 => todo!(),
             Op::TSB => todo!(),

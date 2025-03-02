@@ -22,32 +22,52 @@
 
 use simulans::jit;
 
-use core::mem;
+use std::borrow::Cow;
+
+mod samples {
+    #![allow(dead_code)]
+
+    /// ```text
+    /// 0x40080000: sub sp, sp, #0x10
+    /// 0x40080004: str w0, [sp, #0xc]
+    /// 0x40080008: ldr w8, [sp, #0xc]
+    /// 0x4008000c: ldr w9, [sp, #0xc]
+    /// 0x40080010: mul w0, w8, w9
+    /// 0x40080014: add sp, sp, #0x10
+    /// 0x40080018: ret
+    /// ```
+    pub const SQUARED: &[u8] = b"\xff\x43\x00\xd1\xe0\x0f\x00\xb9\xe8\x0f\x40\xb9\xe9\x0f\x40\xb9\x00\x7d\x09\x1b\xff\x43\x00\x91\xc0\x03\x5f\xd6";
+    /// ```text
+    /// 1000: str   x0, [sp, #-16]! ; "\xe0\x0f\x1f\xf8"
+    /// 1004: ldr   x0, [sp], #16   ; "\xe0\x07\x41\xf8"
+    /// ```
+    pub const LOAD_STORES: &[u8] = b"\xe0\x0f\x1f\xf8\xe0\x07\x41\xf8";
+
+    /// ```text
+    /// 0x40080000: mov x0, #0x1234
+    /// 0x40080004: str x0, [sp, #-0x10]!
+    /// 0x40080008: ldr x1, [sp], #0x10
+    /// 0x4008000c: add x0, x0, x1
+    /// ```
+    pub const STACK_ADD: &[u8] =
+        b"\x80\x46\x82\xd2\xe0\x0f\x1f\xf8\xe1\x07\x41\xf8\x00\x00\x01\x8b";
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let input = match args.len() {
+        0 | 1 => Cow::Borrowed(samples::SQUARED),
+        2 => Cow::Owned(std::fs::read(&args[1])?),
+        more => {
+            eprintln!("Error: at most one argument is expected, but got {more}");
+            std::process::exit(1);
+        }
+    };
     // Create the JIT instance, which manages all generated functions and data.
     let mut jit = jit::JIT::default();
-    //let input = b"\xe0\x0f\x1f\xf8\xe0\x07\x41\xf8";
-    // 1000: str   x0, [sp, #-16]! ; "\xe0\x0f\x1f\xf8"
-    // 1004: ldr   x0, [sp], #16   ; "\xe0\x07\x41\xf8"
-    // let input = b"\x80\x46\x82\xd2\xe0\x0f\x1f\xf8\xe1\x07\x41\xf8\x00\x00\x01\x8b";
 
-    //0x40080000: mov x0, #0x1234
-    //0x40080004: str x0, [sp, #-0x10]!
-    //0x40080008: ldr x1, [sp], #0x10
-    //0x4008000c: add x0, x0, x1
-    let input = b"\xff\x43\x00\xd1\xe0\x0f\x00\xb9\xe8\x0f\x40\xb9\xe9\x0f\x40\xb9\x00\x7d\x09\x1b\xff\x43\x00\x91\xc0\x03\x5f\xd6";
-    // Capstone output:
-    // 0x40080000: sub sp, sp, #0x10
-    // 0x40080004: str w0, [sp, #0xc]
-    // 0x40080008: ldr w8, [sp, #0xc]
-    // 0x4008000c: ldr w9, [sp, #0xc]
-    // 0x40080010: mul w0, w8, w9
-    // 0x40080014: add sp, sp, #0x10
-    // 0x40080018: ret
-
-    disas(input)?;
-    println!("sp_el0 = 0x{:x}", run_aarch64(&mut jit, input)?);
+    disas(&input)?;
+    println!("sp_el0 = 0x{:x}", run_aarch64(&mut jit, &input)?);
     println!("cpu state after running is {:#?}", &jit.cpu_state);
     Ok(())
 }
@@ -96,7 +116,7 @@ unsafe fn run_code<I, O>(
     // Cast the raw pointer to a typed function pointer. This is unsafe, because
     // this is the critical point where you have to trust that the generated code
     // is safe to be called.
-    let code_fn = mem::transmute::<*const u8, fn(I) -> O>(code_ptr);
+    let code_fn = std::mem::transmute::<*const u8, fn(I) -> O>(code_ptr);
     // And now we can call it!
     Ok(code_fn(input))
 }
