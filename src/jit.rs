@@ -326,6 +326,34 @@ impl FunctionTranslator<'_> {
                     .iconst(self.int, i64::try_from(*imm).unwrap()),
                 Imm::Signed(imm) => self.builder.ins().iconst(self.int, *imm),
             },
+            Operand::MemOffset {
+                reg,
+                offset,
+                mul_vl: false,
+                arrspec: None,
+            } => {
+                let reg_val = self.reg_to_value(reg);
+                match offset {
+                    Imm::Unsigned(imm) => {
+                        let imm_value = self
+                            .builder
+                            .ins()
+                            .iconst(self.int, i64::try_from(*imm).unwrap());
+                        let value = self.builder.ins().uadd_overflow_trap(
+                            reg_val,
+                            imm_value,
+                            TrapCode::IntegerOverflow,
+                        );
+                        value
+                    }
+                    Imm::Signed(imm) => {
+                        let imm_value = self.builder.ins().iconst(self.int, *imm);
+                        let (value, _overflow_flag) =
+                            self.builder.ins().sadd_overflow(reg_val, imm_value);
+                        value
+                    }
+                }
+            }
             // bad64::Operand::Imm32 {
             //     imm,
             //     shift: Option<Shift>,
