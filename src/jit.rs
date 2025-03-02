@@ -206,6 +206,7 @@ impl JIT {
         //     declare_variables(int, &mut builder, &params, &the_return, &stmts, entry_block);
 
         let mut variables = IndexMap::new();
+        self.cpu_state.registers.x0 = 25;
         self.cpu_state.registers.sp_el0 = self.stack.addr(self.stack.offset).try_into().unwrap();
         println!(
             "stack pointer starts at 0x{:x}",
