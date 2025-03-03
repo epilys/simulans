@@ -1,7 +1,11 @@
 [package]
 name = "test-kernel"
 version = "0.1.0"
+authors = ["Manos Pitsidianakis <manos@pitsidianak.is>"]
+license = "EUPL-1.2 OR GPL-3.0-or-later"
+description = "Hello world bare-metal aarch64 unikernel"
 edition = "2021"
+publish = false
 
 [dependencies]
 buddy_system_allocator = "0.10.0"

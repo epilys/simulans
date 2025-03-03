@@ -1,9 +1,9 @@
 [package]
 name = "simulans"
 version = "0.0.0"
-authors = []
+authors = ["Manos Pitsidianakis <manos@pitsidianak.is>"]
 license = "EUPL-1.2 OR GPL-3.0-or-later"
-description = ""
+description = "Armv8-A emulation toolkit"
 edition = "2021"
 
 [dependencies]
@@ -14,4 +14,6 @@ cranelift = "0.97.1"
 cranelift-jit = "0.97.1"
 cranelift-module = "0.97.1"
 cranelift-native = "0.97.1"
-indexmap = "2.7.1"
+env_logger = { version = "0.11.6", default-features = false }
+indexmap = { version = "2.7.1" }
+log = { version = "0.4.26", default-features = false }

@@ -29,22 +29,22 @@ use std::{pin::Pin, slice};
 
 use crate::cpu_state::*;
 
-struct Stack {
-    data: Pin<Box<[u8; Stack::SIZE]>>,
-    offset: usize,
+pub struct Stack {
+    pub data: Pin<Box<[u8; Stack::SIZE]>>,
+    pub offset: usize,
 }
 
 impl Stack {
     const SIZE: usize = 100 * 4096;
 
     fn new() -> Self {
-        let stack_vec = vec![0xba; Self::SIZE];
+        let stack_vec = vec![u8::MAX; Self::SIZE];
         let ptr = Box::into_raw(stack_vec.into_boxed_slice()) as *mut [u8; Self::SIZE];
 
         // SAFETY: The underlying array of a slice has the exact same layout as an actual array `[T; N]` if `N` is equal to the slice's length.
         let data = Pin::new(unsafe { Box::from_raw(ptr) });
         Self {
-            offset: data.as_slice().len() - 3 * 16,
+            offset: data.as_slice().len() - 1,
             data,
         }
     }
@@ -56,7 +56,7 @@ impl Stack {
 }
 
 /// The basic JIT class.
-pub struct JIT {
+pub struct Armv8AMachine {
     /// The function builder context, which is reused across multiple
     /// FunctionBuilder instances.
     builder_context: FunctionBuilderContext,
@@ -68,7 +68,7 @@ pub struct JIT {
 
     /// The data description, which is to data objects what `ctx` is to functions.
     data_description: DataDescription,
-    stack: Stack,
+    pub stack: Stack,
     pub cpu_state: Pin<Box<ExecutionState>>,
 
     /// The module, with the jit backend, which manages the JIT'd
@@ -76,7 +76,7 @@ pub struct JIT {
     module: JITModule,
 }
 
-impl Default for JIT {
+impl Default for Armv8AMachine {
     fn default() -> Self {
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
@@ -90,18 +90,21 @@ impl Default for JIT {
         let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
 
         let module = JITModule::new(builder);
+        let stack = Stack::new();
+        let mut cpu_state = Box::pin(ExecutionState::default());
+        cpu_state.registers.sp_el0 = stack.addr(stack.offset).try_into().unwrap();
         Self {
-            cpu_state: Box::pin(ExecutionState::default()),
+            cpu_state,
             builder_context: FunctionBuilderContext::new(),
             ctx: module.make_context(),
-            stack: Stack::new(),
+            stack,
             data_description: DataDescription::new(),
             module,
         }
     }
 }
 
-impl JIT {
+impl Armv8AMachine {
     /// Compile a string in the toy language into machine code.
     pub fn compile(&mut self, input: &[u8]) -> Result<*const u8, Box<dyn std::error::Error>> {
         // translate the input into Cranelift IR.
@@ -202,16 +205,7 @@ impl JIT {
 
         let mut registers = IndexMap::new();
         let mut sys_registers = IndexMap::new();
-        self.cpu_state.registers.x0 = 25;
-        self.cpu_state.registers.sp_el0 = self.stack.addr(self.stack.offset).try_into().unwrap();
-        println!(
-            "stack pointer starts at 0x{:x}",
-            self.cpu_state.registers.sp_el0
-        );
-        // unsafe {
-        //     *(self.cpu_state.registers.sp_el0 as *mut u8) = 0xba;
-        //     *((self.cpu_state.registers.sp_el0 - 16) as *mut u8) = 0xdb;
-        // }
+
         // Load register values into Variables.
         self.cpu_state
             .load_cpu_state(&mut builder, &mut registers, &mut sys_registers);
@@ -224,8 +218,8 @@ impl JIT {
         // Translate each decoded instruction
         for insn in decoded_iter {
             let insn = insn.map_err(|err| err.to_string())?;
-            println!("{:#?}", insn);
-            println!("{}", insn);
+            log::trace!("{:#?}", insn);
+            log::trace!("{}", insn);
             trans.translate_instruction(insn);
         }
         let FunctionTranslator {
@@ -610,9 +604,6 @@ impl FunctionTranslator<'_> {
                     Offset32::new(0),
                 );
                 self.builder.def_var(target, value);
-                // self.builder
-                //     .ins()
-                //     .store(MemFlags::new(), value, target, Offset32::new(0));
             }
             // Moves
             Op::MOV => {
