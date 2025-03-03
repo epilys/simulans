@@ -2,8 +2,8 @@ Immediate problems and open questions:
 
 - Problem: ~~Handling different addressing modes in load/stores ([offset/post-indexing/pre-indexing](https://developer.arm.com/documentation/102374/0102/Loads-and-stores---addressing)) during instruction building~~ See `FunctionTranslator::translate_operand()` method
 - Question: ~~Exposing register read/writes to JIT during instruction building
-  Cranelift's JIT instruction builder can use "variables" as `Value`s.
-  * We can perhaps model registers as global variables which will allow setting
+  Cranelift's JIT instruction builder can use "variables" as `Value`s.~~
+  * ~~We can perhaps model registers as global variables which will allow setting
     initial values, retrieving values when trapping back to the emulator?~~
     Store CPU state (register values) in a struct (See `CpuState` struct), load register values as JIT variables before starting translation (see `CpuState::load_cpu_state()` method), then read all the register values back into the struct when JIT execution finishes (see `CpuState::save_cpu_state()` method).
 - Question(s): Exposing system memory
