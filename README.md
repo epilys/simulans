@@ -12,6 +12,14 @@ Simply pass a binary file containing aarch64 instructions (NOT an ELF file!):
 cargo run -- /path/to/aarch64.bin
 ```
 
+## MVP wishlist
+
+- Run a simple kernel.
+- No A32/`AArch32` support.
+- No T32/`Thumb-2` support.
+- No live code-loading (loading code into memory and executing it). The kernel code will be pre-compiled before emulation.
+- Emulation in same process as JIT (no sandboxing for security).
+
 ## Design questions:
 
 - Problem: ~~Handling different addressing modes in load/stores ([offset/post-indexing/pre-indexing](https://developer.arm.com/documentation/102374/0102/Loads-and-stores---addressing)) during instruction building~~ See `FunctionTranslator::translate_operand()` method
@@ -28,10 +36,9 @@ cargo run -- /path/to/aarch64.bin
       for emulator memory before exec'ing JIT'ed code and monitor page faults with
       [`userfaultfd(2)`](https://man7.org/linux/man-pages/man2/userfaultfd.2.html)
       to detect unauthorized accesses.
-- Problem: Some basic introspection as a starting build block.
+- Problem: ~~Some basic introspection as a starting build block.~~
   ~~The JIT should be able to print state of CPU registers.~~ Can print `CpuState`.
   ~~The JIT should be able to dump contents of memory regions.~~ Can print `Stack` contents.
-- Question: Handling system traps and exceptions. Is instrumentation the only
-  approach?
+- Question: Handling system traps and exceptions. Instrumentation?
   * And/or Catching `SIGSEGV` for memory traps?
 - Question: modelling architectural limits such as [stack pointer 16-byte alignment checks](https://community.arm.com/arm-community-blogs/b/architectures-and-processors-blog/posts/using-the-stack-in-aarch64-implementing-push-and-pop).
