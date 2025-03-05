@@ -43,15 +43,15 @@ fn test_square() {
     // 0x40080014: add sp, sp, #0x10
     // 0x40080018: ret
     // ```
-    let mut machine = jit::Armv8AMachine::default();
-    let stack_pre = machine.cpu_state.registers.sp_el0;
+    let mut machine = jit::Armv8AMachine::new(0x40080000 + 2 * SQUARED.len());
+    let stack_pre = machine.cpu_state.registers.sp;
     // Pass "25" as `num`
     machine.cpu_state.registers.x0 = 25;
     let _sp: i64 = unsafe { run_code(&mut machine, SQUARED, ()).unwrap() };
     assert_eq!(machine.cpu_state.registers.x0, 625);
     assert_eq!(machine.cpu_state.registers.x8, 25);
     assert_eq!(machine.cpu_state.registers.x9, 25);
-    let stack_post = machine.cpu_state.registers.sp_el0;
+    let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre);
 }
 
@@ -64,19 +64,27 @@ fn test_load_stores() {
     const LOAD_STORES: &[u8] = b"\xe0\x0f\x1f\xf8\xe1\x07\x41\xf8";
     // _ = simulans::disas(LOAD_STORES);
 
-    let mut machine = jit::Armv8AMachine::default();
-    let stack_pre = machine.cpu_state.registers.sp_el0;
+    let mut machine = jit::Armv8AMachine::new(0x40080000 + 2 * LOAD_STORES.len());
+    let stack_pre = machine.cpu_state.registers.sp;
     machine.cpu_state.registers.x0 = 0xbadbeef;
     let _: i64 = unsafe { run_code(&mut machine, LOAD_STORES, ()).unwrap() };
-    let stack_end = machine.stack.data.len() - 1;
-    assert_eq!(machine.stack.data[stack_end - 0x10], 0xef);
-    assert_eq!(machine.stack.data[stack_end - 0x10 + 1], 0xbe);
-    assert_eq!(machine.stack.data[stack_end - 0x10 + 2], 0xad);
-    assert_eq!(machine.stack.data[stack_end - 0x10 + 3], 0x0b);
+    let stack_post = machine.cpu_state.registers.sp;
+    assert_eq!(stack_post, stack_pre);
+    assert_eq!(machine.mem.map.as_ref()[stack_post as usize - 0x10], 0xef);
+    assert_eq!(
+        machine.mem.map.as_ref()[stack_post as usize - 0x10 + 1],
+        0xbe
+    );
+    assert_eq!(
+        machine.mem.map.as_ref()[stack_post as usize - 0x10 + 2],
+        0xad
+    );
+    assert_eq!(
+        machine.mem.map.as_ref()[stack_post as usize - 0x10 + 3],
+        0x0b
+    );
     assert_eq!(machine.cpu_state.registers.x0, 0xbadbeef);
     assert_eq!(machine.cpu_state.registers.x1, 0xbadbeef);
-    let stack_post = machine.cpu_state.registers.sp_el0;
-    assert_eq!(stack_post, stack_pre);
 }
 
 /// Test a load stores adds and moves in the stack
@@ -90,15 +98,60 @@ fn test_load_stores_2() {
     const STACK_ADD: &[u8] = b"\x80\x46\x82\xd2\xe0\x0f\x1f\xf8\xe1\x07\x41\xf8\x00\x00\x01\x8b";
     // _ = simulans::disas(STACK_ADD);
 
-    let mut machine = jit::Armv8AMachine::default();
-    let stack_pre = machine.cpu_state.registers.sp_el0;
+    let mut machine = jit::Armv8AMachine::new(0x40080000 + 2 * STACK_ADD.len());
+    let stack_pre = machine.cpu_state.registers.sp;
     machine.cpu_state.registers.x0 = 0xbadbeef;
     let _: i64 = unsafe { run_code(&mut machine, STACK_ADD, ()).unwrap() };
-    let stack_post = machine.cpu_state.registers.sp_el0;
+    let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre);
     assert_eq!(machine.cpu_state.registers.x0, 2 * 0x1234);
     assert_eq!(machine.cpu_state.registers.x1, 0x1234);
-    let stack_end = machine.stack.data.len() - 1;
-    assert_eq!(machine.stack.data[stack_end - 0x10], 0x34);
-    assert_eq!(machine.stack.data[stack_end - 0x10 + 1], 0x12);
+    assert_eq!(machine.mem.map.as_ref()[stack_post as usize - 0x10], 0x34);
+    assert_eq!(
+        machine.mem.map.as_ref()[stack_post as usize - 0x10 + 1],
+        0x12
+    );
+}
+
+/// Test exception levels
+#[test]
+fn test_exception_levels() {
+    // Capstone output:
+    // 0x40080000: mov x0, #1
+    // 0x40080004: orr x0, x0, #2
+    // 0x40080008: orr x0, x0, #4
+    // 0x4008000c: orr x0, x0, #8
+    // 0x40080010: orr x0, x0, #0x100
+    // 0x40080014: orr x0, x0, #0x400
+    // 0x40080018: orr x0, x0, #0x800
+    // 0x4008001c: msr scr_el3, x0
+    // 0x40080020: orr w0, wzr, #8
+    // 0x40080024: orr x0, x0, #0x10
+    // 0x40080028: orr x0, x0, #0x80000000
+    // 0x4008002c: msr hcr_el2, x0
+    // 0x40080030: mrs x0, midr_el1
+    // 0x40080034: msr vpidr_el2, x0
+    // 0x40080038: mrs x0, mpidr_el1
+    // 0x4008003c: msr vmpidr_el2, x0
+    // 0x40080040: msr vttbr_el2, xzr
+    // 0x40080044: msr sctlr_el2, xzr
+    // 0x40080048: msr sctlr_el1, xzr
+    // 0x4008004c: ldr x0, #0x40080068
+    // 0x40080050: msr elr_el3, x0
+    // 0x40080054: ldr x0, #0x40080070
+    // 0x40080058: msr spsr_el3, x0
+    // 0x4008005c: eret
+    // 0x40080060: nop
+    const BOOT: &[u8] = b"\x20\x00\x80\xd2\x00\x00\x7f\xb2\x00\x00\x7e\xb2\x00\x00\x7d\xb2\x00\x00\x78\xb2\x00\x00\x76\xb2\x00\x00\x75\xb2\x00\x11\x1e\xd5\xe0\x03\x1d\x32\x00\x00\x7c\xb2\x00\x00\x61\xb2\x00\x11\x1c\xd5\x00\x00\x38\xd5\x00\x00\x1c\xd5\xa0\x00\x38\xd5\xa0\x00\x1c\xd5\x1f\x21\x1c\xd5\x1f\x10\x1c\xd5\x1f\x10\x18\xd5\xe0\x00\x00\x58\x20\x40\x1e\xd5\xe0\x00\x00\x58\x00\x40\x1e\xd5\xe0\x03\x9f\xd6\x1f\x20\x03\xd5\x00\x00\x00\x00\xd8\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+    _ = simulans::disas(BOOT);
+
+    let mut machine = jit::Armv8AMachine::new(0x40080000 + 2 * BOOT.len());
+    let stack_pre = machine.cpu_state.registers.sp;
+    let _: i64 = unsafe { run_code(&mut machine, BOOT, ()).unwrap() };
+    let stack_post = machine.cpu_state.registers.sp;
+    assert_eq!(stack_post, stack_pre);
+    assert_eq!(machine.cpu_state.registers.x0, 0);
+    assert_eq!(machine.cpu_state.registers.hcr_el2, 0x80000018);
+    assert_eq!(machine.cpu_state.registers.scr_el3, 0xd0f);
+    assert_eq!(machine.cpu_state.registers.elr_el3, 0x4000d8);
 }

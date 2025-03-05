@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     // Create the JIT instance, which manages all generated functions and data.
-    let mut jit = jit::Armv8AMachine::default();
+    let mut jit = jit::Armv8AMachine::new(0x40080000 + 0x40080000 / 2);
 
     disas(&input)?;
     let sp_el0 = run_aarch64(&mut jit, &input)?;

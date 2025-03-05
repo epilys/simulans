@@ -20,6 +20,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+#![allow(non_snake_case)]
+
 use bilge::prelude::*;
 use cranelift::prelude::*;
 use indexmap::IndexMap;
@@ -60,23 +62,55 @@ pub struct RegisterFile {
     // Link Register can be referred to as LR
     pub x30: u64,
     pub xzr: u64,
+    /// Selected `SP` based on current Exception Level and PSTATE's SpSel.
+    pub sp: u64,
     pub sp_el0: u64,
     pub sp_el1: u64,
     pub sp_el2: u64,
     pub sp_el3: u64,
+    // Translation Table Base Register 0: Holds the base address of translation table 0, and
+    // information about the memory it occupies. This is one of the translation tables for the
+    // stage 1 translation of memory accesses at ELn.
+    /// EL1 Translation Table Base Register 0
     pub ttbr0_el1: u64,
+    // pub ttbr0_el2: u64,
+    // pub ttbr0_el3: u64,
+    pub vttbr_el2: u64,
+    // Memory Attribute Indirection Register: Provides the memory attribute encodings corresponding
+    // to the possible values in a Long- descriptor format translation table entry for stage 1
+    // translations at ELn.
+    /// EL1 Memory Attribute Indirection Register
     pub mair_el1: u64,
+    // pub mair_el2: u64,
+    // pub mair_el3: u64,
+    pub vpidr_el2: u64,
+    pub vmpidr_el2: u64,
     pub id_aa64mmfr0_el1: u64,
     pub tcr_el1: u64,
     pub sctlr_el1: u64,
+    pub sctlr_el2: u64,
+    pub sctlr_el3: u64,
     pub cpacr_el1: u64,
+    // Vector Based Address Register Holds the exception base address for any exception that is
+    // taken to ELn.
+    /// EL1 Vector Based Address Register
     pub vbar_el1: u64,
+    // pub vbar_el2: u64,
+    // pub vbar_el3: u64,
+    /// Hypervisor Configuration Register
+    ///
+    /// Controls virtualization settings and trapping of exceptions to EL2.
+    pub hcr_el2: u64,
+    /// Secure Configuration Register
+    ///
+    /// Controls Secure state and trapping of exceptions to EL3
+    pub scr_el3: u64,
     // pub spsr_el1: SavedProgramStatusRegister,
     // pub spsr_el2: SavedProgramStatusRegister,
-    // pub spsr_el3: SavedProgramStatusRegister,
-    // pub elr_el1: u64,
-    // pub elr_el2: u64,
-    // pub elr_el3: u64,
+    pub spsr_el3: SavedProgramStatusRegister,
+    pub elr_el1: u64,
+    pub elr_el2: u64,
+    pub elr_el3: u64,
 }
 
 #[bitsize(2)]
@@ -91,18 +125,18 @@ pub enum CurrentEl {
 
 #[bitsize(1)]
 #[derive(Default, FromBits, Debug)]
-pub enum SpSel {
+pub enum ArchMode {
     #[default]
-    Current,
-    SpEl0,
+    _64 = 0,
+    _32 = 1,
 }
 
-#[repr(C)]
-#[derive(Default, Debug)]
-pub struct ProcessorState {
-    pub spsr: SavedProgramStatusRegister,
-    pub el: CurrentEl,
-    pub sp: SpSel,
+#[bitsize(1)]
+#[derive(Default, FromBits, Debug)]
+pub enum SpSel {
+    #[default]
+    SpEl0 = 0,
+    Current = 1,
 }
 
 #[bitsize(5)]
@@ -121,10 +155,10 @@ pub enum Mode {
     System = 0b11111,
 }
 
-// #[repr(C)]
-#[bitsize(32)]
-#[derive(Default, FromBits, DebugBits)]
+#[bitsize(64)]
+#[derive(Default, Copy, Clone, FromBits, DebugBits)]
 pub struct SavedProgramStatusRegister {
+    pub _padding: u32,
     /// Negative condition flag. (bit `[31]`)
     pub n: bool,
     /// Zero condition flag. (bit `[30]`)
@@ -139,11 +173,14 @@ pub struct SavedProgramStatusRegister {
     pub it_a: u2,
     /// Reserved zero. (bit `[24]`)
     pub j: u1,
-    /// When `FEAT_SSBS` is implemented: Speculative Store Bypass,  otherwise reserved zero. (bit `[23]`)
+    /// When `FEAT_SSBS` is implemented: Speculative Store Bypass,  otherwise
+    /// reserved zero. (bit `[23]`)
     pub ssbs: u1,
-    /// When FEAT_PAN is implemented, Privileged Access Never, otherwise reserved zero. (bit `[22]`)
+    /// When `FEAT_PAN` is implemented, Privileged Access Never, otherwise
+    /// reserved zero. (bit `[22]`)
     pub pan: u1,
-    /// When FEAT_DIT is implemented: Data Independent Timing, otherwise reserved zero . (bit `[21]`)
+    /// When `FEAT_DIT` is implemented: Data Independent Timing, otherwise
+    /// reserved zero . (bit `[21]`)
     pub dit: u1,
     /// Illegal Execution state. (bit `[20]`)
     pub il: bool,
@@ -153,7 +190,9 @@ pub struct SavedProgramStatusRegister {
     pub it_b: u6,
     /// Big Endianness. (bit `[9]`)
     pub e: bool,
-    /// SError exception mask. "Set to the value of PSTATE.A on taking an exception to the current mode, and copied to PSTATE.A on executing an exception return operation in the current mode". (bit `[8]`)
+    /// SError exception mask. "Set to the value of `PSTATE.A` on taking an
+    /// exception to the current mode, and copied to `PSTATE.A` on executing an
+    /// exception return operation in the current mode". (bit `[8]`)
     pub a: bool,
     /// IRQ interrupt mask. (bit `[7]`)
     pub i: bool,
@@ -165,15 +204,70 @@ pub struct SavedProgramStatusRegister {
     pub m: Mode,
 }
 
+#[bitsize(14)]
+#[derive(Default, FromBits, DebugBits)]
+#[allow(non_snake_case)]
+pub struct PSTATE {
+    /// Negative condition flag.
+    pub N: bool,
+    /// Zero condition flag.
+    pub Z: bool,
+    /// Carry condition flag.
+    pub C: bool,
+    /// oVerflow condition flag.
+    pub V: bool,
+    /// Debug mask bit.
+    pub D: bool,
+    /// SError mask bit.
+    pub A: bool,
+    /// IRQ mask bit.
+    pub I: bool,
+    /// FIQ mask bit.
+    pub F: bool,
+    /// Software Step bit.
+    pub SS: bool,
+    /// Illegal Execution state bit.
+    pub IL: bool,
+    /// (2) Exception level.
+    pub EL: CurrentEl,
+    /// Execution state
+    /// ```text
+    /// 0 = 64-bit
+    /// 1 = 32-bit
+    /// ```
+    pub nRW: ArchMode,
+    /// Stack pointer selector.
+    /// ```text
+    /// 0 = SP_EL0
+    /// 1 = SP_ELn
+    /// ```
+    pub SP: SpSel,
+}
+
 #[repr(C)]
 #[derive(Default, Debug)]
 pub struct ExecutionState {
     pub registers: RegisterFile,
-    pub pstate: ProcessorState,
+    /// `PSTATE` isn't an architectural register for ARMv8. Its bit fields are
+    /// accessed through special-purpose registers.
+    ///
+    /// The special registers are:
+    ///
+    /// | Special purpose register | Description                                                                                     | `PSTATE` fields |
+    /// | ------------------------ | ----------------------------------------------------------------------------------------------- | --------------- |
+    /// | `CurrentEL`              | Holds the current Exception level.                                                              | `EL`            |
+    /// | `DAIF`                   | Specifies the current interrupt mask bits.                                                      | `D, A, I, F`    |
+    /// | `DAIFSet`                | Sets any of the `PSTATE.{D,A, I, F}` bits to `1`                                                | `D, A, I, F`    |
+    /// | `DAIFClr`                | Sets any of the `PSTATE.{D,A, I, F}` bits to `0`                                                | `D, A, I, F`    |
+    /// | `NZCV`                   | Holds the condition flags.                                                                      | `N, Z, C, V`    |
+    /// | `SPSel`                  | At `EL1` or higher, this selects between the `SP` for the current Exception level and `SP_EL0`. | `SP`            |
+    pub pstate: PSTATE,
+    pub spsr: SavedProgramStatusRegister,
 }
 
 impl ExecutionState {
-    /// Add JIT instructions to assign a variable for each register and set it with its value.
+    /// Add JIT instructions to assign a variable for each register and set it
+    /// with its value.
     pub fn load_cpu_state(
         &self,
         builder: &mut FunctionBuilder,
@@ -183,7 +277,7 @@ impl ExecutionState {
         use bad64::{Reg, SysReg};
 
         let int = cranelift::prelude::Type::int(64).expect("Could not create I64 type");
-        macro_rules! decl_reg_field {
+        macro_rules! reg_field {
             ($($field:ident => $bad_reg:expr),*$(,)?) => {{
                 $(
                     let value = builder.ins().iconst(int, self.registers.$field as i64);
@@ -194,23 +288,43 @@ impl ExecutionState {
                     builder.def_var(var, value);
                 )*
             }};
-            (sys $field:ident => $bad_sys_reg:expr) => {{
-                let value = builder.ins().iconst(int, self.registers.$field as i64);
-                let var = Variable::new(registers.len() + sys_registers.len());
-                assert!(!sys_registers.contains_key(&$bad_sys_reg));
-                sys_registers.insert($bad_sys_reg, var);
-                builder.declare_var(var, int);
-                builder.def_var(var, value);
+            (sys $($field:ident$($conversion:expr)? => $bad_sys_reg:expr),*$(,)?) => {{
+                $(
+                    let value = builder.ins().iconst(int, $($conversion)*(self.registers.$field) as u64 as i64);
+                    let var = Variable::new(registers.len() + sys_registers.len());
+                    assert!(!sys_registers.contains_key(&$bad_sys_reg));
+                    sys_registers.insert($bad_sys_reg, var);
+                    builder.declare_var(var, int);
+                    builder.def_var(var, value);
+                )*
             }};
         }
-        decl_reg_field! { sys ttbr0_el1 => SysReg::TTBR0_EL1 };
-        decl_reg_field! { sys mair_el1 => SysReg::MAIR_EL1 };
-        //decl_reg_field! { sys id_aa64mmfr0_el1 => SysReg::ID_AA64MMFR0_EL1 };
-        decl_reg_field! { sys tcr_el1 => SysReg::TCR_EL1 };
-        decl_reg_field! { sys sctlr_el1 => SysReg::SCTLR_EL1 };
-        decl_reg_field! { sys cpacr_el1 => SysReg::CPACR_EL1 };
-        decl_reg_field! { sys vbar_el1 => SysReg::VBAR_EL1 };
-        decl_reg_field! {
+        reg_field! { sys
+            ttbr0_el1 => SysReg::TTBR0_EL1,
+            vttbr_el2 => SysReg::VTTBR_EL2,
+            mair_el1 => SysReg::MAIR_EL1,
+            //reg_field! { sys id_aa64mmfr0_el1 => SysReg::ID_AA64MMFR0_EL1 };
+            sp_el0 => SysReg::SP_EL0,
+            sp_el1 => SysReg::SP_EL1,
+            sp_el2 => SysReg::SP_EL2,
+            // sp_el3 => SysReg::SP_EL3,
+            // FIXME: bad64 doesn't have an SP_EL3 variant.
+            tcr_el1 => SysReg::TCR_EL1,
+            sctlr_el1 => SysReg::SCTLR_EL1,
+            sctlr_el2 => SysReg::SCTLR_EL2,
+            sctlr_el3 => SysReg::SCTLR_EL3,
+            cpacr_el1 => SysReg::CPACR_EL1,
+            vbar_el1 => SysReg::VBAR_EL1,
+            hcr_el2 => SysReg::HCR_EL2,
+            scr_el3 => SysReg::SCR_EL3,
+            vpidr_el2 => SysReg::VPIDR_EL2,
+            vmpidr_el2 => SysReg::VMPIDR_EL2,
+            spsr_el3 u64::from =>  SysReg::SPSR_EL3,
+            elr_el1 => SysReg::ELR_EL1,
+            elr_el2 => SysReg::ELR_EL2,
+            elr_el3 => SysReg::ELR_EL3,
+        }
+        reg_field! {
             x0 => Reg::X0,
             x1 => Reg::X1,
             x2 => Reg::X2,
@@ -243,7 +357,7 @@ impl ExecutionState {
             x29 => Reg::X29,
             x30 => Reg::X30,
             xzr => Reg::XZR,
-            sp_el0 => bad64::Reg::SP,
+            sp => bad64::Reg::SP,
         }
     }
 
@@ -258,7 +372,7 @@ impl ExecutionState {
 
         let int = cranelift::prelude::Type::int(64).expect("Could not create I64 type");
         let memflags = MemFlags::new().with_endianness(codegen::ir::Endianness::Little);
-        macro_rules! read_reg_field {
+        macro_rules! reg_field {
             ($($field:ident => $bad_reg:expr),*$(,)?) => {{
                 $(
                     let addr = builder.ins().iconst(int, std::ptr::addr_of!(self.registers) as i64);
@@ -269,24 +383,44 @@ impl ExecutionState {
                     builder.ins().store(memflags, var_value, addr, i32::try_from(offset).unwrap());
                 )*
             }};
-            (sys $field:ident => $bad_sys_reg:expr) => {{
+            (sys $($field:ident$($conversion:expr)? => $bad_sys_reg:expr),*$(,)?) => {{
+                $(
                     let addr = builder.ins().iconst(int, std::ptr::addr_of!(self.registers) as i64);
                     let offset = core::mem::offset_of!(RegisterFile, $field);
                     assert!(sys_registers.contains_key(&$bad_sys_reg));
                     let var = &sys_registers[&$bad_sys_reg];
                     let var_value = builder.use_var(*var);
                     builder.ins().store(memflags, var_value, addr, i32::try_from(offset).unwrap());
+                )*
             }};
         }
 
-        read_reg_field! { sys ttbr0_el1 => SysReg::TTBR0_EL1 };
-        read_reg_field! { sys mair_el1 => SysReg::MAIR_EL1 };
-        // read_reg_field! { sys id_aa64mmfr0_el1 => SysReg::ID_AA64MMFR0_EL1 };
-        read_reg_field! { sys tcr_el1 => SysReg::TCR_EL1 };
-        read_reg_field! { sys sctlr_el1 => SysReg::SCTLR_EL1 };
-        read_reg_field! { sys cpacr_el1 => SysReg::CPACR_EL1 };
-        read_reg_field! { sys vbar_el1 => SysReg::VBAR_EL1 };
-        read_reg_field! {
+        reg_field! { sys
+            ttbr0_el1 => SysReg::TTBR0_EL1,
+            vttbr_el2 => SysReg::VTTBR_EL2,
+            mair_el1 => SysReg::MAIR_EL1,
+            // id_aa64mmfr0_el1 => SysReg::ID_AA64MMFR0_EL1,
+            sp_el0 => SysReg::SP_EL0,
+            sp_el1 => SysReg::SP_EL1,
+            sp_el2 => SysReg::SP_EL2,
+            // sp_el3 => SysReg::SP_EL3,
+            // FIXME: bad64 doesn't have an SP_EL3 variant.
+            tcr_el1 => SysReg::TCR_EL1,
+            sctlr_el1 => SysReg::SCTLR_EL1,
+            sctlr_el2 => SysReg::SCTLR_EL2,
+            sctlr_el3 => SysReg::SCTLR_EL3,
+            cpacr_el1 => SysReg::CPACR_EL1,
+            vbar_el1 => SysReg::VBAR_EL1,
+            hcr_el2 => SysReg::HCR_EL2,
+            scr_el3 => SysReg::SCR_EL3,
+            vpidr_el2 => SysReg::VPIDR_EL2,
+            vmpidr_el2 => SysReg::VMPIDR_EL2,
+            spsr_el3 =>  SysReg::SPSR_EL3,
+            elr_el1 => SysReg::ELR_EL1,
+            elr_el2 => SysReg::ELR_EL2,
+            elr_el3 => SysReg::ELR_EL3,
+        };
+        reg_field! {
             x0 => Reg::X0,
             x1 => Reg::X1,
             x2 => Reg::X2,
@@ -318,7 +452,7 @@ impl ExecutionState {
             x28 => Reg::X28,
             x29 => Reg::X29,
             x30 => Reg::X30,
-            sp_el0 => bad64::Reg::SP,
+            sp => bad64::Reg::SP,
         }
     }
 }
