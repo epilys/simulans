@@ -207,6 +207,7 @@ impl Armv8AMachine {
             int,
             int32,
             mem_start: self.mem.map.as_ptr() as usize as i64,
+            unresolved_blocks: IndexMap::default(),
             builder,
             registers,
             sys_registers,
@@ -232,10 +233,12 @@ impl Armv8AMachine {
             int: _,
             int32: _,
             mem_start: _,
+            unresolved_blocks,
             mut builder,
             registers,
             sys_registers,
         } = trans;
+        assert_eq!(unresolved_blocks, IndexMap::<u64, Block>::default());
 
         // Add JIT code to read register values back to cpu_state fields
         self.cpu_state
@@ -259,6 +262,7 @@ struct FunctionTranslator<'a> {
     int32: types::Type,
     mem_start: i64,
     builder: FunctionBuilder<'a>,
+    unresolved_blocks: IndexMap<u64, Block>,
     registers: IndexMap<bad64::Reg, Variable>,
     sys_registers: IndexMap<bad64::SysReg, Variable>,
 }
@@ -542,6 +546,14 @@ impl FunctionTranslator<'_> {
         use bad64::Op;
 
         let op = instruction.op();
+        if let Some(old_block) = self.unresolved_blocks.swap_remove(&instruction.address()) {
+            let new_block = self.builder.create_block();
+            self.builder.switch_to_block(old_block);
+            self.builder.seal_block(old_block);
+            self.builder.ins().jump(new_block, &[]);
+            self.builder.switch_to_block(new_block);
+            self.builder.seal_block(new_block);
+        }
 
         match op {
             Op::NOP => {}
@@ -749,11 +761,176 @@ impl FunctionTranslator<'_> {
                 let value = self.builder.ins().imul(a, b);
                 self.builder.def_var(target, value);
             }
+            Op::SDIV => {
+                /*
+                constant bits(datasize) operand1 = X[n, datasize];
+                constant bits(datasize) operand2 = X[m, datasize];
+                constant integer dividend = SInt(operand1);
+                constant integer divisor  = SInt(operand2);
+                integer result;
+                if divisor == 0 then
+                result = 0;
+                elsif (dividend < 0) == (divisor < 0) then
+                result = Abs(dividend) DIV Abs(divisor);    // same signs - positive result
+                else
+                result = -(Abs(dividend) DIV Abs(divisor)); // different signs - negative result
+                X[d, datasize] = result<datasize-1:0>;
+                */
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in load: {:?}", other),
+                };
+                let dividend = self.translate_operand(&instruction.operands()[1]);
+                let divisor = self.translate_operand(&instruction.operands()[2]);
+                // if divisor == 0 then
+                // result = 0;
+                let zero = self.reg_to_value(&bad64::Reg::XZR);
+                let first_condition_value =
+                    self.builder
+                        .ins()
+                        .icmp(cranelift::prelude::IntCC::Equal, divisor, zero);
+
+                let zero_block = self.builder.create_block();
+                let else_block = self.builder.create_block();
+                let merge_block = self.builder.create_block();
+
+                // If-else constructs in the toy language have a return value.
+                // In traditional SSA form, this would produce a PHI between
+                // the then and else bodies. Cranelift uses block parameters,
+                // so set up a parameter in the merge block, and we'll pass
+                // the return values to it from the branches.
+                self.builder.append_block_param(merge_block, self.int);
+
+                // Test the if condition and conditionally branch.
+                self.builder
+                    .ins()
+                    .brif(first_condition_value, zero_block, &[], else_block, &[]);
+
+                self.builder.switch_to_block(zero_block);
+                self.builder.seal_block(zero_block);
+                // Jump to the merge block, passing it the block return value.
+                self.builder.ins().jump(merge_block, &[zero]);
+
+                self.builder.switch_to_block(else_block);
+                self.builder.seal_block(else_block);
+                let else_return = self.builder.ins().sdiv(dividend, divisor);
+                // Jump to the merge block, passing it the block return value.
+                self.builder.ins().jump(merge_block, &[else_return]);
+
+                // Switch to the merge block for subsequent statements.
+                self.builder.switch_to_block(merge_block);
+
+                // We've now seen all the predecessors of the merge block.
+                self.builder.seal_block(merge_block);
+
+                // Read the value of the if-else by reading the merge block
+                // parameter.
+                let phi = self.builder.block_params(merge_block)[0];
+
+                self.builder.def_var(target, phi);
+            }
             // Branches
-            Op::BR => todo!(),
+            Op::B => {
+                // This instruction branches unconditionally to a label at a PC-relative offset,
+                // with a hint that this is not a subroutine call or return.
+                // constant boolean branch_conditional = FALSE;
+                // BranchTo(PC64 + offset, BranchType_DIR, branch_conditional);
+                let label = match instruction.operands()[0] {
+                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
+                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                };
+                let unresolved_block = if let Some(block) = self.unresolved_blocks.get(&label) {
+                    *block
+                } else {
+                    self.builder.create_block()
+                };
+                self.builder.ins().jump(unresolved_block, &[]);
+                let new_block = self.builder.create_block();
+                self.builder.switch_to_block(new_block);
+                self.builder.seal_block(new_block);
+                if !self.unresolved_blocks.contains_key(&label) {
+                    self.unresolved_blocks.insert(label, unresolved_block);
+                }
+            }
+            Op::BR => {
+                // This instruction branches unconditionally to an address in a register, with a
+                // hint that this is not a subroutine return.
+                //
+                // constant bits(64) target = X[n, 64];
+                // Value in BTypeNext will be used to set PSTATE.BTYPE
+                // if InGuardedPage then
+                //     if n == 16 || n == 17 then
+                //         BTypeNext = '01';
+                //     else
+                //         BTypeNext = '11';
+                // else
+                //     BTypeNext = '01';
+
+                // constant boolean branch_conditional = FALSE;
+                // BranchTo(target, BranchType_INDIR, branch_conditional);
+                todo!()
+            }
             Op::RET => {
                 // FIXME
                 return ControlFlow::Break(instruction);
+            }
+            // Compares
+            Op::CBNZ => {
+                /*
+                 * constant boolean branch_conditional = TRUE;
+                 * constant bits(datasize) operand1 = X[t, datasize];
+                 * if !IsZero(operand1) then
+                 *     BranchTo(PC64 + offset, BranchType_DIR, branch_conditional);
+                 * else
+                 *     BranchNotTaken(BranchType_DIR, branch_conditional);
+                 */
+                let operand1 = self.translate_operand(&instruction.operands()[0]);
+                let label = match instruction.operands()[1] {
+                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
+                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                };
+                let branch_not_taken_block = self.builder.create_block();
+                let branch_block = self.builder.create_block();
+                let merge_block = self.builder.create_block();
+                self.builder.append_block_param(merge_block, self.int);
+                let zero = self.reg_to_value(&bad64::Reg::XZR);
+                let is_zero_value =
+                    self.builder
+                        .ins()
+                        .icmp(cranelift::prelude::IntCC::Equal, operand1, zero);
+                let is_zero_value = self.builder.ins().sextend(self.int, is_zero_value);
+                self.builder.ins().brif(
+                    is_zero_value,
+                    branch_block,
+                    &[],
+                    branch_not_taken_block,
+                    &[],
+                );
+                self.builder.switch_to_block(branch_not_taken_block);
+                self.builder.seal_block(branch_not_taken_block);
+                // Jump to the merge block, passing it the block return value.
+                self.builder.ins().jump(merge_block, &[is_zero_value]);
+                self.builder.switch_to_block(branch_block);
+                self.builder.seal_block(branch_block);
+                let unresolved_block = if let Some(block) = self.unresolved_blocks.get(&label) {
+                    *block
+                } else {
+                    self.builder.create_block()
+                };
+                // Jump to the merge block, passing it the block return value.
+                self.builder.ins().jump(unresolved_block, &[]);
+                if !self.unresolved_blocks.contains_key(&label) {
+                    self.unresolved_blocks.insert(label, unresolved_block);
+                }
+
+                // Switch to the merge block for subsequent statements.
+                self.builder.switch_to_block(merge_block);
+
+                // We've now seen all the predecessors of the merge block.
+                self.builder.seal_block(merge_block);
             }
             // Bit-ops
             Op::BFI => {
@@ -815,6 +992,22 @@ impl FunctionTranslator<'_> {
                 let value = self.builder.ins().bor(a, b);
                 self.builder.def_var(target, value);
             }
+            Op::LSL => {
+                // Logical shift left
+                // This instruction shifts a register value left by an immediate number of bits,
+                // shifting in zeros, and writes the result to the destination register
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let value = self.builder.ins().ishl(a, b);
+                self.builder.def_var(target, value);
+            }
             Op::AND => todo!(),
 
             // rest
@@ -861,7 +1054,6 @@ impl FunctionTranslator<'_> {
             Op::AUTIZA => todo!(),
             Op::AUTIZB => todo!(),
             Op::AXFLAG => todo!(),
-            Op::B => todo!(),
             Op::BCAX => todo!(),
             Op::BDEP => todo!(),
             Op::BEXT => todo!(),
@@ -942,7 +1134,6 @@ impl FunctionTranslator<'_> {
             Op::CASPA => todo!(),
             Op::CASPAL => todo!(),
             Op::CASPL => todo!(),
-            Op::CBNZ => todo!(),
             Op::CBZ => todo!(),
             Op::CCMN => todo!(),
             Op::CCMP => todo!(),
@@ -1386,7 +1577,6 @@ impl FunctionTranslator<'_> {
             Op::LDXR => todo!(),
             Op::LDXRB => todo!(),
             Op::LDXRH => todo!(),
-            Op::LSL => todo!(),
             Op::LSLR => todo!(),
             Op::LSLV => todo!(),
             Op::LSR => todo!(),
@@ -1522,7 +1712,6 @@ impl FunctionTranslator<'_> {
             Op::SBFX => todo!(),
             Op::SCLAMP => todo!(),
             Op::SCVTF => todo!(),
-            Op::SDIV => todo!(),
             Op::SDIVR => todo!(),
             Op::SDOT => todo!(),
             Op::SEL => todo!(),
