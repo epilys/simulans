@@ -20,39 +20,49 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use std::{ops::ControlFlow, pin::Pin, slice};
+use std::{ops::ControlFlow, pin::Pin};
 
 use cranelift::{codegen::ir::immediates::Offset32, prelude::*};
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{DataDescription, Linkage, Module};
+use cranelift_module::{Linkage, Module};
 use indexmap::IndexMap;
 
-use crate::{cpu_state::*, memory::*};
+use crate::{cpu_state::ExecutionState, machine::Armv8AMachine};
 
-/// The basic JIT class.
-pub struct Armv8AMachine {
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct Entry(pub extern "C" fn(&mut JitContext, &mut Armv8AMachine) -> Entry);
+
+pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMachine) -> Entry {
+    let pc: u64 = machine.pc;
+    if let Some(entry) = machine.entry_blocks.get(&pc) {
+        log::trace!("lookup entry entry found for {}", pc);
+        return *entry;
+    }
+    log::trace!("generating entry for pc {}", pc);
+
+    let next_entry = context.compile(machine, pc.try_into().unwrap()).unwrap();
+    machine.entry_blocks.insert(pc, next_entry);
+
+    log::trace!("returning generated entry for pc {}", pc);
+    next_entry
+}
+
+pub struct JitContext {
     /// The function builder context, which is reused across multiple
     /// FunctionBuilder instances.
     builder_context: FunctionBuilderContext,
-
     /// The main Cranelift context, which holds the state for codegen. Cranelift
     /// separates this from `Module` to allow for parallel compilation, with a
-    /// context per thread, though this isn't in the simple demo here.
+    /// context per thread.
     ctx: codegen::Context,
-
-    /// The data description, which is to data objects what `ctx` is to
-    /// functions.
-    data_description: DataDescription,
-    pub cpu_state: Pin<Box<ExecutionState>>,
-    pub mem: MemoryRegion,
-
     /// The module, with the jit backend, which manages the JIT'd
     /// functions.
     module: JITModule,
 }
 
-impl Armv8AMachine {
-    pub fn new(memory_size: usize) -> Self {
+impl JitContext {
+    pub fn new() -> Pin<Box<Self>> {
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
         flag_builder.set("is_pic", "false").unwrap();
@@ -65,131 +75,101 @@ impl Armv8AMachine {
         let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
 
         let module = JITModule::new(builder);
-        let mem = MemoryRegion::new("ram", memory_size).unwrap();
-        let mut cpu_state = Box::pin(ExecutionState::default());
-        cpu_state.registers.sp = memory_size.try_into().unwrap();
-        cpu_state.registers.sp -= 4096;
-        Self {
-            cpu_state,
-            mem,
+        Box::pin(Self {
             builder_context: FunctionBuilderContext::new(),
             ctx: module.make_context(),
-            data_description: DataDescription::new(),
             module,
-        }
+        })
     }
 
-    /// Compile a string in the toy language into machine code.
     pub fn compile(
         &mut self,
-        input: &[u8],
-        address: usize,
-    ) -> Result<*const u8, Box<dyn std::error::Error>> {
-        assert!(
-            (address + input.len()) < self.mem.len(),
-            "(address = 0x{:x} + input.len() = 0x{:x}) = 0x{:x} >= self.mem.len() = 0x{:x}",
-            address,
-            input.len(),
-            address + input.len(),
-            self.mem.len()
-        );
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                input.as_ptr(),
-                self.mem.map.as_mut_ptr().add(address),
-                input.len(),
-            )
-        };
-        // translate the input into Cranelift IR.
-        self.translate(input)?;
+        machine: &mut Armv8AMachine,
+        program_counter: usize,
+    ) -> Result<Entry, Box<dyn std::error::Error>> {
+        log::trace!("jit compile called for pc = {}", program_counter);
+        let mut sig = self.module.make_signature();
+        sig.params
+            .push(AbiParam::new(self.module.target_config().pointer_type()));
+        sig.params
+            .push(AbiParam::new(self.module.target_config().pointer_type()));
+        sig.returns
+            .push(AbiParam::new(self.module.target_config().pointer_type()));
+        self.ctx.func.signature = sig;
+        // self.ctx.set_disasm(true);
 
-        // Next, declare the function to jit. Functions must be declared
-        // before they can be called, or defined.
-        //
-        // TODO: This may be an area where the API should be streamlined; should
-        // we have a version of `declare_function` that automatically declares
-        // the function?
-        let id = self
-            .module
-            .declare_function("jit", Linkage::Export, &self.ctx.func.signature)
-            .map_err(|e| e.to_string())?;
+        // Actually perform the translation for this translation block
+        self.translate(machine, program_counter)?;
 
-        // Define the function to jit. This finishes compilation, although
-        // there may be outstanding relocations to perform. Currently, jit
-        // cannot finish relocations until all functions to be called are
-        // defined. For this toy demo for now, we'll just finalize the
-        // function below.
-        self.module
-            .define_function(id, &mut self.ctx)
-            .map_err(|e| e.to_string())?;
+        // Functions must be declared before they can be called, or defined.
+        let id = self.module.declare_function(
+            &format!("0x{program_counter:x}"),
+            Linkage::Export,
+            &self.ctx.func.signature,
+        )?;
+
+        // Define the function to jit. This finishes compilation.
+        self.module.define_function(id, &mut self.ctx)?;
+
+        // {
+        //     let pc = program_counter;
+        //     log::trace!("cranelift IR for translation block at pc={pc:#x}:");
+        //     log::trace!("{}", self.ctx.func);
+        //     log::trace!("Native generated code for translation block at
+        // pc={pc:#x}:");     log::trace!(
+        //         "{}",
+        //         self.ctx.compiled_code().unwrap().vcode.as_ref().unwrap()
+        //     );
+        // }
 
         // Now that compilation is finished, we can clear out the context state.
         self.module.clear_context(&mut self.ctx);
 
-        // Finalize the functions which we just defined, which resolves any
-        // outstanding relocations (patching in addresses, now that they're
-        // available).
+        // We don't call any symbols.
         self.module.finalize_definitions().unwrap();
 
         // We can now retrieve a pointer to the machine code.
-        let code = self.module.get_finalized_function(id);
+        // SAFETY: the function signature has been defined to take two pointers as
+        // parameters and return a pointer. This is safe to transmute as long as
+        // we hold the contract that the generated function has this type.
+        let code = unsafe {
+            std::mem::transmute::<
+                *const u8,
+                for<'a, 'b> extern "C" fn(&'a mut JitContext, &'b mut Armv8AMachine) -> Entry,
+            >(self.module.get_finalized_function(id))
+        };
 
-        Ok(code)
+        Ok(Entry(code))
     }
 
-    /// Create a zero-initialized data section.
-    pub fn create_data(
+    // Translate instructions starting from address `program_counter`.
+    fn translate(
         &mut self,
-        name: &str,
-        contents: Vec<u8>,
-    ) -> Result<&[u8], Box<dyn std::error::Error>> {
-        // The steps here are analogous to `compile`, except that data is much
-        // simpler than functions.
-        self.data_description.define(contents.into_boxed_slice());
-        let id = self
-            .module
-            .declare_data(name, Linkage::Export, true, false)
-            .map_err(|e| e.to_string())?;
+        machine: &mut Armv8AMachine,
+        program_counter: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::ops::Deref;
 
-        self.module
-            .define_data(id, &self.data_description)
-            .map_err(|e| e.to_string())?;
-        self.data_description.clear();
-        self.module.finalize_definitions().unwrap();
-        let buffer = self.module.get_finalized_data(id);
-        // TODO: Can we move the unsafe into cranelift?
-        Ok(unsafe { slice::from_raw_parts(buffer.0, buffer.1) })
-    }
+        let machine_addr = std::ptr::addr_of!(*machine);
+        let self_addr = std::ptr::addr_of!(*self);
 
-    // Translate from toy-language AST nodes into Cranelift IR.
-    fn translate(&mut self, input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-        let decoded_iter = bad64::disasm(input, 0x40080000);
+        let Armv8AMachine {
+            ref mut mem,
+            ref mut cpu_state,
+            ..
+        } = machine;
+        let decoded_iter =
+            bad64::disasm(&mem.map.deref()[program_counter..], program_counter as u64);
 
-        // Return type of JIT code
         let int = cranelift::prelude::Type::int(64).expect("Could not create I64 type");
-        let int32 = cranelift::prelude::Type::int(32).expect("Could not create I32 type");
 
-        // for _p in &params {
-        //     self.ctx.func.signature.params.push(AbiParam::new(int));
-        // }
-
-        // Our toy language currently only supports one return value, though
-        // Cranelift is designed to support more.
-        self.ctx.func.signature.returns.push(AbiParam::new(int));
-
-        // Create the builder to build a function.
         let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
 
         // Create the entry block, to start emitting code in.
         let entry_block = builder.create_block();
 
-        // Since this is the entry block, add block parameters corresponding to
-        // the function's parameters.
-        //
-        // TODO: Streamline the API here.
         builder.append_block_params_for_function_params(entry_block);
 
-        // Tell the builder to emit code in this block.
         builder.switch_to_block(entry_block);
 
         // And, tell the builder that this block will have no further
@@ -200,54 +180,53 @@ impl Armv8AMachine {
         let mut registers = IndexMap::new();
         let mut sys_registers = IndexMap::new();
 
-        // Load register values into Variables.
-        self.cpu_state
-            .load_cpu_state(&mut builder, &mut registers, &mut sys_registers);
+        // Declare variables for each register.
+        // Emit code to load register values into variables.
+        cpu_state.load_cpu_state(&mut builder, &mut registers, &mut sys_registers);
+        let jit_ctx_ptr = builder
+            .ins()
+            .iconst(self.module.target_config().pointer_type(), self_addr as i64);
+        let machine_ptr = builder.ins().iconst(
+            self.module.target_config().pointer_type(),
+            machine_addr as i64,
+        );
+        let sigref = builder.import_signature(builder.func.signature.clone());
         let mut trans = FunctionTranslator {
             int,
-            int32,
-            mem_start: self.mem.map.as_ptr() as usize as i64,
-            unresolved_blocks: IndexMap::default(),
+            pointer_type: self.module.target_config().pointer_type(),
+            mem_start: mem.map.as_ptr() as usize as i64,
+            cpu_state,
+            jit_ctx_ptr,
+            machine_ptr,
+            sigref,
             builder,
             registers,
             sys_registers,
         };
+        let mut next_pc = None;
         // Translate each decoded instruction
         for insn in decoded_iter {
             match insn {
                 Ok(insn) => {
                     log::trace!("{:#?}", insn);
                     log::trace!("{}", insn);
-                    eprintln!("{}", insn);
-                    if let ControlFlow::Break(_) = trans.translate_instruction(insn) {
+                    if let ControlFlow::Break(jump_pc) = trans.translate_instruction(insn) {
+                        next_pc = jump_pc;
                         break;
                     }
                 }
                 Err(err) => {
                     log::error!("Error decoding instruction: {}", err);
-                    eprintln!("Error decoding instruction: {}", err);
                 }
             }
         }
-        let FunctionTranslator {
-            int: _,
-            int32: _,
-            mem_start: _,
-            unresolved_blocks,
-            mut builder,
-            registers,
-            sys_registers,
-        } = trans;
-        assert_eq!(unresolved_blocks, IndexMap::<u64, Block>::default());
-
-        // Add JIT code to read register values back to cpu_state fields
-        self.cpu_state
-            .save_cpu_state(&mut builder, &registers, &sys_registers);
-        let return_variable = registers.get(&bad64::Reg::SP).unwrap();
-        let return_value = builder.use_var(*return_variable);
-
-        // Emit the return instruction.
-        builder.ins().return_(&[return_value]);
+        if let Some(next_pc) = next_pc {
+            trans.emit_jump(next_pc);
+        } else {
+            // We are out of code, so halt the machine
+            trans.emit_halt();
+        }
+        let FunctionTranslator { builder, .. } = trans;
 
         // Tell the builder we're done with this function.
         builder.finalize();
@@ -255,14 +234,16 @@ impl Armv8AMachine {
     }
 }
 
-/// A collection of state used for translating from toy-language AST nodes
-/// into Cranelift IR.
+/// In-progress state of translating instructions into Cranelift IR.
 struct FunctionTranslator<'a> {
     int: types::Type,
-    int32: types::Type,
     mem_start: i64,
     builder: FunctionBuilder<'a>,
-    unresolved_blocks: IndexMap<u64, Block>,
+    cpu_state: &'a mut ExecutionState,
+    jit_ctx_ptr: Value,
+    machine_ptr: Value,
+    pointer_type: Type,
+    sigref: codegen::ir::SigRef,
     registers: IndexMap<bad64::Reg, Variable>,
     sys_registers: IndexMap<bad64::SysReg, Variable>,
 }
@@ -291,6 +272,43 @@ impl FunctionTranslator<'_> {
                 bad64::Operand::ImplSpec { o0, o1, cm, cn, o2 }
             ),
         }
+    }
+
+    fn translate_cmp_64(&mut self, _instruction: &bad64::Instruction) -> Value {
+        // let a = self.translate_operand(&instruction.operands()[1]);
+        // let b = self.translate_operand(&instruction.operands()[2]);
+        // let (svalue, _overflow_flag) = self.builder.ins().sadd_overflow(a, b);
+        // let (uvalue, _overflow_flag) = self.builder.ins().uadd_overflow(a, b);
+        // let n = self.builder.ins().band(svalue, 0x1 << 64);
+        // let zero = self.reg_to_value(&bad64::Reg::XZR);
+        // let n_cond = self
+        //     .builder
+        //     .ins()
+        //     .icmp(cranelift::prelude::IntCC::Equal, n, zero);
+
+        // let zero_block = self.builder.create_block();
+        // let else_block = self.builder.create_block();
+        // let merge_block = self.builder.create_block();
+        // self.builder
+        //     .ins()
+        //     .brif(n_cond, zero_block, &[], else_block, &[]);
+
+        /*
+                 / AddWithCarry()
+        // ==============
+        // Integer addition with carry input, returning result and NZCV flags
+
+        (bits(N), bits(4)) AddWithCarry(bits(N) x, bits(N) y, bit carry_in)
+            constant integer unsigned_sum = UInt(x) + UInt(y) + UInt(carry_in);
+            constant integer signed_sum = SInt(x) + SInt(y) + UInt(carry_in);
+            constant bits(N) result = unsigned_sum<N-1:0>; // same value as signed_sum<N-1:0>
+            constant bit n = result<N-1>;
+            constant bit z = if IsZero(result) then '1' else '0';
+            constant bit c = if UInt(result) == unsigned_sum then '0' else '1';
+            constant bit v = if SInt(result) == signed_sum then '0' else '1';
+            return (result, n:z:c:v);
+                 */
+        todo!()
     }
 
     fn translate_operand(&mut self, operand: &bad64::Operand) -> Value {
@@ -542,19 +560,10 @@ impl FunctionTranslator<'_> {
     fn translate_instruction(
         &mut self,
         instruction: bad64::Instruction,
-    ) -> ControlFlow<bad64::Instruction> {
+    ) -> ControlFlow<Option<Value>> {
         use bad64::Op;
 
         let op = instruction.op();
-        if let Some(old_block) = self.unresolved_blocks.swap_remove(&instruction.address()) {
-            let new_block = self.builder.create_block();
-            self.builder.switch_to_block(old_block);
-            self.builder.seal_block(old_block);
-            self.builder.ins().jump(new_block, &[]);
-            self.builder.switch_to_block(new_block);
-            self.builder.seal_block(new_block);
-        }
-
         match op {
             Op::NOP => {}
             // Special registers
@@ -748,6 +757,20 @@ impl FunctionTranslator<'_> {
                 let (value, _ignore_overflow) = self.builder.ins().usub_overflow(a, b);
                 self.builder.def_var(target, value);
             }
+            Op::SUBS => {
+                // FIXME: update NZCV flags
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in load: {:?}", other),
+                };
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let (value, _ignore_overflow) = self.builder.ins().usub_overflow(a, b);
+                self.builder.def_var(target, value);
+            }
             Op::MUL => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
@@ -797,11 +820,6 @@ impl FunctionTranslator<'_> {
                 let else_block = self.builder.create_block();
                 let merge_block = self.builder.create_block();
 
-                // If-else constructs in the toy language have a return value.
-                // In traditional SSA form, this would produce a PHI between
-                // the then and else bodies. Cranelift uses block parameters,
-                // so set up a parameter in the merge block, and we'll pass
-                // the return values to it from the branches.
                 self.builder.append_block_param(merge_block, self.int);
 
                 // Test the if condition and conditionally branch.
@@ -842,18 +860,24 @@ impl FunctionTranslator<'_> {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     other => panic!("unexpected branch address in {op:?}: {:?}", other),
                 };
-                let unresolved_block = if let Some(block) = self.unresolved_blocks.get(&label) {
-                    *block
-                } else {
-                    self.builder.create_block()
-                };
-                self.builder.ins().jump(unresolved_block, &[]);
-                let new_block = self.builder.create_block();
-                self.builder.switch_to_block(new_block);
-                self.builder.seal_block(new_block);
-                if !self.unresolved_blocks.contains_key(&label) {
-                    self.unresolved_blocks.insert(label, unresolved_block);
-                }
+                let pc = self
+                    .builder
+                    .ins()
+                    .iconst(self.int, instruction.address() as i64);
+                self.builder.ins().store(
+                    MemFlags::trusted().with_vmctx(),
+                    pc,
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
+                );
+                let next_pc = self.builder.ins().iconst(self.int, label as i64);
+                self.builder.ins().store(
+                    MemFlags::trusted().with_vmctx(),
+                    next_pc,
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, pc) as i32,
+                );
+                return ControlFlow::Break(Some(next_pc));
             }
             Op::BR => {
                 // This instruction branches unconditionally to an address in a register, with a
@@ -871,11 +895,42 @@ impl FunctionTranslator<'_> {
 
                 // constant boolean branch_conditional = FALSE;
                 // BranchTo(target, BranchType_INDIR, branch_conditional);
-                todo!()
+                let next_pc = self.translate_operand(&instruction.operands()[0]);
+                let pc = self
+                    .builder
+                    .ins()
+                    .iconst(self.int, instruction.address() as i64);
+                self.builder.ins().store(
+                    MemFlags::trusted().with_vmctx(),
+                    pc,
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
+                );
+                self.builder.ins().store(
+                    MemFlags::trusted().with_vmctx(),
+                    next_pc,
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, pc) as i32,
+                );
+                return ControlFlow::Break(Some(next_pc));
             }
             Op::RET => {
                 // FIXME
-                return ControlFlow::Break(instruction);
+
+                let bool_type =
+                    cranelift::prelude::Type::int(8).expect("Could not create bool type");
+                let true_value = self.builder.ins().iconst(bool_type, 1);
+                self.builder.ins().store(
+                    MemFlags::trusted().with_vmctx(),
+                    true_value,
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, halted) as i32,
+                );
+                // let next_pc = self
+                //     .builder
+                //     .ins()
+                //     .iconst(self.int, instruction.address() as i64);
+                // return ControlFlow::Break(next_pc);
             }
             // Compares
             Op::CBNZ => {
@@ -904,9 +959,9 @@ impl FunctionTranslator<'_> {
                 let is_zero_value = self.builder.ins().sextend(self.int, is_zero_value);
                 self.builder.ins().brif(
                     is_zero_value,
-                    branch_block,
-                    &[],
                     branch_not_taken_block,
+                    &[],
+                    branch_block,
                     &[],
                 );
                 self.builder.switch_to_block(branch_not_taken_block);
@@ -915,17 +970,8 @@ impl FunctionTranslator<'_> {
                 self.builder.ins().jump(merge_block, &[is_zero_value]);
                 self.builder.switch_to_block(branch_block);
                 self.builder.seal_block(branch_block);
-                let unresolved_block = if let Some(block) = self.unresolved_blocks.get(&label) {
-                    *block
-                } else {
-                    self.builder.create_block()
-                };
-                // Jump to the merge block, passing it the block return value.
-                self.builder.ins().jump(unresolved_block, &[]);
-                if !self.unresolved_blocks.contains_key(&label) {
-                    self.unresolved_blocks.insert(label, unresolved_block);
-                }
-
+                let label_value = self.builder.ins().iconst(self.int, label as i64);
+                self.emit_jump(label_value);
                 // Switch to the merge block for subsequent statements.
                 self.builder.switch_to_block(merge_block);
 
@@ -1156,7 +1202,21 @@ impl FunctionTranslator<'_> {
             Op::CMLE => todo!(),
             Op::CMLT => todo!(),
             Op::CMN => todo!(),
-            Op::CMP => todo!(),
+            Op::CMP => {
+                self.translate_cmp_64(&instruction);
+                /*
+                                 * constant bits(datasize) operand1 = if n == 31 then SP[datasize] else X[n, datasize];
+                constant bits(datasize) operand2 = NOT(ExtendReg(m, extend_type, shift, datasize));
+                bits(datasize) result;
+                bits(4) nzcv;
+
+                (result, nzcv) = AddWithCarry(operand1, operand2, '1');
+
+                X[d, datasize] = result;
+                PSTATE.<N,Z,C,V> = nzcv;
+                                */
+                // FIXME
+            }
             Op::CMPEQ => todo!(),
             Op::CMPGE => todo!(),
             Op::CMPGT => todo!(),
@@ -1189,7 +1249,9 @@ impl FunctionTranslator<'_> {
             Op::CRC32W => todo!(),
             Op::CRC32X => todo!(),
             Op::CSDB => todo!(),
-            Op::CSEL => todo!(),
+            Op::CSEL => {
+                todo!()
+            }
             Op::CSET => todo!(),
             Op::CSETM => todo!(),
             Op::CSINC => todo!(),
@@ -1223,8 +1285,17 @@ impl FunctionTranslator<'_> {
             Op::EORTB => todo!(),
             Op::EORV => todo!(),
             Op::ERET => {
-                // TODO
-                return ControlFlow::Break(instruction);
+                // FIXME
+
+                let bool_type =
+                    cranelift::prelude::Type::int(8).expect("Could not create bool type");
+                let true_value = self.builder.ins().iconst(bool_type, 1);
+                self.builder.ins().store(
+                    MemFlags::trusted().with_vmctx(),
+                    true_value,
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, halted) as i32,
+                );
             }
             Op::ERETAA => todo!(),
             Op::ERETAB => todo!(),
@@ -1990,7 +2061,6 @@ impl FunctionTranslator<'_> {
             Op::SUBP => todo!(),
             Op::SUBPS => todo!(),
             Op::SUBR => todo!(),
-            Op::SUBS => todo!(),
             Op::SUDOT => todo!(),
             Op::SUMOPA => todo!(),
             Op::SUMOPS => todo!(),
@@ -2060,8 +2130,8 @@ impl FunctionTranslator<'_> {
             Op::UCLAMP => todo!(),
             Op::UCVTF => todo!(),
             Op::UDF => {
-                // nop
-                return ControlFlow::Break(instruction);
+                // FIXME: What should we do here?
+                return ControlFlow::Break(None);
             }
             Op::UDIV => todo!(),
             Op::UDIVR => todo!(),
@@ -2189,278 +2259,72 @@ impl FunctionTranslator<'_> {
         }
         ControlFlow::Continue(())
     }
+
+    fn emit_jump(&mut self, pc_value: Value) {
+        {
+            {
+                let Self {
+                    ref mut cpu_state,
+                    ref mut builder,
+                    ref registers,
+                    ref sys_registers,
+                    ..
+                } = self;
+                cpu_state.save_cpu_state(builder, registers, sys_registers);
+            }
+            self.builder.ins().store(
+                MemFlags::trusted().with_vmctx(),
+                pc_value,
+                self.machine_ptr,
+                std::mem::offset_of!(Armv8AMachine, pc) as i32,
+            );
+            let translate_func = self.builder.ins().load(
+                self.pointer_type,
+                MemFlags::trusted().with_vmctx(),
+                self.machine_ptr,
+                std::mem::offset_of!(Armv8AMachine, lookup_entry_func) as i32,
+            );
+            let call = self.builder.ins().call_indirect(
+                self.sigref,
+                translate_func,
+                &[self.jit_ctx_ptr, self.machine_ptr],
+            );
+            let resolved_entry = self.builder.inst_results(call)[0];
+            self.builder.ins().return_(&[resolved_entry]);
+        }
+    }
+
+    fn emit_halt(&mut self) {
+        {
+            let Self {
+                ref mut cpu_state,
+                ref mut builder,
+                ref registers,
+                ref sys_registers,
+                ..
+            } = self;
+            cpu_state.save_cpu_state(builder, registers, sys_registers);
+        }
+        let bool_type = cranelift::prelude::Type::int(8).expect("Could not create bool type");
+        let true_value = self.builder.ins().iconst(bool_type, 1);
+        self.builder.ins().store(
+            MemFlags::trusted().with_vmctx(),
+            true_value,
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, halted) as i32,
+        );
+        let translate_func = self.builder.ins().load(
+            self.pointer_type,
+            MemFlags::trusted().with_vmctx(),
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, lookup_entry_func) as i32,
+        );
+        let call = self.builder.ins().call_indirect(
+            self.sigref,
+            translate_func,
+            &[self.jit_ctx_ptr, self.machine_ptr],
+        );
+        let resolved_entry = self.builder.inst_results(call)[0];
+        self.builder.ins().return_(&[resolved_entry]);
+    }
 }
-
-// Code from the cranelift JIT demo:
-//
-// impl<'a> FunctionTranslator<'a> {
-// /// When you write out instructions in Cranelift, you get back `Value`s. You
-// /// can then use these references in other instructions.
-// fn translate_expr(&mut self, expr: Expr) -> Value {
-//     match expr {
-//         Expr::Literal(literal) => {
-//             let imm: i32 = literal.parse().unwrap();
-//             self.builder.ins().iconst(self.int, i64::from(imm))
-//         }
-
-//         Expr::Add(lhs, rhs) => {
-//             let lhs = self.translate_expr(*lhs);
-//             let rhs = self.translate_expr(*rhs);
-//             self.builder.ins().iadd(lhs, rhs)
-//         }
-
-//         Expr::Sub(lhs, rhs) => {
-//             let lhs = self.translate_expr(*lhs);
-//             let rhs = self.translate_expr(*rhs);
-//             self.builder.ins().isub(lhs, rhs)
-//         }
-
-//         Expr::Mul(lhs, rhs) => {
-//             let lhs = self.translate_expr(*lhs);
-//             let rhs = self.translate_expr(*rhs);
-//             self.builder.ins().imul(lhs, rhs)
-//         }
-
-//         Expr::Div(lhs, rhs) => {
-//             let lhs = self.translate_expr(*lhs);
-//             let rhs = self.translate_expr(*rhs);
-//             self.builder.ins().udiv(lhs, rhs)
-//         }
-
-//         Expr::Eq(lhs, rhs) => self.translate_icmp(IntCC::Equal, *lhs, *rhs),
-//         Expr::Ne(lhs, rhs) => self.translate_icmp(IntCC::NotEqual, *lhs,
-// *rhs),         Expr::Lt(lhs, rhs) =>
-// self.translate_icmp(IntCC::SignedLessThan, *lhs, *rhs),         Expr::Le(lhs,
-// rhs) => self.translate_icmp(IntCC::SignedLessThanOrEqual, *lhs, *rhs),
-//         Expr::Gt(lhs, rhs) => self.translate_icmp(IntCC::SignedGreaterThan,
-// *lhs, *rhs),         Expr::Ge(lhs, rhs) =>
-// self.translate_icmp(IntCC::SignedGreaterThanOrEqual, *lhs, *rhs),
-//         Expr::Call(name, args) => self.translate_call(name, args),
-//         Expr::GlobalDataAddr(name) => self.translate_global_data_addr(name),
-//         Expr::Identifier(name) => {
-//             // `use_var` is used to read the value of a variable.
-//             let variable = self.variables.get(&name).expect("variable not
-// defined");             self.builder.use_var(*variable)
-//         }
-//         Expr::Assign(name, expr) => self.translate_assign(name, *expr),
-//         Expr::IfElse(condition, then_body, else_body) => {
-//             self.translate_if_else(*condition, then_body, else_body)
-//         }
-//         Expr::WhileLoop(condition, loop_body) => {
-//             self.translate_while_loop(*condition, loop_body)
-//         }
-//     }
-// }
-
-// fn translate_assign(&mut self, name: String, expr: Expr) -> Value {
-//     // `def_var` is used to write the value of a variable. Note that
-//     // variables can have multiple definitions. Cranelift will
-//     // convert them into SSA form for itself automatically.
-//     let new_value = self.translate_expr(expr);
-//     let variable = self.variables.get(&name).unwrap();
-//     self.builder.def_var(*variable, new_value);
-//     new_value
-// }
-
-// fn translate_icmp(&mut self, cmp: IntCC, lhs: Expr, rhs: Expr) -> Value {
-//     let lhs = self.translate_expr(lhs);
-//     let rhs = self.translate_expr(rhs);
-//     self.builder.ins().icmp(cmp, lhs, rhs)
-// }
-
-// fn translate_if_else(
-//     &mut self,
-//     condition: Expr,
-//     then_body: Vec<Expr>,
-//     else_body: Vec<Expr>,
-// ) -> Value {
-//     let condition_value = self.translate_expr(condition);
-
-//     let then_block = self.builder.create_block();
-//     let else_block = self.builder.create_block();
-//     let merge_block = self.builder.create_block();
-
-//     // If-else constructs in the toy language have a return value.
-//     // In traditional SSA form, this would produce a PHI between
-//     // the then and else bodies. Cranelift uses block parameters,
-//     // so set up a parameter in the merge block, and we'll pass
-//     // the return values to it from the branches.
-//     self.builder.append_block_param(merge_block, self.int);
-
-//     // Test the if condition and conditionally branch.
-//     self.builder
-//         .ins()
-//         .brif(condition_value, then_block, &[], else_block, &[]);
-
-//     self.builder.switch_to_block(then_block);
-//     self.builder.seal_block(then_block);
-//     let mut then_return = self.builder.ins().iconst(self.int, 0);
-//     for expr in then_body {
-//         then_return = self.translate_expr(expr);
-//     }
-
-//     // Jump to the merge block, passing it the block return value.
-//     self.builder.ins().jump(merge_block, &[then_return]);
-
-//     self.builder.switch_to_block(else_block);
-//     self.builder.seal_block(else_block);
-//     let mut else_return = self.builder.ins().iconst(self.int, 0);
-//     for expr in else_body {
-//         else_return = self.translate_expr(expr);
-//     }
-
-//     // Jump to the merge block, passing it the block return value.
-//     self.builder.ins().jump(merge_block, &[else_return]);
-
-//     // Switch to the merge block for subsequent statements.
-//     self.builder.switch_to_block(merge_block);
-
-//     // We've now seen all the predecessors of the merge block.
-//     self.builder.seal_block(merge_block);
-
-//     // Read the value of the if-else by reading the merge block
-//     // parameter.
-//     let phi = self.builder.block_params(merge_block)[0];
-
-//     phi
-// }
-
-// fn translate_while_loop(&mut self, condition: Expr, loop_body: Vec<Expr>) ->
-// Value {     let header_block = self.builder.create_block();
-//     let body_block = self.builder.create_block();
-//     let exit_block = self.builder.create_block();
-
-//     self.builder.ins().jump(header_block, &[]);
-//     self.builder.switch_to_block(header_block);
-
-//     let condition_value = self.translate_expr(condition);
-//     self.builder
-//         .ins()
-//         .brif(condition_value, body_block, &[], exit_block, &[]);
-
-//     self.builder.switch_to_block(body_block);
-//     self.builder.seal_block(body_block);
-
-//     for expr in loop_body {
-//         self.translate_expr(expr);
-//     }
-//     self.builder.ins().jump(header_block, &[]);
-
-//     self.builder.switch_to_block(exit_block);
-
-//     // We've reached the bottom of the loop, so there will be no
-//     // more backedges to the header to exits to the bottom.
-//     self.builder.seal_block(header_block);
-//     self.builder.seal_block(exit_block);
-
-//     // Just return 0 for now.
-//     self.builder.ins().iconst(self.int, 0)
-// }
-
-// fn translate_call(&mut self, name: String, args: Vec<Expr>) -> Value {
-//     let mut sig = self.module.make_signature();
-
-//     // Add a parameter for each argument.
-//     for _arg in &args {
-//         sig.params.push(AbiParam::new(self.int));
-//     }
-
-//     // For simplicity for now, just make all calls return a single I64.
-//     sig.returns.push(AbiParam::new(self.int));
-
-//     // TODO: Streamline the API here?
-//     let callee = self
-//         .module
-//         .declare_function(&name, Linkage::Import, &sig)
-//         .expect("problem declaring function");
-//     let local_callee = self.module.declare_func_in_func(callee,
-// self.builder.func);
-
-//     let mut arg_values = Vec::new();
-//     for arg in args {
-//         arg_values.push(self.translate_expr(arg))
-//     }
-//     let call = self.builder.ins().call(local_callee, &arg_values);
-//     self.builder.inst_results(call)[0]
-// }
-
-// fn translate_global_data_addr(&mut self, name: String) -> Value {
-//     let sym = self
-//         .module
-//         .declare_data(&name, Linkage::Export, true, false)
-//         .expect("problem declaring data object");
-//     let local_id = self.module.declare_data_in_func(sym, self.builder.func);
-
-//     let pointer = self.module.target_config().pointer_type();
-//     self.builder.ins().symbol_value(pointer, local_id)
-// }
-// }
-// fn declare_variables(
-//     int: types::Type,
-//     builder: &mut FunctionBuilder,
-//     // params: &[String],
-//     the_return: bad64::Reg,
-//     stmts: &[Expr],
-//     entry_block: Block,
-// ) -> IndexMap<bad64::Reg, Variable> {
-//     let mut variables = IndexMap::new();
-
-//     // for (i, name) in function_params.iter().enumerate() {
-//     //     // TODO: cranelift_frontend should really have an API to make it
-// easy to set     //     // up param variables.
-//     //     let val = builder.block_params(entry_block)[i];
-//     //     let var = declare_variable(int, builder, &mut variables, name);
-//     //     builder.def_var(var, val);
-//     // }
-//     let zero = builder.ins().iconst(int, 0);
-//     let return_variable = declare_variable(int, builder, &mut variables,
-// the_return);     builder.def_var(return_variable, zero);
-//     for expr in stmts {
-//         declare_variables_in_stmt(int, builder, &mut variables, expr);
-//     }
-
-//     variables
-// }
-
-// /// Recursively descend through the AST, translating all implicit
-// /// variable declarations.
-// fn declare_variables_in_stmt(
-//     int: types::Type,
-//     builder: &mut FunctionBuilder,
-//     variables: &mut IndexMap<String, Variable>,
-//     expr: &Expr,
-// ) {
-//     match *expr {
-//         Expr::Assign(ref name, _) => {
-//             declare_variable(int, builder, variables, name);
-//         }
-//         Expr::IfElse(ref _condition, ref then_body, ref else_body) => {
-//             for stmt in then_body {
-//                 declare_variables_in_stmt(int, builder, variables, stmt);
-//             }
-//             for stmt in else_body {
-//                 declare_variables_in_stmt(int, builder, variables, stmt);
-//             }
-//         }
-//         Expr::WhileLoop(ref _condition, ref loop_body) => {
-//             for stmt in loop_body {
-//                 declare_variables_in_stmt(int, builder, variables, stmt);
-//             }
-//         }
-//         _ => (),
-//     }
-// }
-// / Declare a single variable declaration.
-// fn declare_variable(
-//     int: types::Type,
-//     builder: &mut FunctionBuilder,
-//     variables: &mut IndexMap<bad64::Reg, Variable>,
-//     name: bad64::Reg,
-// ) -> Variable {
-//     let var = Variable::new(variables.len());
-//     if !variables.contains_key(&name) {
-//         variables.insert(name, var);
-//         builder.declare_var(var, int);
-//     }
-//     var
-// }

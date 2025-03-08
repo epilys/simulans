@@ -20,32 +20,46 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use simulans::{disas, jit, run_code};
+use simulans::{disas, machine, main_loop};
+
+mod cli;
+use cli::Args;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    let args = std::env::args_os().collect::<Vec<_>>();
-    let input = match args.len() {
-        2 => std::fs::read(&args[1])?,
-        other => {
-            eprintln!("Error: one argument is expected, but got {other}");
-            std::process::exit(1);
-        }
-    };
-    // Create the JIT instance, which manages all generated functions and data.
-    let mut jit = jit::Armv8AMachine::new(0x40080000 + 0x40080000 / 2);
-
-    disas(&input)?;
-    let sp_el0 = run_aarch64(&mut jit, &input)?;
-    log::trace!("sp_el0 = 0x{:x}", sp_el0);
-    log::trace!("cpu state after running is {:#?}", &jit.cpu_state);
+    let args = Args::parse()?;
+    match args.verbose {
+        0 => log::set_max_level(log::LevelFilter::Off),
+        1 => log::set_max_level(log::LevelFilter::Info),
+        2 => log::set_max_level(log::LevelFilter::Debug),
+        _ => log::set_max_level(log::LevelFilter::Trace),
+    }
+    run_app(args)?;
     Ok(())
 }
 
-fn run_aarch64(
-    jit: &mut jit::Armv8AMachine,
-    input: &[u8],
-) -> Result<i64, Box<dyn std::error::Error>> {
-    let ret: i64 = unsafe { run_code(jit, input, ())? };
-    Ok(ret)
+fn run_app(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    let input = std::fs::read(&args.binary)?;
+    // Create the machine instance, which holds the VM state.
+    let mut machine = machine::Armv8AMachine::new(args.memory.0);
+
+    disas(&input)?;
+    main_loop(
+        &mut machine,
+        args.start_address.0.try_into().unwrap(),
+        &input,
+    )?;
+    // let sp_el0 = run_aarch64(&mut machine, &input, args.start_address.0)?;
+    // log::trace!("sp_el0 = 0x{:x}", sp_el0);
+    // log::trace!("cpu state after running is {:#?}", &machine.cpu_state);
+    Ok(())
 }
+
+// fn run_aarch64(
+//     machine: &mut machine::Armv8AMachine,
+//     input: &[u8],
+//     start_address: u64,
+// ) -> Result<i64, Box<dyn std::error::Error>> {
+//     let ret: i64 = unsafe { run_code(machine, start_address.try_into()?,
+// input, ())? };     Ok(ret)
+// }

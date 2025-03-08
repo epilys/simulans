@@ -33,11 +33,12 @@ pub struct MemoryRegion {
 }
 
 impl MemoryRegion {
-    pub fn new(name: &str, size: usize) -> Result<Self, Errno> {
+    pub fn new(name: &str, size: u64) -> Result<Self, Errno> {
         let name = CString::new(name).unwrap();
         let fd = memfd::memfd_create(&name, memfd::MemFdCreateFlag::MFD_CLOEXEC)?;
         nix::unistd::ftruncate(&fd, size.try_into().unwrap())?;
         let map = unsafe { memmap2::MmapOptions::new().map_mut(&fd).unwrap() };
+        let size: usize = size.try_into().map_err(|_| Errno::ERANGE)?;
         debug_assert_eq!(map.len(), size);
         Ok(Self { size, fd, map })
     }

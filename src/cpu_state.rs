@@ -204,8 +204,8 @@ pub struct SavedProgramStatusRegister {
     pub m: Mode,
 }
 
-#[bitsize(14)]
-#[derive(Default, FromBits, DebugBits)]
+#[repr(C)]
+#[derive(Default, Debug)]
 #[allow(non_snake_case)]
 pub struct PSTATE {
     /// Negative condition flag.
@@ -371,7 +371,7 @@ impl ExecutionState {
         use bad64::{Reg, SysReg};
 
         let int = cranelift::prelude::Type::int(64).expect("Could not create I64 type");
-        let memflags = MemFlags::new().with_endianness(codegen::ir::Endianness::Little);
+        let memflags = MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
         macro_rules! reg_field {
             ($($field:ident => $bad_reg:expr),*$(,)?) => {{
                 $(

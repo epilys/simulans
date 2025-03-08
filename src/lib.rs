@@ -22,9 +22,13 @@
 
 pub mod cpu_state;
 pub mod jit;
+pub mod machine;
 pub mod memory;
 
-/// Dissassembles and prints each decoded aarch64 instruction to stdout using
+/// Default guest physical address to load kernel code to.
+pub const KERNEL_ADDRESS: usize = 0x40080000;
+
+/// Disassembles and prints each decoded aarch64 instruction to stdout using
 /// Capstone library, for debugging.
 pub fn disas(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     use capstone::prelude::*;
@@ -45,27 +49,20 @@ pub fn disas(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Executes the given aarch64 binary code.
-///
-/// Feeds the given input into the JIT compiled function and returns the
-/// resulting output.
-///
-/// # Safety
-///
-/// This function is unsafe since it relies on the caller to provide it with the
-/// correct input and output types. Using incorrect types at this point may
-/// corrupt the program's state.
-pub unsafe fn run_code<I, O>(
-    jit: &mut jit::Armv8AMachine,
+pub fn main_loop(
+    machine: &mut machine::Armv8AMachine,
+    start_address: usize,
     code: &[u8],
-    input: I,
-) -> Result<O, Box<dyn std::error::Error>> {
-    // Pass the string to the JIT, and it returns a raw pointer to machine code.
-    let code_ptr = jit.compile(code, 0x40080000)?;
-    // Cast the raw pointer to a typed function pointer. This is unsafe, because
-    // this is the critical point where you have to trust that the generated code
-    // is safe to be called.
-    let code_fn = std::mem::transmute::<*const u8, fn(I) -> O>(code_ptr);
-    // And now we can call it!
-    Ok(code_fn(input))
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut jit_block = jit::JitContext::new();
+    machine.load_kernel(code, start_address)?;
+    machine.pc = start_address.try_into().unwrap();
+    let mut func = machine.lookup_entry_func;
+    while machine.halted == 0 {
+        func = (func.0)(&mut jit_block, machine);
+        if machine.prev_pc == machine.pc {
+            break;
+        }
+    }
+    Ok(())
 }

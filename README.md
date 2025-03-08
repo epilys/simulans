@@ -12,12 +12,13 @@ Simply pass a binary file containing aarch64 instructions (NOT an ELF file!):
 cargo run -- /path/to/aarch64.bin
 ```
 
+See `--help` output for all CLI options.
+
 ## MVP wishlist
 
 - Run a simple kernel.
 - No A32/`AArch32` support.
 - No T32/`Thumb-2` support.
-- No live code-loading (loading code into memory and executing it). The kernel code will be pre-compiled before emulation.
 - Emulation in same process as JIT (no sandboxing for security).
 
 ## Design questions:

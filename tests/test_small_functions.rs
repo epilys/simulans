@@ -20,7 +20,7 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use simulans::{jit, run_code};
+use simulans::{machine, main_loop, KERNEL_ADDRESS};
 
 /// Test a simple function that squares its input.
 #[test]
@@ -43,11 +43,11 @@ fn test_square() {
     // 0x40080014: add sp, sp, #0x10
     // 0x40080018: ret
     // ```
-    let mut machine = jit::Armv8AMachine::new(0x40080000 + 2 * SQUARED.len());
+    let mut machine = machine::Armv8AMachine::new(0x40080000 + 2 * SQUARED.len() as u64);
     let stack_pre = machine.cpu_state.registers.sp;
     // Pass "25" as `num`
     machine.cpu_state.registers.x0 = 25;
-    let _sp: i64 = unsafe { run_code(&mut machine, SQUARED, ()).unwrap() };
+    main_loop(&mut machine, KERNEL_ADDRESS, SQUARED).unwrap();
     assert_eq!(machine.cpu_state.registers.x0, 625);
     assert_eq!(machine.cpu_state.registers.x8, 25);
     assert_eq!(machine.cpu_state.registers.x9, 25);
@@ -64,10 +64,10 @@ fn test_load_stores() {
     const LOAD_STORES: &[u8] = b"\xe0\x0f\x1f\xf8\xe1\x07\x41\xf8";
     // _ = simulans::disas(LOAD_STORES);
 
-    let mut machine = jit::Armv8AMachine::new(0x40080000 + 2 * LOAD_STORES.len());
+    let mut machine = machine::Armv8AMachine::new(0x40080000 + 2 * LOAD_STORES.len() as u64);
     let stack_pre = machine.cpu_state.registers.sp;
     machine.cpu_state.registers.x0 = 0xbadbeef;
-    let _: i64 = unsafe { run_code(&mut machine, LOAD_STORES, ()).unwrap() };
+    main_loop(&mut machine, KERNEL_ADDRESS, LOAD_STORES).unwrap();
     let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre);
     assert_eq!(machine.mem.map.as_ref()[stack_post as usize - 0x10], 0xef);
@@ -98,10 +98,10 @@ fn test_load_stores_2() {
     const STACK_ADD: &[u8] = b"\x80\x46\x82\xd2\xe0\x0f\x1f\xf8\xe1\x07\x41\xf8\x00\x00\x01\x8b";
     // _ = simulans::disas(STACK_ADD);
 
-    let mut machine = jit::Armv8AMachine::new(0x40080000 + 2 * STACK_ADD.len());
+    let mut machine = machine::Armv8AMachine::new(0x40080000 + 2 * STACK_ADD.len() as u64);
     let stack_pre = machine.cpu_state.registers.sp;
     machine.cpu_state.registers.x0 = 0xbadbeef;
-    let _: i64 = unsafe { run_code(&mut machine, STACK_ADD, ()).unwrap() };
+    main_loop(&mut machine, KERNEL_ADDRESS, STACK_ADD).unwrap();
     let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre);
     assert_eq!(machine.cpu_state.registers.x0, 2 * 0x1234);
@@ -143,11 +143,11 @@ fn test_exception_levels() {
     // 0x4008005c: eret
     // 0x40080060: nop
     const BOOT: &[u8] = b"\x20\x00\x80\xd2\x00\x00\x7f\xb2\x00\x00\x7e\xb2\x00\x00\x7d\xb2\x00\x00\x78\xb2\x00\x00\x76\xb2\x00\x00\x75\xb2\x00\x11\x1e\xd5\xe0\x03\x1d\x32\x00\x00\x7c\xb2\x00\x00\x61\xb2\x00\x11\x1c\xd5\x00\x00\x38\xd5\x00\x00\x1c\xd5\xa0\x00\x38\xd5\xa0\x00\x1c\xd5\x1f\x21\x1c\xd5\x1f\x10\x1c\xd5\x1f\x10\x18\xd5\xe0\x00\x00\x58\x20\x40\x1e\xd5\xe0\x00\x00\x58\x00\x40\x1e\xd5\xe0\x03\x9f\xd6\x1f\x20\x03\xd5\x00\x00\x00\x00\xd8\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-    _ = simulans::disas(BOOT);
+    // _ = simulans::disas(BOOT);
 
-    let mut machine = jit::Armv8AMachine::new(0x40080000 + 2 * BOOT.len());
+    let mut machine = machine::Armv8AMachine::new(0x40080000 + 2 * BOOT.len() as u64);
     let stack_pre = machine.cpu_state.registers.sp;
-    let _: i64 = unsafe { run_code(&mut machine, BOOT, ()).unwrap() };
+    main_loop(&mut machine, KERNEL_ADDRESS, BOOT).unwrap();
     let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre);
     assert_eq!(machine.cpu_state.registers.x0, 0);
