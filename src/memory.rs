@@ -38,6 +38,11 @@ impl MemoryRegion {
         let fd = memfd::memfd_create(&name, memfd::MemFdCreateFlag::MFD_CLOEXEC)?;
         nix::unistd::ftruncate(&fd, size.try_into().unwrap())?;
         let map = unsafe { memmap2::MmapOptions::new().map_mut(&fd).unwrap() };
+        #[cfg(target_os = "linux")]
+        {
+            // Don't include VM memory in dumped core files.
+            _ = map.advise(memmap2::Advice::DontDump);
+        }
         let size: usize = size.try_into().map_err(|_| Errno::ERANGE)?;
         debug_assert_eq!(map.len(), size);
         Ok(Self { size, fd, map })
