@@ -802,6 +802,7 @@ version = "0.0.0"
 dependencies = [
  "bad64",
  "bilge",
+ "bitflags 2.6.0",
  "capstone",
  "clap",
  "cranelift",
@@ -813,6 +814,7 @@ dependencies = [
  "log",
  "memmap2",
  "nix",
+ "num-traits",
  "rustc-hash 2.1.1",
 ]
 

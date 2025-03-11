@@ -16,6 +16,9 @@ For native code, you can run the code under gdb.
 If you stop at JITed code or the process crashes while executing JITed code, you won't be able to see any source code or backtraces because there are none.
 You can print a disassembly of the current instruction with `x/i $pc` (`x` is to show memory, `i` is to interpret it as instructions).
 
+Note: If you want the `machine.pc` field to accurately reflect the emulated (not native) program counter, enable the `accurate-pc` Cargo feature.
+This adds an extra store operation of the instruction address to `machine.pc` before each emulated instruction.
+
 If you want to step-by-step execute instrunctions, it might be useful to print the current instruction on each `stepi`.
 You can do this by defining a hook:
 

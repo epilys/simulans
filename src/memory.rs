@@ -24,7 +24,10 @@
 
 use std::{ffi::CString, os::fd::OwnedFd};
 
-use nix::{errno::Errno, sys::memfd};
+use nix::{
+    errno::Errno,
+    sys::{memfd, mman::ProtFlags},
+};
 
 pub struct MemoryRegion {
     pub size: usize,
@@ -37,7 +40,14 @@ impl MemoryRegion {
         let name = CString::new(name).unwrap();
         let fd = memfd::memfd_create(&name, memfd::MemFdCreateFlag::MFD_CLOEXEC)?;
         nix::unistd::ftruncate(&fd, size.try_into().unwrap())?;
-        let map = unsafe { memmap2::MmapOptions::new().map_mut(&fd).unwrap() };
+        let mut map = unsafe { memmap2::MmapOptions::new().map_mut(&fd).unwrap() };
+        unsafe {
+            nix::sys::mman::mprotect(
+                std::ptr::NonNull::new(map.as_mut_ptr().cast::<core::ffi::c_void>()).unwrap(),
+                size.try_into().unwrap(),
+                ProtFlags::PROT_READ | ProtFlags::PROT_WRITE | ProtFlags::PROT_EXEC,
+            )?;
+        }
         #[cfg(target_os = "linux")]
         {
             // Don't include VM memory in dumped core files.

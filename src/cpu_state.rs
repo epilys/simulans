@@ -23,8 +23,10 @@
 #![allow(non_snake_case)]
 
 use bilge::prelude::*;
+use codegen::ir::types::I64;
 use cranelift::prelude::*;
 use indexmap::IndexMap;
+use num_traits::cast::FromPrimitive;
 
 #[derive(Default, Debug)]
 #[repr(C)]
@@ -209,25 +211,25 @@ pub struct SavedProgramStatusRegister {
 #[allow(non_snake_case)]
 pub struct PSTATE {
     /// Negative condition flag.
-    pub N: bool,
+    pub N: u64,
     /// Zero condition flag.
-    pub Z: bool,
+    pub Z: u64,
     /// Carry condition flag.
-    pub C: bool,
+    pub C: u64,
     /// oVerflow condition flag.
-    pub V: bool,
+    pub V: u64,
     /// Debug mask bit.
-    pub D: bool,
+    pub D: u64,
     /// SError mask bit.
-    pub A: bool,
+    pub A: u64,
     /// IRQ mask bit.
-    pub I: bool,
+    pub I: u64,
     /// FIQ mask bit.
-    pub F: bool,
+    pub F: u64,
     /// Software Step bit.
-    pub SS: bool,
+    pub SS: u64,
     /// Illegal Execution state bit.
-    pub IL: bool,
+    pub IL: u64,
     /// (2) Exception level.
     pub EL: CurrentEl,
     /// Execution state
@@ -248,6 +250,7 @@ pub struct PSTATE {
 #[derive(Default, Debug)]
 pub struct ExecutionState {
     pub registers: RegisterFile,
+    pub vector_registers: [(u64, u64); 32],
     /// `PSTATE` isn't an architectural register for ARMv8. Its bit fields are
     /// accessed through special-purpose registers.
     ///
@@ -263,6 +266,7 @@ pub struct ExecutionState {
     /// | `SPSel`                  | At `EL1` or higher, this selects between the `SP` for the current Exception level and `SP_EL0`. | `SP`            |
     pub pstate: PSTATE,
     pub spsr: SavedProgramStatusRegister,
+    pub arch_features: ArchFeatures,
 }
 
 impl ExecutionState {
@@ -276,25 +280,24 @@ impl ExecutionState {
     ) {
         use bad64::{Reg, SysReg};
 
-        let int = cranelift::prelude::Type::int(64).expect("Could not create I64 type");
         macro_rules! reg_field {
-            ($($field:ident => $bad_reg:expr),*$(,)?) => {{
+            ($($field:ident$([$index:expr])? => $bad_reg:expr),*$(,)?) => {{
                 $(
-                    let value = builder.ins().iconst(int, self.registers.$field as i64);
+                    let value = builder.ins().iconst(I64, self.registers.$field$([$index])* as i64);
                     let var = Variable::new(registers.len() + sys_registers.len());
                     assert!(!registers.contains_key(&$bad_reg));
                     registers.insert($bad_reg, var);
-                    builder.declare_var(var, int);
+                    builder.declare_var(var, I64);
                     builder.def_var(var, value);
                 )*
             }};
             (sys $($field:ident$($conversion:expr)? => $bad_sys_reg:expr),*$(,)?) => {{
                 $(
-                    let value = builder.ins().iconst(int, $($conversion)*(self.registers.$field) as u64 as i64);
+                    let value = builder.ins().iconst(I64, $($conversion)*(self.registers.$field) as u64 as i64);
                     let var = Variable::new(registers.len() + sys_registers.len());
                     assert!(!sys_registers.contains_key(&$bad_sys_reg));
                     sys_registers.insert($bad_sys_reg, var);
-                    builder.declare_var(var, int);
+                    builder.declare_var(var, I64);
                     builder.def_var(var, value);
                 )*
             }};
@@ -357,7 +360,31 @@ impl ExecutionState {
             x29 => Reg::X29,
             x30 => Reg::X30,
             xzr => Reg::XZR,
-            sp => bad64::Reg::SP,
+            sp => Reg::SP,
+        }
+        for i in 0_u32..=31 {
+            let d_reg = bad64::Reg::from_u32(bad64::Reg::D0 as u32 + i).unwrap();
+            assert!(!registers.contains_key(&d_reg));
+            let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
+            assert!(!registers.contains_key(&v_reg));
+            {
+                let d_value = builder
+                    .ins()
+                    .iconst(I64, self.vector_registers[i as usize].1 as i64);
+                let d_var = Variable::new(registers.len() + sys_registers.len());
+                registers.insert(d_reg, d_var);
+                builder.declare_var(d_var, I64);
+                builder.def_var(d_var, d_value);
+            }
+            {
+                let v_value = builder
+                    .ins()
+                    .iconst(I64, self.vector_registers[i as usize].0 as i64);
+                let v_var = Variable::new(registers.len() + sys_registers.len());
+                registers.insert(v_reg, v_var);
+                builder.declare_var(v_var, I64);
+                builder.def_var(v_var, v_value);
+            }
         }
     }
 
@@ -370,13 +397,12 @@ impl ExecutionState {
     ) {
         use bad64::{Reg, SysReg};
 
-        let int = cranelift::prelude::Type::int(64).expect("Could not create I64 type");
         let memflags = MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
         macro_rules! reg_field {
-            ($($field:ident => $bad_reg:expr),*$(,)?) => {{
+            ($($field:ident$([$index:expr])? => $bad_reg:expr),*$(,)?) => {{
                 $(
-                    let addr = builder.ins().iconst(int, std::ptr::addr_of!(self.registers) as i64);
-                    let offset = core::mem::offset_of!(RegisterFile, $field);
+                    let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
+                    let offset = core::mem::offset_of!(RegisterFile, $field) $(+ $index * std::mem::size_of::<u128>())*;
                     assert!(registers.contains_key(&$bad_reg));
                     let var = &registers[&$bad_reg];
                     let var_value = builder.use_var(*var);
@@ -385,7 +411,7 @@ impl ExecutionState {
             }};
             (sys $($field:ident$($conversion:expr)? => $bad_sys_reg:expr),*$(,)?) => {{
                 $(
-                    let addr = builder.ins().iconst(int, std::ptr::addr_of!(self.registers) as i64);
+                    let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
                     let offset = core::mem::offset_of!(RegisterFile, $field);
                     assert!(sys_registers.contains_key(&$bad_sys_reg));
                     let var = &sys_registers[&$bad_sys_reg];
@@ -452,7 +478,42 @@ impl ExecutionState {
             x28 => Reg::X28,
             x29 => Reg::X29,
             x30 => Reg::X30,
-            sp => bad64::Reg::SP,
+            sp => Reg::SP,
         }
+        for i in 0_u32..=31 {
+            let addr = builder
+                .ins()
+                .iconst(I64, std::ptr::addr_of!(self.vector_registers) as i64);
+            let offset = i * std::mem::size_of::<(u64, u64)>() as u32;
+            let d_reg = bad64::Reg::from_u32(bad64::Reg::D0 as u32 + i).unwrap();
+            let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
+            assert!(registers.contains_key(&d_reg));
+            assert!(registers.contains_key(&v_reg));
+            let var = &registers[&d_reg];
+            let low_bits_value = builder.use_var(*var);
+            let offset = i32::try_from(offset).unwrap();
+            builder.ins().store(memflags, low_bits_value, addr, offset);
+            let var = &registers[&v_reg];
+            let high_bits_value = builder.use_var(*var);
+            builder.ins().store(
+                memflags,
+                high_bits_value,
+                addr,
+                offset + std::mem::size_of::<u64>() as i32,
+            );
+        }
+    }
+}
+
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct ArchFeatures: u64 {
+        const FEAT_LSE = 0b00000001;
+    }
+}
+
+impl Default for ArchFeatures {
+    fn default() -> Self {
+        Self::FEAT_LSE
     }
 }

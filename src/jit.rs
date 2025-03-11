@@ -22,10 +22,12 @@
 
 use std::{ops::ControlFlow, pin::Pin};
 
+use codegen::ir::types::{I64, I8};
 use cranelift::{codegen::ir::immediates::Offset32, prelude::*};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 use indexmap::IndexMap;
+use num_traits::cast::FromPrimitive;
 
 use crate::{cpu_state::ExecutionState, machine::Armv8AMachine};
 
@@ -33,19 +35,27 @@ use crate::{cpu_state::ExecutionState, machine::Armv8AMachine};
 #[derive(Clone, Copy)]
 pub struct Entry(pub extern "C" fn(&mut JitContext, &mut Armv8AMachine) -> Entry);
 
+#[no_mangle]
 pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMachine) -> Entry {
     let pc: u64 = machine.pc;
     if let Some(entry) = machine.entry_blocks.get(&pc) {
-        log::trace!("lookup entry entry found for {}", pc);
+        log::trace!("lookup entry entry found for 0x{:x}", pc);
         return *entry;
     }
-    log::trace!("generating entry for pc {}", pc);
+    log::trace!("generating entry for pc 0x{:x}", pc);
 
     let next_entry = context.compile(machine, pc.try_into().unwrap()).unwrap();
     machine.entry_blocks.insert(pc, next_entry);
 
-    log::trace!("returning generated entry for pc {}", pc);
+    log::trace!("returning generated entry for pc 0x{:x}", pc);
     next_entry
+}
+
+#[inline]
+fn is_vector(reg: &bad64::Reg) -> bool {
+    use bad64::Reg;
+    let reg = *reg as u32;
+    ((Reg::V0 as u32)..=(Reg::Q31 as u32)).contains(&reg)
 }
 
 pub struct JitContext {
@@ -87,7 +97,7 @@ impl JitContext {
         machine: &mut Armv8AMachine,
         program_counter: usize,
     ) -> Result<Entry, Box<dyn std::error::Error>> {
-        log::trace!("jit compile called for pc = {}", program_counter);
+        log::trace!("jit compile called for pc = 0x{:x}", program_counter);
         let mut sig = self.module.make_signature();
         sig.params
             .push(AbiParam::new(self.module.target_config().pointer_type()));
@@ -161,8 +171,6 @@ impl JitContext {
         let decoded_iter =
             bad64::disasm(&mem.map.deref()[program_counter..], program_counter as u64);
 
-        let int = cranelift::prelude::Type::int(64).expect("Could not create I64 type");
-
         let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
 
         // Create the entry block, to start emitting code in.
@@ -192,7 +200,6 @@ impl JitContext {
         );
         let sigref = builder.import_signature(builder.func.signature.clone());
         let mut trans = FunctionTranslator {
-            int,
             pointer_type: self.module.target_config().pointer_type(),
             mem_start: mem.map.as_ptr() as usize as i64,
             cpu_state,
@@ -236,7 +243,6 @@ impl JitContext {
 
 /// In-progress state of translating instructions into Cranelift IR.
 struct FunctionTranslator<'a> {
-    int: types::Type,
     mem_start: i64,
     builder: FunctionBuilder<'a>,
     cpu_state: &'a mut ExecutionState,
@@ -248,6 +254,16 @@ struct FunctionTranslator<'a> {
     sys_registers: IndexMap<bad64::SysReg, Variable>,
 }
 
+#[derive(Clone, Copy)]
+#[repr(i32)]
+enum Width {
+    _128 = 128,
+    _64 = 64,
+    _32 = 32,
+    _16 = 16,
+    _8 = 8,
+}
+
 impl FunctionTranslator<'_> {
     #[allow(non_snake_case)]
     fn translate_o0_op1_CRn_CRm_op2(&mut self, o0: u8, o1: u8, cm: u8, cn: u8, o2: u8) -> Value {
@@ -255,17 +271,17 @@ impl FunctionTranslator<'_> {
             (0b11, 0, 0, 0b111, 0) => {
                 // ID_AA64MMFR0_EL1
                 // FIXME
-                self.builder.ins().iconst(self.int, 0)
+                self.builder.ins().iconst(I64, 0)
             }
             (0b11, 0, 0, 0, 0) => {
                 // MIDR_EL1
                 // FIXME
-                self.builder.ins().iconst(self.int, 0)
+                self.builder.ins().iconst(I64, 0)
             }
             (3, 0, 0, 0, 5) => {
                 // MPIDR_EL1
                 // FIXME
-                self.builder.ins().iconst(self.int, 0)
+                self.builder.ins().iconst(I64, 0)
             }
             _other => unimplemented!(
                 "unimplemented sysreg encoding: {:?}",
@@ -274,41 +290,110 @@ impl FunctionTranslator<'_> {
         }
     }
 
-    fn translate_cmp_64(&mut self, _instruction: &bad64::Instruction) -> Value {
-        // let a = self.translate_operand(&instruction.operands()[1]);
-        // let b = self.translate_operand(&instruction.operands()[2]);
-        // let (svalue, _overflow_flag) = self.builder.ins().sadd_overflow(a, b);
-        // let (uvalue, _overflow_flag) = self.builder.ins().uadd_overflow(a, b);
-        // let n = self.builder.ins().band(svalue, 0x1 << 64);
-        // let zero = self.reg_to_value(&bad64::Reg::XZR);
-        // let n_cond = self
-        //     .builder
-        //     .ins()
-        //     .icmp(cranelift::prelude::IntCC::Equal, n, zero);
+    fn add_with_carry(&mut self, x: Value, y: Value, carry_in: bool) -> (Value, [Value; 4]) {
+        // / AddWithCarry()
+        // // ==============
+        // // Integer addition with carry input, returning result and NZCV flags
 
-        // let zero_block = self.builder.create_block();
-        // let else_block = self.builder.create_block();
-        // let merge_block = self.builder.create_block();
-        // self.builder
-        //     .ins()
-        //     .brif(n_cond, zero_block, &[], else_block, &[]);
+        let (mut unsigned_sum, mut overflow_1) = self.builder.ins().uadd_overflow(x, y);
+        if carry_in {
+            let one = self.builder.ins().iconst(I64, 1);
+            let (carry_add, carry_overflow) = self.builder.ins().uadd_overflow(unsigned_sum, one);
+            unsigned_sum = carry_add;
+            overflow_1 = self.builder.ins().bor(overflow_1, carry_overflow);
+        }
+        let (mut signed_sum, mut overflow_2) = self.builder.ins().sadd_overflow(x, y);
+        if carry_in {
+            let one = self.builder.ins().iconst(I64, 1);
+            let (carry_add, carry_overflow) = self.builder.ins().sadd_overflow(signed_sum, one);
+            signed_sum = carry_add;
+            overflow_2 = self.builder.ins().bor(overflow_2, carry_overflow);
+        }
+        let nth_bit_mask = self
+            .builder
+            .ins()
+            .iconst(I64, (u64::MAX & !(1 << 63)) as i64);
+        eprintln!("u64::MAX & !(1 << 64) = 0x:{:x}", u64::MAX & !(1 << 63));
+        let result = self.builder.ins().band(unsigned_sum, nth_bit_mask);
+        let n = self
+            .builder
+            .ins()
+            .icmp_imm(IntCC::SignedLessThan, signed_sum, 0);
+        let z = self.builder.ins().icmp_imm(IntCC::Equal, result, 0);
+        let c = self.builder.ins().icmp_imm(IntCC::NotEqual, overflow_2, 0);
+        let v = self.builder.ins().icmp_imm(IntCC::NotEqual, overflow_1, 0);
+        let n = self.builder.ins().uextend(I64, n);
+        let z = self.builder.ins().uextend(I64, z);
+        let c = self.builder.ins().uextend(I64, c);
+        let v = self.builder.ins().uextend(I64, v);
+        // FIXME: make sure what kind of int bit width nzcv have
+        // let n = self.builder.ins().ireduce(I8, n);
+        // let z = self.builder.ins().ireduce(I8, z);
+        // let c = self.builder.ins().ireduce(I8, c);
+        // let v = self.builder.ins().ireduce(I8, v);
+        // (bits(N), bits(4)) AddWithCarry(bits(N) x, bits(N) y, bit carry_in)
+        // constant integer unsigned_sum = UInt(x) + UInt(y) + UInt(carry_in);
+        // constant integer signed_sum = SInt(x) + SInt(y) + UInt(carry_in);
+        // constant bits(N) result = unsigned_sum<N-1:0>; // same value as
+        // signed_sum<N-1:0> constant bit n = result<N-1>;
+        // constant bit z = if IsZero(result) then '1' else '0';
+        // constant bit c = if UInt(result) == unsigned_sum then '0' else '1';
+        // constant bit v = if SInt(result) == signed_sum then '0' else '1';
+        // return (result, n:z:c:v);
+        (result, [n, z, c, v])
+    }
 
-        /*
-                 / AddWithCarry()
-        // ==============
-        // Integer addition with carry input, returning result and NZCV flags
+    fn update_nzcv(&mut self, [n, z, c, v]: [Value; 4]) {
+        self.builder.ins().store(
+            MemFlags::trusted().with_vmctx(),
+            n,
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, cpu_state.pstate.N) as i32,
+        );
+        self.builder.ins().store(
+            MemFlags::trusted().with_vmctx(),
+            z,
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, cpu_state.pstate.Z) as i32,
+        );
+        self.builder.ins().store(
+            MemFlags::trusted().with_vmctx(),
+            c,
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, cpu_state.pstate.C) as i32,
+        );
+        self.builder.ins().store(
+            MemFlags::trusted().with_vmctx(),
+            v,
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, cpu_state.pstate.V) as i32,
+        );
+    }
 
-        (bits(N), bits(4)) AddWithCarry(bits(N) x, bits(N) y, bit carry_in)
-            constant integer unsigned_sum = UInt(x) + UInt(y) + UInt(carry_in);
-            constant integer signed_sum = SInt(x) + SInt(y) + UInt(carry_in);
-            constant bits(N) result = unsigned_sum<N-1:0>; // same value as signed_sum<N-1:0>
-            constant bit n = result<N-1>;
-            constant bit z = if IsZero(result) then '1' else '0';
-            constant bit c = if UInt(result) == unsigned_sum then '0' else '1';
-            constant bit v = if SInt(result) == signed_sum then '0' else '1';
-            return (result, n:z:c:v);
-                 */
-        todo!()
+    fn branch_if_non_zero(&mut self, is_zero_value: Value, label_value: Value) {
+        let branch_not_taken_block = self.builder.create_block();
+        let branch_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder.append_block_param(merge_block, I64);
+        self.builder.ins().brif(
+            is_zero_value,
+            branch_not_taken_block,
+            &[],
+            branch_block,
+            &[],
+        );
+        self.builder.switch_to_block(branch_not_taken_block);
+        self.builder.seal_block(branch_not_taken_block);
+        // Jump to the merge block, passing it the block return value.
+        self.builder.ins().jump(merge_block, &[is_zero_value]);
+        self.builder.switch_to_block(branch_block);
+        self.builder.seal_block(branch_block);
+        self.emit_jump(label_value);
+        // Switch to the merge block for subsequent statements.
+        self.builder.switch_to_block(merge_block);
+
+        // We've now seen all the predecessors of the merge block.
+        self.builder.seal_block(merge_block);
     }
 
     fn translate_operand(&mut self, operand: &bad64::Operand) -> Value {
@@ -323,26 +408,35 @@ impl FunctionTranslator<'_> {
                 let reg_val = self.reg_to_value(reg);
                 match imm {
                     Imm::Unsigned(imm) => {
-                        let imm_value = self
-                            .builder
-                            .ins()
-                            .iconst(self.int, i64::try_from(*imm).unwrap());
+                        let imm_value =
+                            self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap());
                         let value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
                             TrapCode::IntegerOverflow,
                         );
-                        let reg_var = *self.reg_to_var(reg, false);
+                        let reg_var = *self.reg_to_var(reg, true);
                         self.builder.def_var(reg_var, value);
-                        value
+                        self.reg_to_value(reg)
+                    }
+                    Imm::Signed(imm) if *imm < 0 => {
+                        let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
+                        let (value, _overflow_flag) =
+                            self.builder.ins().usub_overflow(reg_val, imm_value);
+                        let reg_var = *self.reg_to_var(reg, true);
+                        self.builder.def_var(reg_var, value);
+                        self.reg_to_value(reg)
                     }
                     Imm::Signed(imm) => {
-                        let imm_value = self.builder.ins().iconst(self.int, *imm);
-                        let (value, _overflow_flag) =
-                            self.builder.ins().sadd_overflow(reg_val, imm_value);
-                        let reg_var = *self.reg_to_var(reg, false);
+                        let imm_value = self.builder.ins().iconst(I64, *imm);
+                        let value = self.builder.ins().uadd_overflow_trap(
+                            reg_val,
+                            imm_value,
+                            TrapCode::IntegerOverflow,
+                        );
+                        let reg_var = *self.reg_to_var(reg, true);
                         self.builder.def_var(reg_var, value);
-                        value
+                        self.reg_to_value(reg)
                     }
                 }
             }
@@ -350,10 +444,8 @@ impl FunctionTranslator<'_> {
                 let reg_val = self.reg_to_value(reg);
                 match imm {
                     Imm::Unsigned(imm) => {
-                        let imm_value = self
-                            .builder
-                            .ins()
-                            .iconst(self.int, i64::try_from(*imm).unwrap());
+                        let imm_value =
+                            self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap());
                         let post_value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
@@ -362,10 +454,20 @@ impl FunctionTranslator<'_> {
                         let reg_var = *self.reg_to_var(reg, false);
                         self.builder.def_var(reg_var, post_value);
                     }
-                    Imm::Signed(imm) => {
-                        let imm_value = self.builder.ins().iconst(self.int, *imm);
+                    Imm::Signed(imm) if *imm < 0 => {
+                        let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
                         let (post_value, _overflow_flag) =
-                            self.builder.ins().sadd_overflow(reg_val, imm_value);
+                            self.builder.ins().usub_overflow(reg_val, imm_value);
+                        let reg_var = *self.reg_to_var(reg, false);
+                        self.builder.def_var(reg_var, post_value);
+                    }
+                    Imm::Signed(imm) => {
+                        let imm_value = self.builder.ins().iconst(I64, *imm);
+                        let post_value = self.builder.ins().uadd_overflow_trap(
+                            reg_val,
+                            imm_value,
+                            TrapCode::IntegerOverflow,
+                        );
                         let reg_var = *self.reg_to_var(reg, false);
                         self.builder.def_var(reg_var, post_value);
                     }
@@ -374,16 +476,15 @@ impl FunctionTranslator<'_> {
             }
             Operand::Imm64 { imm, shift } => {
                 let const_value = match imm {
-                    Imm::Unsigned(imm) => self
-                        .builder
-                        .ins()
-                        .iconst(self.int, i64::try_from(*imm).unwrap()),
-                    Imm::Signed(imm) => self.builder.ins().iconst(self.int, *imm),
+                    Imm::Unsigned(imm) => {
+                        self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap())
+                    }
+                    Imm::Signed(imm) => self.builder.ins().iconst(I64, *imm),
                 };
                 match shift {
                     None => const_value,
                     Some(bad64::Shift::LSL(lsl)) => {
-                        let lsl = self.builder.ins().iconst(self.int, i64::from(*lsl));
+                        let lsl = self.builder.ins().iconst(I64, i64::from(*lsl));
                         self.builder.ins().ishl(const_value, lsl)
                     }
                     other => unimplemented!("unimplemented shift {other:?}"),
@@ -391,13 +492,13 @@ impl FunctionTranslator<'_> {
             }
             Operand::Imm32 { imm, shift } => {
                 let const_value = match imm {
-                    Imm::Unsigned(imm) => self.builder.ins().iconst(self.int, *imm as i64),
-                    Imm::Signed(imm) => self.builder.ins().iconst(self.int, *imm),
+                    Imm::Unsigned(imm) => self.builder.ins().iconst(I64, *imm as i64),
+                    Imm::Signed(imm) => self.builder.ins().iconst(I64, *imm),
                 };
                 match shift {
                     None => const_value,
                     Some(bad64::Shift::LSL(lsl)) => {
-                        let lsl = self.builder.ins().iconst(self.int, i64::from(*lsl));
+                        let lsl = self.builder.ins().iconst(I64, i64::from(*lsl));
                         self.builder.ins().ishl(const_value, lsl)
                     }
                     other => unimplemented!("unimplemented shift {other:?}"),
@@ -412,10 +513,8 @@ impl FunctionTranslator<'_> {
                 let reg_val = self.reg_to_value(reg);
                 match offset {
                     Imm::Unsigned(imm) => {
-                        let imm_value = self
-                            .builder
-                            .ins()
-                            .iconst(self.int, i64::try_from(*imm).unwrap());
+                        let imm_value =
+                            self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap());
                         let value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
@@ -423,16 +522,22 @@ impl FunctionTranslator<'_> {
                         );
                         value
                     }
-                    Imm::Signed(imm) => {
-                        let imm_value = self.builder.ins().iconst(self.int, *imm);
+                    Imm::Signed(imm) if *imm < 0 => {
+                        let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
                         let (value, _overflow_flag) =
-                            self.builder.ins().sadd_overflow(reg_val, imm_value);
+                            self.builder.ins().usub_overflow(reg_val, imm_value);
+                        value
+                    }
+                    Imm::Signed(imm) => {
+                        let imm_value = self.builder.ins().iconst(I64, *imm);
+                        let (value, _overflow_flag) =
+                            self.builder.ins().uadd_overflow(reg_val, imm_value);
                         value
                     }
                 }
             }
-            Operand::Label(Imm::Unsigned(imm)) => self.builder.ins().iconst(self.int, *imm as i64),
-            Operand::Label(Imm::Signed(imm)) => self.builder.ins().iconst(self.int, *imm),
+            Operand::Label(Imm::Unsigned(imm)) => self.builder.ins().iconst(I64, *imm as i64),
+            Operand::Label(Imm::Signed(imm)) => self.builder.ins().iconst(I64, *imm),
             Operand::ImplSpec { o0, o1, cm, cn, o2 } => {
                 self.translate_o0_op1_CRn_CRm_op2(*o0, *o1, *cm, *cn, *o2)
             }
@@ -451,9 +556,89 @@ impl FunctionTranslator<'_> {
         })
     }
 
+    #[cold]
+    fn simd_reg_to_var(&mut self, reg: &bad64::Reg, write: bool) -> &Variable {
+        use bad64::Reg;
+
+        let reg_no = *reg as u32;
+        if ((Reg::V0 as u32)..=(Reg::V31 as u32)).contains(&reg_no) {
+            unimplemented!()
+            // return &self.registers[reg];
+        }
+        if ((Reg::Q0 as u32)..=(Reg::Q31 as u32)).contains(&reg_no) {
+            unimplemented!()
+            // // 128 bits
+            // let i = reg_no - (Reg::Q0 as u32);
+            // let v_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
+            // let var = &self.registers[&v_reg];
+            // if write {
+            //     todo!()
+            // }
+            // return var;
+        }
+        if ((Reg::B0 as u32)..=(Reg::B31 as u32)).contains(&reg_no) {
+            // 8 bits
+            let i = reg_no - (Reg::B0 as u32);
+            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
+            let var = &self.registers[&d_reg];
+            if write {
+                let mask = self.builder.ins().iconst(I64, 0xff);
+                let unmasked_value = self.builder.use_var(self.registers[&d_reg]);
+                let masked_value = self.builder.ins().band(unmasked_value, mask);
+                self.builder.def_var(self.registers[&d_reg], masked_value);
+            }
+            return var;
+        }
+        if ((Reg::H0 as u32)..=(Reg::H31 as u32)).contains(&reg_no) {
+            // 16 bits
+            let i = reg_no - (Reg::H0 as u32);
+            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
+            let var = &self.registers[&d_reg];
+            if write {
+                let mask = self.builder.ins().iconst(I64, 0xffff);
+                let unmasked_value = self.builder.use_var(self.registers[&d_reg]);
+                let masked_value = self.builder.ins().band(unmasked_value, mask);
+                self.builder.def_var(self.registers[&d_reg], masked_value);
+            }
+            return var;
+        }
+        if ((Reg::S0 as u32)..=(Reg::S31 as u32)).contains(&reg_no) {
+            // 32 bits
+            let i = reg_no - (Reg::S0 as u32);
+            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
+            let var = &self.registers[&d_reg];
+            if write {
+                let mask = self.builder.ins().iconst(I64, 0xffff_ffff);
+                let unmasked_value = self.builder.use_var(self.registers[&d_reg]);
+                let masked_value = self.builder.ins().band(unmasked_value, mask);
+                self.builder.def_var(self.registers[&d_reg], masked_value);
+            }
+            return var;
+        }
+        if ((Reg::D0 as u32)..=(Reg::D31 as u32)).contains(&reg_no) {
+            // 64 bits
+            let i = reg_no - (Reg::D0 as u32);
+            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
+            return &self.registers[&d_reg];
+        }
+        unreachable!()
+    }
+
     #[inline]
     fn reg_to_var(&mut self, reg: &bad64::Reg, write: bool) -> &Variable {
         use bad64::Reg;
+
+        if is_vector(reg) {
+            return self.simd_reg_to_var(reg, write);
+        }
+
+        if reg.is_sve() {
+            todo!();
+        }
+
+        if reg.is_pred() {
+            todo!();
+        }
 
         let reg_64 = match reg {
             Reg::W0 => Reg::X0,
@@ -496,7 +681,7 @@ impl FunctionTranslator<'_> {
         if write {
             // Writes to W registers set the higher 32 bits of the X register to zero. So,
             // writing 0xFFFFFFFF into W0 sets X0 to 0x00000000FFFFFFFF.
-            let mask = self.builder.ins().iconst(self.int, 0xffff_ffff);
+            let mask = self.builder.ins().iconst(I64, 0xffff_ffff);
             let unmasked_value = self.builder.use_var(self.registers[&reg_64]);
             let masked_value = self.builder.ins().band(unmasked_value, mask);
             self.builder.def_var(self.registers[&reg_64], masked_value);
@@ -504,9 +689,75 @@ impl FunctionTranslator<'_> {
         &self.registers[&reg_64]
     }
 
+    #[cold]
+    fn simd_reg_to_value(&mut self, reg: &bad64::Reg) -> Value {
+        use bad64::Reg;
+
+        let reg_no = *reg as u32;
+        if ((Reg::V0 as u32)..=(Reg::V31 as u32)).contains(&reg_no) {
+            unimplemented!()
+            // return self.builder.use_var(self.registers[reg]);
+        }
+        if ((Reg::Q0 as u32)..=(Reg::Q31 as u32)).contains(&reg_no) {
+            unimplemented!()
+            // // 128 bits
+            // let i = reg_no - (Reg::Q0 as u32);
+            // let v_reg = Reg::from_u32(i + Reg::V0 as u32).unwrap();
+            // let var = &self.registers[&v_reg];
+            // return self.builder.use_var(*var);
+        }
+        if ((Reg::B0 as u32)..=(Reg::B31 as u32)).contains(&reg_no) {
+            // 8 bits
+            let i = reg_no - (Reg::B0 as u32);
+            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
+            let var = &self.registers[&d_reg];
+            let value = self.builder.use_var(*var);
+            let mask = self.builder.ins().iconst(I64, 0xff);
+            return self.builder.ins().band(value, mask);
+        }
+        if ((Reg::H0 as u32)..=(Reg::H31 as u32)).contains(&reg_no) {
+            // 16 bits
+            let i = reg_no - (Reg::H0 as u32);
+            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
+            let var = &self.registers[&d_reg];
+            let value = self.builder.use_var(*var);
+            let mask = self.builder.ins().iconst(I64, 0xffff);
+            return self.builder.ins().band(value, mask);
+        }
+        if ((Reg::S0 as u32)..=(Reg::S31 as u32)).contains(&reg_no) {
+            // 32 bits
+            let i = reg_no - (Reg::S0 as u32);
+            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
+            let var = &self.registers[&d_reg];
+            let value = self.builder.use_var(*var);
+            let mask = self.builder.ins().iconst(I64, 0xffff_ffff);
+            return self.builder.ins().band(value, mask);
+        }
+        if ((Reg::D0 as u32)..=(Reg::D31 as u32)).contains(&reg_no) {
+            // 64 bits
+            let i = reg_no - (Reg::D0 as u32);
+            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
+            let var = &self.registers[&d_reg];
+            return self.builder.use_var(*var);
+        }
+        unreachable!()
+    }
+
     #[inline]
     fn reg_to_value(&mut self, reg: &bad64::Reg) -> Value {
         use bad64::Reg;
+
+        if is_vector(reg) {
+            return self.simd_reg_to_value(reg);
+        }
+
+        if reg.is_sve() {
+            todo!();
+        }
+
+        if reg.is_pred() {
+            todo!();
+        }
 
         let reg_64 = match reg {
             Reg::W0 => Reg::X0,
@@ -542,7 +793,7 @@ impl FunctionTranslator<'_> {
             Reg::W30 => Reg::X30,
             Reg::WSP => Reg::SP,
             Reg::XZR | Reg::WZR => {
-                return self.builder.ins().iconst(self.int, 0);
+                return self.builder.ins().iconst(I64, 0);
             }
             _ => {
                 let var = &self.registers[reg];
@@ -551,10 +802,45 @@ impl FunctionTranslator<'_> {
         };
         // Reads from W registers ignore the higher 32 bits of the corresponding X
         // register and leave them unchanged.
-        let mask = self.builder.ins().iconst(self.int, 0xffff_ffff);
+        let mask = self.builder.ins().iconst(I64, 0xffff_ffff);
         let unmasked_value = self.builder.use_var(self.registers[&reg_64]);
         let masked_value = self.builder.ins().band(unmasked_value, mask);
         masked_value
+    }
+
+    fn operand_width(&mut self, operand: &bad64::Operand) -> Width {
+        use bad64::{Operand, Reg};
+
+        let reg = match operand {
+            Operand::MemOffset { reg, .. }
+            | Operand::MemPreIdx { reg, .. }
+            | Operand::MemPostIdxImm { reg, .. }
+            | Operand::MemReg(reg)
+            | Operand::ShiftReg { reg, .. }
+            | Operand::QualReg { reg, .. }
+            | Operand::Reg { reg, .. } => reg,
+            Operand::ImplSpec { .. } | Operand::SysReg { .. } => return Width::_64,
+            Operand::FImm32(_) | Operand::Imm32 { .. } => return Width::_32,
+            Operand::Label(_) | Operand::Imm64 { .. } => return Width::_64,
+            Operand::MultiReg { .. }
+            | Operand::MemPostIdxReg(_)
+            | Operand::MemExt { .. }
+            | Operand::SmeTile { .. }
+            | Operand::AccumArray { .. }
+            | Operand::IndexedElement { .. }
+            | Operand::Cond(_)
+            | Operand::Name(_)
+            | Operand::StrImm { .. } => unimplemented!(),
+        };
+
+        let reg_val = *reg as u32;
+        if ((Reg::W0 as u32)..=(Reg::W30 as u32)).contains(&reg_val)
+            || matches!(reg, Reg::WSP | Reg::WZR)
+        {
+            Width::_32
+        } else {
+            Width::_64
+        }
     }
 
     fn translate_instruction(
@@ -563,6 +849,18 @@ impl FunctionTranslator<'_> {
     ) -> ControlFlow<Option<Value>> {
         use bad64::Op;
 
+        if cfg!(feature = "accurate-pc") {
+            let pc_value = self
+                .builder
+                .ins()
+                .iconst(I64, i64::try_from(instruction.address()).unwrap());
+            self.builder.ins().store(
+                MemFlags::trusted().with_vmctx(),
+                pc_value,
+                self.machine_ptr,
+                std::mem::offset_of!(Armv8AMachine, pc) as i32,
+            );
+        }
         let op = instruction.op();
         match op {
             Op::NOP => {}
@@ -599,15 +897,7 @@ impl FunctionTranslator<'_> {
                     } => *self.reg_to_var(reg, true),
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
-                let imm_value = self.translate_operand(&instruction.operands()[1]);
-                let twelve = self.builder.ins().iconst(self.int, 12);
-                let shifted_imm_value = self.builder.ins().ishl(imm_value, twelve);
-                let pc = self
-                    .builder
-                    .ins()
-                    .iconst(self.int, self.mem_start + instruction.address() as i64);
-                let (value, _overflow_flag) =
-                    self.builder.ins().sadd_overflow(pc, shifted_imm_value);
+                let value = self.translate_operand(&instruction.operands()[1]);
                 self.builder.def_var(target, value);
             }
             Op::ADR => {
@@ -620,11 +910,11 @@ impl FunctionTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let imm_value = self.translate_operand(&instruction.operands()[1]);
-                let pc = self
-                    .builder
-                    .ins()
-                    .iconst(self.int, self.mem_start + instruction.address() as i64);
-                let (value, _overflow_flag) = self.builder.ins().sadd_overflow(pc, imm_value);
+                let pc = self.builder.ins().iconst(I64, instruction.address() as i64);
+                let value =
+                    self.builder
+                        .ins()
+                        .uadd_overflow_trap(pc, imm_value, TrapCode::IntegerOverflow);
                 self.builder.def_var(target, value);
             }
             Op::STR => {
@@ -636,13 +926,86 @@ impl FunctionTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let target = self.translate_operand(&instruction.operands()[1]);
-                let mem_start = self.builder.ins().iconst(self.int, self.mem_start);
-                let (target, _overflow_flag) = self.builder.ins().sadd_overflow(mem_start, target);
+                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
+                let target = self.builder.ins().uadd_overflow_trap(
+                    target,
+                    mem_start,
+                    TrapCode::IntegerOverflow,
+                );
                 self.builder.ins().store(
                     cranelift::prelude::MemFlags::new(),
                     value,
                     target,
                     Offset32::new(0),
+                );
+            }
+            Op::STRH => {
+                let value = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => self.reg_to_value(reg),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let target = self.translate_operand(&instruction.operands()[1]);
+                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
+                let target = self.builder.ins().uadd_overflow_trap(
+                    target,
+                    mem_start,
+                    TrapCode::IntegerOverflow,
+                );
+                self.builder.ins().istore16(
+                    cranelift::prelude::MemFlags::new(),
+                    value,
+                    target,
+                    Offset32::new(0),
+                );
+            }
+            Op::STRB => {
+                let value = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => self.reg_to_value(reg),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let target = self.translate_operand(&instruction.operands()[1]);
+                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
+                let target = self.builder.ins().uadd_overflow_trap(
+                    target,
+                    mem_start,
+                    TrapCode::IntegerOverflow,
+                );
+                self.builder.ins().istore8(
+                    cranelift::prelude::MemFlags::new(),
+                    value,
+                    target,
+                    Offset32::new(0),
+                );
+            }
+            Op::STP => {
+                let width = self.operand_width(&instruction.operands()[0]);
+                let data1 = self.translate_operand(&instruction.operands()[0]);
+                let data2 = self.translate_operand(&instruction.operands()[1]);
+                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
+                let target = self.translate_operand(&instruction.operands()[2]);
+                let target = self.builder.ins().uadd_overflow_trap(
+                    target,
+                    mem_start,
+                    TrapCode::IntegerOverflow,
+                );
+                let offset = Offset32::new(width as i32);
+                self.builder.ins().store(
+                    cranelift::prelude::MemFlags::new(),
+                    data1,
+                    target,
+                    Offset32::new(0),
+                );
+                self.builder.ins().store(
+                    cranelift::prelude::MemFlags::new(),
+                    data2,
+                    target,
+                    offset,
                 );
             }
             Op::LDR => {
@@ -654,17 +1017,65 @@ impl FunctionTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let source_address = self.translate_operand(&instruction.operands()[1]);
-                let mem_start = self.builder.ins().iconst(self.int, self.mem_start);
-                let (source_address, _overflow_flag) =
-                    self.builder.ins().sadd_overflow(mem_start, source_address);
-                let value = self.builder.ins().load(
-                    cranelift::prelude::Type::int(64).unwrap(),
+                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
+                let source_address = self.builder.ins().uadd_overflow_trap(
+                    mem_start,
+                    source_address,
+                    TrapCode::IntegerOverflow,
+                );
+                let value =
+                    self.builder
+                        .ins()
+                        .load(I64, MemFlags::new(), source_address, Offset32::new(0));
+                self.builder.def_var(target, value);
+            }
+            Op::LDRH => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
+                let source_address = self.builder.ins().uadd_overflow_trap(
+                    mem_start,
+                    source_address,
+                    TrapCode::IntegerOverflow,
+                );
+                let value = self.builder.ins().uload16(
+                    I64,
                     MemFlags::new(),
                     source_address,
                     Offset32::new(0),
                 );
                 self.builder.def_var(target, value);
             }
+            Op::LDRB => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
+                let source_address = self.builder.ins().uadd_overflow_trap(
+                    mem_start,
+                    source_address,
+                    TrapCode::IntegerOverflow,
+                );
+                let value = self.builder.ins().uload8(
+                    I64,
+                    MemFlags::new(),
+                    source_address,
+                    Offset32::new(0),
+                );
+                self.builder.def_var(target, value);
+            }
+
             // Moves
             Op::MOV => {
                 let target = match instruction.operands()[0] {
@@ -686,19 +1097,17 @@ impl FunctionTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let (imm_value, shift_mask): (Value, u64) = match &instruction.operands()[1] {
-                    bad64::Operand::Imm64 { imm, shift } => {
+                    bad64::Operand::Imm32 { imm, shift } | bad64::Operand::Imm64 { imm, shift } => {
                         let const_value = match imm {
-                            bad64::Imm::Unsigned(imm) => self
-                                .builder
-                                .ins()
-                                .iconst(self.int, i64::try_from(*imm).unwrap()),
-                            bad64::Imm::Signed(imm) => self.builder.ins().iconst(self.int, *imm),
+                            bad64::Imm::Unsigned(imm) => {
+                                self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap())
+                            }
+                            bad64::Imm::Signed(imm) => self.builder.ins().iconst(I64, *imm),
                         };
                         match shift {
                             None => (const_value, !0xf),
                             Some(bad64::Shift::LSL(lsl)) => {
-                                let lsl_value =
-                                    self.builder.ins().iconst(self.int, i64::from(*lsl));
+                                let lsl_value = self.builder.ins().iconst(I64, i64::from(*lsl));
                                 let const_value = self.builder.ins().ishl(const_value, lsl_value);
                                 let shift_mask = match lsl {
                                     16 => !0xf0,
@@ -713,7 +1122,7 @@ impl FunctionTranslator<'_> {
                     }
                     other => panic!("other: {:?}", other),
                 };
-                let mask = self.builder.ins().iconst(self.int, shift_mask as i64);
+                let mask = self.builder.ins().iconst(I64, shift_mask as i64);
                 let unmasked_value = self.builder.use_var(target);
                 let masked_value = self.builder.ins().band(unmasked_value, mask);
                 let value = self.builder.ins().bor(masked_value, imm_value);
@@ -741,7 +1150,10 @@ impl FunctionTranslator<'_> {
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
-                let (value, _ignore_overflow) = self.builder.ins().sadd_overflow(a, b);
+                let value = self
+                    .builder
+                    .ins()
+                    .uadd_overflow_trap(a, b, TrapCode::IntegerOverflow);
                 self.builder.def_var(target, value);
             }
             Op::SUB => {
@@ -785,20 +1197,19 @@ impl FunctionTranslator<'_> {
                 self.builder.def_var(target, value);
             }
             Op::SDIV => {
-                /*
-                constant bits(datasize) operand1 = X[n, datasize];
-                constant bits(datasize) operand2 = X[m, datasize];
-                constant integer dividend = SInt(operand1);
-                constant integer divisor  = SInt(operand2);
-                integer result;
-                if divisor == 0 then
-                result = 0;
-                elsif (dividend < 0) == (divisor < 0) then
-                result = Abs(dividend) DIV Abs(divisor);    // same signs - positive result
-                else
-                result = -(Abs(dividend) DIV Abs(divisor)); // different signs - negative result
-                X[d, datasize] = result<datasize-1:0>;
-                */
+                // TODO: verify
+                // constant bits(datasize) operand1 = X[n, datasize];
+                // constant bits(datasize) operand2 = X[m, datasize];
+                // constant integer dividend = SInt(operand1);
+                // constant integer divisor  = SInt(operand2);
+                // integer result;
+                // if divisor == 0 then
+                // result = 0;
+                // elsif (dividend < 0) == (divisor < 0) then
+                // result = Abs(dividend) DIV Abs(divisor);    // same signs - positive result
+                // else
+                // result = -(Abs(dividend) DIV Abs(divisor)); // different signs - negative
+                // result X[d, datasize] = result<datasize-1:0>;
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -820,7 +1231,7 @@ impl FunctionTranslator<'_> {
                 let else_block = self.builder.create_block();
                 let merge_block = self.builder.create_block();
 
-                self.builder.append_block_param(merge_block, self.int);
+                self.builder.append_block_param(merge_block, I64);
 
                 // Test the if condition and conditionally branch.
                 self.builder
@@ -850,6 +1261,58 @@ impl FunctionTranslator<'_> {
 
                 self.builder.def_var(target, phi);
             }
+            Op::UDIV => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in load: {:?}", other),
+                };
+                let dividend = self.translate_operand(&instruction.operands()[1]);
+                let divisor = self.translate_operand(&instruction.operands()[2]);
+                // if divisor == 0 then
+                // result = 0;
+                let zero = self.reg_to_value(&bad64::Reg::XZR);
+                let first_condition_value =
+                    self.builder
+                        .ins()
+                        .icmp(cranelift::prelude::IntCC::Equal, divisor, zero);
+
+                let zero_block = self.builder.create_block();
+                let else_block = self.builder.create_block();
+                let merge_block = self.builder.create_block();
+
+                self.builder.append_block_param(merge_block, I64);
+
+                // Test the if condition and conditionally branch.
+                self.builder
+                    .ins()
+                    .brif(first_condition_value, zero_block, &[], else_block, &[]);
+
+                self.builder.switch_to_block(zero_block);
+                self.builder.seal_block(zero_block);
+                // Jump to the merge block, passing it the block return value.
+                self.builder.ins().jump(merge_block, &[zero]);
+
+                self.builder.switch_to_block(else_block);
+                self.builder.seal_block(else_block);
+                let else_return = self.builder.ins().udiv(dividend, divisor);
+                // Jump to the merge block, passing it the block return value.
+                self.builder.ins().jump(merge_block, &[else_return]);
+
+                // Switch to the merge block for subsequent statements.
+                self.builder.switch_to_block(merge_block);
+
+                // We've now seen all the predecessors of the merge block.
+                self.builder.seal_block(merge_block);
+
+                // Read the value of the if-else by reading the merge block
+                // parameter.
+                let phi = self.builder.block_params(merge_block)[0];
+
+                self.builder.def_var(target, phi);
+            }
             // Branches
             Op::B => {
                 // This instruction branches unconditionally to a label at a PC-relative offset,
@@ -860,152 +1323,83 @@ impl FunctionTranslator<'_> {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     other => panic!("unexpected branch address in {op:?}: {:?}", other),
                 };
-                let pc = self
-                    .builder
-                    .ins()
-                    .iconst(self.int, instruction.address() as i64);
-                self.builder.ins().store(
-                    MemFlags::trusted().with_vmctx(),
-                    pc,
-                    self.machine_ptr,
-                    std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
-                );
-                let next_pc = self.builder.ins().iconst(self.int, label as i64);
-                self.builder.ins().store(
-                    MemFlags::trusted().with_vmctx(),
-                    next_pc,
-                    self.machine_ptr,
-                    std::mem::offset_of!(Armv8AMachine, pc) as i32,
-                );
-                return ControlFlow::Break(Some(next_pc));
+                let next_pc = self.builder.ins().iconst(I64, label as i64);
+                return self.unconditional_jump_epilogue(&instruction, next_pc);
             }
             Op::BR => {
                 // This instruction branches unconditionally to an address in a register, with a
                 // hint that this is not a subroutine return.
-                //
                 // constant bits(64) target = X[n, 64];
-                // Value in BTypeNext will be used to set PSTATE.BTYPE
-                // if InGuardedPage then
-                //     if n == 16 || n == 17 then
-                //         BTypeNext = '01';
-                //     else
-                //         BTypeNext = '11';
-                // else
-                //     BTypeNext = '01';
-
                 // constant boolean branch_conditional = FALSE;
                 // BranchTo(target, BranchType_INDIR, branch_conditional);
                 let next_pc = self.translate_operand(&instruction.operands()[0]);
-                let pc = self
-                    .builder
-                    .ins()
-                    .iconst(self.int, instruction.address() as i64);
-                self.builder.ins().store(
-                    MemFlags::trusted().with_vmctx(),
-                    pc,
-                    self.machine_ptr,
-                    std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
-                );
-                self.builder.ins().store(
-                    MemFlags::trusted().with_vmctx(),
-                    next_pc,
-                    self.machine_ptr,
-                    std::mem::offset_of!(Armv8AMachine, pc) as i32,
-                );
-                return ControlFlow::Break(Some(next_pc));
+                return self.unconditional_jump_epilogue(&instruction, next_pc);
             }
             Op::RET => {
-                // FIXME
-
-                let bool_type =
-                    cranelift::prelude::Type::int(8).expect("Could not create bool type");
-                let true_value = self.builder.ins().iconst(bool_type, 1);
-                self.builder.ins().store(
-                    MemFlags::trusted().with_vmctx(),
-                    true_value,
-                    self.machine_ptr,
-                    std::mem::offset_of!(Armv8AMachine, halted) as i32,
-                );
-                // let next_pc = self
-                //     .builder
-                //     .ins()
-                //     .iconst(self.int, instruction.address() as i64);
-                // return ControlFlow::Break(next_pc);
+                let next_pc = self.reg_to_value(&bad64::Reg::X30);
+                return self.unconditional_jump_epilogue(&instruction, next_pc);
             }
             // Compares
             Op::CBNZ => {
-                /*
-                 * constant boolean branch_conditional = TRUE;
-                 * constant bits(datasize) operand1 = X[t, datasize];
-                 * if !IsZero(operand1) then
-                 *     BranchTo(PC64 + offset, BranchType_DIR, branch_conditional);
-                 * else
-                 *     BranchNotTaken(BranchType_DIR, branch_conditional);
-                 */
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
                 let label = match instruction.operands()[1] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     other => panic!("unexpected branch address in {op:?}: {:?}", other),
                 };
-                let branch_not_taken_block = self.builder.create_block();
-                let branch_block = self.builder.create_block();
-                let merge_block = self.builder.create_block();
-                self.builder.append_block_param(merge_block, self.int);
                 let zero = self.reg_to_value(&bad64::Reg::XZR);
                 let is_zero_value =
                     self.builder
                         .ins()
                         .icmp(cranelift::prelude::IntCC::Equal, operand1, zero);
-                let is_zero_value = self.builder.ins().sextend(self.int, is_zero_value);
-                self.builder.ins().brif(
-                    is_zero_value,
-                    branch_not_taken_block,
-                    &[],
-                    branch_block,
-                    &[],
-                );
-                self.builder.switch_to_block(branch_not_taken_block);
-                self.builder.seal_block(branch_not_taken_block);
-                // Jump to the merge block, passing it the block return value.
-                self.builder.ins().jump(merge_block, &[is_zero_value]);
-                self.builder.switch_to_block(branch_block);
-                self.builder.seal_block(branch_block);
-                let label_value = self.builder.ins().iconst(self.int, label as i64);
-                self.emit_jump(label_value);
-                // Switch to the merge block for subsequent statements.
-                self.builder.switch_to_block(merge_block);
-
-                // We've now seen all the predecessors of the merge block.
-                self.builder.seal_block(merge_block);
+                let is_zero_value = self.builder.ins().sextend(I64, is_zero_value);
+                let label_value = self.builder.ins().iconst(I64, label as i64);
+                self.branch_if_non_zero(is_zero_value, label_value);
+            }
+            Op::CBZ => {
+                let operand1 = self.translate_operand(&instruction.operands()[0]);
+                let label = match instruction.operands()[1] {
+                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
+                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                };
+                let zero = self.reg_to_value(&bad64::Reg::XZR);
+                let is_not_zero_value =
+                    self.builder
+                        .ins()
+                        .icmp(cranelift::prelude::IntCC::NotEqual, operand1, zero);
+                let is_not_zero_value = self.builder.ins().sextend(I64, is_not_zero_value);
+                let label_value = self.builder.ins().iconst(I64, label as i64);
+                self.branch_if_non_zero(is_not_zero_value, label_value);
             }
             // Bit-ops
             Op::BFI => {
+                // TODO: verify
                 // Bitfield insert
                 // This instruction copies a bitfield of <width> bits from the least significant
                 // bits of the source register to bit position <lsb> of the destination
                 // register, leaving the other destination bits unchanged.
-                /*
-                 * if sf == '1' && N != '1' then EndOfDecode(Decode_UNDEF);
-                    if sf == '0' && (N != '0' || immr<5> != '0' || imms<5> != '0') then EndOfDecode(Decode_UNDEF);
 
-                    constant integer d = UInt(Rd);
-                    constant integer n = UInt(Rn);
-                    constant integer datasize = 32 << UInt(sf);
-                    constant integer s = UInt(imms);
-                    constant integer r = UInt(immr);
+                // if sf == '1' && N != '1' then EndOfDecode(Decode_UNDEF);
+                //  if sf == '0' && (N != '0' || immr<5> != '0' || imms<5> != '0') then
+                // EndOfDecode(Decode_UNDEF);
 
-                    bits(datasize) wmask;
-                    bits(datasize) tmask;
-                    (wmask, tmask) = DecodeBitMasks(N, imms, immr, FALSE, datasize);
-                   constant bits(datasize) dst = X[d, datasize];
-                   constant bits(datasize) src = X[n, datasize];
+                //  constant integer d = UInt(Rd);
+                //  constant integer n = UInt(Rn);
+                //  constant integer datasize = 32 << UInt(sf);
+                //  constant integer s = UInt(imms);
+                //  constant integer r = UInt(immr);
 
-                // Perform bitfield move on low bits
-                constant bits(datasize) bot = (dst AND NOT(wmask)) OR (ROR(src, r) AND wmask);
+                //  bits(datasize) wmask;
+                //  bits(datasize) tmask;
+                //  (wmask, tmask) = DecodeBitMasks(N, imms, immr, FALSE, datasize);
+                // constant bits(datasize) dst = X[d, datasize];
+                // constant bits(datasize) src = X[n, datasize];
 
-                // Combine extension bits and result bits
-                X[d, datasize] = (dst AND NOT(tmask)) OR (bot AND tmask);
-                 */
+                // // Perform bitfield move on low bits
+                // constant bits(datasize) bot = (dst AND NOT(wmask)) OR (ROR(src, r) AND
+                // wmask);
+
+                // // Combine extension bits and result bits
+                // X[d, datasize] = (dst AND NOT(tmask)) OR (bot AND tmask);
                 let dst = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -1013,17 +1407,32 @@ impl FunctionTranslator<'_> {
                     } => *self.reg_to_var(reg, true),
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
-                let src = match instruction.operands()[0] {
-                    bad64::Operand::Reg {
-                        ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, false),
+                let dst_value = self.translate_operand(&instruction.operands()[0]);
+                let src_value = self.translate_operand(&instruction.operands()[1]);
+                let lsb: i64 = match instruction.operands()[2] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(lsb),
+                        shift: None,
+                    } => lsb.try_into().unwrap(),
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
-                // TODO...
+                let wmask = match instruction.operands()[3] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(wmask),
+                        shift: None,
+                    } => self.builder.ins().iconst(I64, 2_i64.pow(wmask as u32) - 1),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let bits_to_copy = self.builder.ins().band(wmask, src_value);
+                let bits_mask = self.builder.ins().rotl_imm(bits_to_copy, lsb);
+                let target_mask = self.builder.ins().rotl_imm(wmask, lsb);
+                let target_mask = self.builder.ins().bnot(target_mask);
+                let dst_value = self.builder.ins().band(target_mask, dst_value);
+                let dst_value = self.builder.ins().bor(dst_value, bits_mask);
+                self.builder.def_var(dst, dst_value);
             }
             Op::ORR => {
-                // Bitwise OR (immediate)
+                // Bitwise OR
                 // This instruction performs a bitwise (inclusive) OR of a register value and an
                 // immediate value, and writes the result to the destination register.
                 let target = match instruction.operands()[0] {
@@ -1036,6 +1445,22 @@ impl FunctionTranslator<'_> {
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
                 let value = self.builder.ins().bor(a, b);
+                self.builder.def_var(target, value);
+            }
+            Op::AND => {
+                // Bitwise AND
+                // This instruction performs a bitwise AND of a register value and an immediate
+                // value, and writes the result to the destination register.
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let value = self.builder.ins().band(a, b);
                 self.builder.def_var(target, value);
             }
             Op::LSL => {
@@ -1054,9 +1479,20 @@ impl FunctionTranslator<'_> {
                 let value = self.builder.ins().ishl(a, b);
                 self.builder.def_var(target, value);
             }
-            Op::AND => todo!(),
-
-            // rest
+            Op::LSR => {
+                // Logical shift right
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let value = self.builder.ins().ushr(a, b);
+                self.builder.def_var(target, value);
+            }
             Op::ABS => todo!(),
             Op::ADC => todo!(),
             Op::ADCLB => todo!(),
@@ -1122,7 +1558,18 @@ impl FunctionTranslator<'_> {
             Op::BICS => todo!(),
             Op::BIF => todo!(),
             Op::BIT => todo!(),
-            Op::BL => todo!(),
+            Op::BL => {
+                let link_pc = instruction.address() + 4;
+                let link_pc = self.builder.ins().iconst(I64, link_pc as i64);
+                let link_register = *self.reg_to_var(&bad64::Reg::X30, true);
+                self.builder.def_var(link_register, link_pc);
+                let label = match instruction.operands()[0] {
+                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
+                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                };
+                let label_value = self.builder.ins().iconst(I64, label as i64);
+                return self.unconditional_jump_epilogue(&instruction, label_value);
+            }
             Op::BLR => todo!(),
             Op::BLRAA => todo!(),
             Op::BLRAAZ => todo!(),
@@ -1149,7 +1596,21 @@ impl FunctionTranslator<'_> {
             Op::BTI => todo!(),
             Op::B_AL => todo!(),
             Op::B_CC => todo!(),
-            Op::B_CS => todo!(),
+            Op::B_CS => {
+                let carry_is_set = self.builder.ins().load(
+                    I64,
+                    MemFlags::trusted().with_vmctx(),
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, cpu_state.pstate.C) as i32,
+                );
+                let label = match instruction.operands()[0] {
+                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
+                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                };
+                // let carry_is_set = self.builder.ins().uextend(I64, carry_is_set);
+                let label_value = self.builder.ins().iconst(I64, label as i64);
+                self.branch_if_non_zero(carry_is_set, label_value);
+            }
             Op::B_EQ => todo!(),
             Op::B_GE => todo!(),
             Op::B_GT => todo!(),
@@ -1180,7 +1641,6 @@ impl FunctionTranslator<'_> {
             Op::CASPA => todo!(),
             Op::CASPAL => todo!(),
             Op::CASPL => todo!(),
-            Op::CBZ => todo!(),
             Op::CCMN => todo!(),
             Op::CCMP => todo!(),
             Op::CDOT => todo!(),
@@ -1190,7 +1650,9 @@ impl FunctionTranslator<'_> {
             Op::CINV => todo!(),
             Op::CLASTA => todo!(),
             Op::CLASTB => todo!(),
-            Op::CLREX => todo!(),
+            Op::CLREX => {
+                // TODO: We don't model exclusive access (yet).
+            }
             Op::CLS => todo!(),
             Op::CLZ => todo!(),
             Op::CMEQ => todo!(),
@@ -1203,19 +1665,12 @@ impl FunctionTranslator<'_> {
             Op::CMLT => todo!(),
             Op::CMN => todo!(),
             Op::CMP => {
-                self.translate_cmp_64(&instruction);
-                /*
-                                 * constant bits(datasize) operand1 = if n == 31 then SP[datasize] else X[n, datasize];
-                constant bits(datasize) operand2 = NOT(ExtendReg(m, extend_type, shift, datasize));
-                bits(datasize) result;
-                bits(4) nzcv;
-
-                (result, nzcv) = AddWithCarry(operand1, operand2, '1');
-
-                X[d, datasize] = result;
-                PSTATE.<N,Z,C,V> = nzcv;
-                                */
-                // FIXME
+                let operand1 = self.translate_operand(&instruction.operands()[0]);
+                let operand2 = self.translate_operand(&instruction.operands()[1]);
+                let operand2 = self.builder.ins().bnot(operand2);
+                let (_result, nzcv) = self.add_with_carry(operand1, operand2, true);
+                // discard result, only update NZCV flags.
+                self.update_nzcv(nzcv);
             }
             Op::CMPEQ => todo!(),
             Op::CMPGE => todo!(),
@@ -1249,9 +1704,7 @@ impl FunctionTranslator<'_> {
             Op::CRC32W => todo!(),
             Op::CRC32X => todo!(),
             Op::CSDB => todo!(),
-            Op::CSEL => {
-                todo!()
-            }
+            Op::CSEL => todo!(),
             Op::CSET => todo!(),
             Op::CSETM => todo!(),
             Op::CSINC => todo!(),
@@ -1285,17 +1738,7 @@ impl FunctionTranslator<'_> {
             Op::EORTB => todo!(),
             Op::EORV => todo!(),
             Op::ERET => {
-                // FIXME
-
-                let bool_type =
-                    cranelift::prelude::Type::int(8).expect("Could not create bool type");
-                let true_value = self.builder.ins().iconst(bool_type, 1);
-                self.builder.ins().store(
-                    MemFlags::trusted().with_vmctx(),
-                    true_value,
-                    self.machine_ptr,
-                    std::mem::offset_of!(Armv8AMachine, halted) as i32,
-                );
+                // FIXME: select current EL from PSTATE, and jump to ELR_ELx.
             }
             Op::ERETAA => todo!(),
             Op::ERETAB => todo!(),
@@ -1510,7 +1953,30 @@ impl FunctionTranslator<'_> {
             Op::LDARH => todo!(),
             Op::LDAXP => todo!(),
             Op::LDAXR => todo!(),
-            Op::LDAXRB => todo!(),
+            Op::LDAXRB => {
+                // TODO: We don't model exclusive access (yet).
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
+                let source_address = self.builder.ins().uadd_overflow_trap(
+                    mem_start,
+                    source_address,
+                    TrapCode::IntegerOverflow,
+                );
+                let value = self.builder.ins().uload8(
+                    I64,
+                    MemFlags::new(),
+                    source_address,
+                    Offset32::new(0),
+                );
+                self.builder.def_var(target, value);
+            }
             Op::LDAXRH => todo!(),
             Op::LDCLR => todo!(),
             Op::LDCLRA => todo!(),
@@ -1567,8 +2033,6 @@ impl FunctionTranslator<'_> {
             Op::LDPSW => todo!(),
             Op::LDRAA => todo!(),
             Op::LDRAB => todo!(),
-            Op::LDRB => todo!(),
-            Op::LDRH => todo!(),
             Op::LDRSB => todo!(),
             Op::LDRSH => todo!(),
             Op::LDRSW => todo!(),
@@ -1650,7 +2114,6 @@ impl FunctionTranslator<'_> {
             Op::LDXRH => todo!(),
             Op::LSLR => todo!(),
             Op::LSLV => todo!(),
-            Op::LSR => todo!(),
             Op::LSRR => todo!(),
             Op::LSRV => todo!(),
             Op::MAD => todo!(),
@@ -2007,9 +2470,6 @@ impl FunctionTranslator<'_> {
             Op::STNT1D => todo!(),
             Op::STNT1H => todo!(),
             Op::STNT1W => todo!(),
-            Op::STP => todo!(),
-            Op::STRB => todo!(),
-            Op::STRH => todo!(),
             Op::STSET => todo!(),
             Op::STSETB => todo!(),
             Op::STSETH => todo!(),
@@ -2048,7 +2508,32 @@ impl FunctionTranslator<'_> {
             Op::STURH => todo!(),
             Op::STXP => todo!(),
             Op::STXR => todo!(),
-            Op::STXRB => todo!(),
+            Op::STXRB => {
+                // TODO: We don't model exclusive access (yet).
+                let status_target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let target = self.translate_operand(&instruction.operands()[2]);
+                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
+                let target = self.builder.ins().uadd_overflow_trap(
+                    target,
+                    mem_start,
+                    TrapCode::IntegerOverflow,
+                );
+                self.builder.ins().istore8(
+                    cranelift::prelude::MemFlags::new(),
+                    value,
+                    target,
+                    Offset32::new(0),
+                );
+                let one = self.builder.ins().iconst(I64, 1);
+                self.builder.def_var(status_target, one);
+            }
             Op::STXRH => todo!(),
             Op::STZ2G => todo!(),
             Op::STZG => todo!(),
@@ -2133,7 +2618,6 @@ impl FunctionTranslator<'_> {
                 // FIXME: What should we do here?
                 return ControlFlow::Break(None);
             }
-            Op::UDIV => todo!(),
             Op::UDIVR => todo!(),
             Op::UDOT => todo!(),
             Op::UHADD => todo!(),
@@ -2260,6 +2744,7 @@ impl FunctionTranslator<'_> {
         ControlFlow::Continue(())
     }
 
+    /// Save state and resolve the next entry block.
     fn emit_jump(&mut self, pc_value: Value) {
         {
             {
@@ -2278,12 +2763,19 @@ impl FunctionTranslator<'_> {
                 self.machine_ptr,
                 std::mem::offset_of!(Armv8AMachine, pc) as i32,
             );
-            let translate_func = self.builder.ins().load(
-                self.pointer_type,
-                MemFlags::trusted().with_vmctx(),
-                self.machine_ptr,
-                std::mem::offset_of!(Armv8AMachine, lookup_entry_func) as i32,
-            );
+            // We don't change the lookup_entry_func so just use the function pointer of
+            // `lookup_entry` directly.
+            //
+            // let translate_func = self.builder.ins().load(
+            //     self.pointer_type,
+            //     MemFlags::trusted().with_vmctx(),
+            //     self.machine_ptr,
+            //     std::mem::offset_of!(Armv8AMachine, lookup_entry_func) as i32,
+            // );
+            let translate_func = self
+                .builder
+                .ins()
+                .iconst(I64, lookup_entry as usize as u64 as i64);
             let call = self.builder.ins().call_indirect(
                 self.sigref,
                 translate_func,
@@ -2294,6 +2786,8 @@ impl FunctionTranslator<'_> {
         }
     }
 
+    /// Save state but also set `machine.halted` to `true` so that we stop the
+    /// emulation instead of fetching the next JIT block.
     fn emit_halt(&mut self) {
         {
             let Self {
@@ -2305,8 +2799,7 @@ impl FunctionTranslator<'_> {
             } = self;
             cpu_state.save_cpu_state(builder, registers, sys_registers);
         }
-        let bool_type = cranelift::prelude::Type::int(8).expect("Could not create bool type");
-        let true_value = self.builder.ins().iconst(bool_type, 1);
+        let true_value = self.builder.ins().iconst(I8, 1);
         self.builder.ins().store(
             MemFlags::trusted().with_vmctx(),
             true_value,
@@ -2326,5 +2819,30 @@ impl FunctionTranslator<'_> {
         );
         let resolved_entry = self.builder.inst_results(call)[0];
         self.builder.ins().return_(&[resolved_entry]);
+    }
+
+    #[must_use]
+    fn unconditional_jump_epilogue(
+        &mut self,
+        source_instruction: &bad64::Instruction,
+        dest_label: Value,
+    ) -> ControlFlow<Option<Value>> {
+        let pc = self
+            .builder
+            .ins()
+            .iconst(I64, source_instruction.address() as i64);
+        self.builder.ins().store(
+            MemFlags::trusted().with_vmctx(),
+            pc,
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
+        );
+        self.builder.ins().store(
+            MemFlags::trusted().with_vmctx(),
+            dest_label,
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, pc) as i32,
+        );
+        ControlFlow::Break(Some(dest_label))
     }
 }

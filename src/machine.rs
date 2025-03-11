@@ -35,7 +35,7 @@ use crate::{
 pub struct Armv8AMachine {
     pub pc: u64,
     pub prev_pc: u64,
-    pub cpu_state: Pin<Box<ExecutionState>>,
+    pub cpu_state: ExecutionState,
     pub mem: MemoryRegion,
     pub entry_blocks: FxHashMap<u64, Entry>,
     pub lookup_entry_func: Entry,
@@ -45,9 +45,8 @@ pub struct Armv8AMachine {
 impl Armv8AMachine {
     pub fn new(memory_size: u64) -> Pin<Box<Self>> {
         let mem = MemoryRegion::new("ram", memory_size).unwrap();
-        let mut cpu_state = Box::pin(ExecutionState::default());
-        cpu_state.registers.sp = memory_size;
-        cpu_state.registers.sp -= 4096;
+        let mut cpu_state = ExecutionState::default();
+        cpu_state.registers.sp = memory_size / 2;
         let entry_blocks = FxHashMap::default();
         Box::pin(Self {
             pc: 0,
