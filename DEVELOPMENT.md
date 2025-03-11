@@ -2,6 +2,55 @@
 
 Set the environment variable `RUST_LOG=trace` or `RUST_LOG=debug` to print logs during execution.
 
+## Debugging JIT code
+
+Needless to say, it's not easy.
+
+### Debugging JIT IR
+
+For Cranelift, the JIT can dump its IR representation when translating a block when you pass `RUST_LOG=trace`.
+
+### Debugging native JITed code
+
+For native code, you can run the code under gdb.
+If you stop at JITed code or the process crashes while executing JITed code, you won't be able to see any source code or backtraces because there are none.
+You can print a disassembly of the current instruction with `x/i $pc` (`x` is to show memory, `i` is to interpret it as instructions).
+
+If you want to step-by-step execute instrunctions, it might be useful to print the current instruction on each `stepi`.
+You can do this by defining a hook:
+
+```text
+define hook-stop
+  x/i $pc
+end
+```
+
+To inspect `machine` state, you can start the process by issuing a temporary break on the function that looks up or creates translation blocks, `lookup_entry`, to get the pointer of the `machine::Armv8AMachine` instance which is pinned in memory.
+
+Then, when stepping through JITed code, you can use the address to inspect its state.
+
+Note that registers are only updated in the translation block epilogue.
+
+Example gdb session to demonstrate this:
+
+```text
+(gdb) tbreak lookup_entry
+Temporary breakpoint 1 at 0x970aca: file src/jit.rs, line 41.
+(gdb) run
+Starting program: target/debug/simulans -vvv ./test_kernel/target/aarch64-unknown-none/release/test_kernel.bin
+Temporary breakpoint 1, simulans::jit::lookup_entry (context=0x5555568c1290, machine=0x5555568b2bd0) at src/jit.rs:41
+41          let pc: u64 = machine.pc;
+(gdb) print machine
+$1 = (*mut simulans::machine::Armv8AMachine) 0x5555568b2bd0
+(gdb) # continue ...
+```
+
+Then at any point you can inspect the machine state by using the `$1` variable, or the address itself.
+
+```text
+(gdb) p $1.pc
+```
+
 ## Running tests
 
 Under [`tests/`](./tests/) you will find integration tests that run small
