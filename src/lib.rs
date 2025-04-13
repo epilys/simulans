@@ -113,7 +113,7 @@ pub mod memory;
 
 /// Disassembles and prints each decoded aarch64 instruction to stdout using
 /// Capstone library, for debugging.
-pub fn disas(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn disas(input: &[u8], starting_address: u64) -> Result<(), Box<dyn std::error::Error>> {
     use capstone::prelude::*;
 
     let mut cs = Capstone::new()
@@ -124,7 +124,7 @@ pub fn disas(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .expect("Failed to create Capstone object");
     cs.set_syntax(capstone::Syntax::Intel)?;
-    let decoded_iter = cs.disasm_all(input, 0x40080000)?;
+    let decoded_iter = cs.disasm_all(input, starting_address)?;
     eprintln!("Capstone output:");
     for insn in decoded_iter.as_ref() {
         eprintln!("{}", insn);

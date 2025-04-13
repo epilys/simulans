@@ -22,7 +22,7 @@
 
 //! Representation of an emulated machine.
 
-use std::pin::Pin;
+use std::{num::NonZero, pin::Pin};
 
 use rustc_hash::FxHashMap;
 
@@ -46,9 +46,9 @@ pub struct Armv8AMachine {
 
 impl Armv8AMachine {
     pub fn new(memory_size: MemorySize) -> Pin<Box<Self>> {
-        let mem = MemoryRegion::new("ram", memory_size).unwrap();
+        let mem = MemoryRegion::new("ram", memory_size, PHYS_MEM_START as usize).unwrap();
         let mut cpu_state = ExecutionState::default();
-        cpu_state.registers.sp = memory_size.get() / 2;
+        cpu_state.registers.sp = mem.phys_offset as u64 + memory_size.get() / 2;
         let entry_blocks = FxHashMap::default();
         Box::pin(Self {
             pc: 0,
@@ -67,19 +67,42 @@ impl Armv8AMachine {
         input: &[u8],
         address: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        assert!(
-            (address + input.len()) < self.mem.len(),
-            "(address = 0x{:x} + input.len() = 0x{:x}) = 0x{:x} >= self.mem.len() = 0x{:x}",
-            address,
-            input.len(),
-            address + input.len(),
-            self.mem.len()
-        );
+        let Some(input_size) = NonZero::new(input.len().try_into()?) else {
+            log::info!("Called `load_code` with empty slice which does nothing.");
+            return Ok(());
+        };
+        if address < self.mem.phys_offset {
+            return Err(format!(
+                "Cannot load code to address {} which is below start of DRAM {}.",
+                Address(address as u64),
+                Address(self.mem.phys_offset as u64),
+            )
+            .into());
+        }
+        if (address - self.mem.phys_offset) >= self.mem.len() {
+            return Err(format!(
+                "Address {} does not fit into DRAM of size {}.",
+                Address(address as u64),
+                self.mem.size
+            )
+            .into());
+        }
+        if (address + input.len() - self.mem.phys_offset) >= self.mem.len() {
+            return Err(format!(
+                "Input of size {} cannot fit in DRAM of size {} starting from address {}.",
+                MemorySize(input_size),
+                self.mem.size,
+                Address(address as u64),
+            )
+            .into());
+        }
+        let address_inside_region = address - self.mem.phys_offset;
+
         // SAFETY: We performed boundary checks in the above check.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 input.as_ptr(),
-                self.mem.map.as_mut_ptr().add(address),
+                self.mem.map.as_mut_ptr().add(address_inside_region),
                 input.len(),
             )
         };

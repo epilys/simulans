@@ -33,16 +33,18 @@ use nix::{
 pub const KERNEL_ADDRESS: usize = 0x40080000;
 
 // Starting offset of DRAM inside the physical address space.
-pub const PHYS_MEM_START: u64 = 0x00000000;
+pub const PHYS_MEM_START: u64 = 0x40000000;
 
 pub struct MemoryRegion {
+    /// Offset from start of physical address space.
+    pub phys_offset: usize,
     pub size: MemorySize,
     pub fd: OwnedFd,
     pub map: memmap2::MmapMut,
 }
 
 impl MemoryRegion {
-    pub fn new(name: &str, size: MemorySize) -> Result<Self, Errno> {
+    pub fn new(name: &str, size: MemorySize, phys_offset: usize) -> Result<Self, Errno> {
         let name = CString::new(name).unwrap();
         let fd = memfd::memfd_create(&name, memfd::MemFdCreateFlag::MFD_CLOEXEC)?;
         nix::unistd::ftruncate(&fd, size.get().try_into().unwrap())?;
@@ -63,7 +65,12 @@ impl MemoryRegion {
         }
         let u_size: usize = size.get().try_into().map_err(|_| Errno::ERANGE)?;
         debug_assert_eq!(map.len(), u_size);
-        Ok(Self { size, fd, map })
+        Ok(Self {
+            phys_offset,
+            size,
+            fd,
+            map,
+        })
     }
 
     #[inline]

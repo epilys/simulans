@@ -22,10 +22,7 @@
 
 use std::num::NonZero;
 
-use simulans::{
-    machine, main_loop,
-    memory::{MemorySize, KERNEL_ADDRESS},
-};
+use simulans::{machine, main_loop, memory::MemorySize};
 
 #[test]
 fn test_sdiv() {
@@ -37,20 +34,22 @@ fn test_sdiv() {
     // 0x40080010: sdiv w8, w8, w9
     const SDIV: &[u8] =
         b"\xff\x43\x00\xd1\xe0\x0b\x00\xb9\xe8\x0b\x40\xb9\x49\x00\x80\x52\x08\x0d\xc9\x1a";
-    _ = simulans::disas(SDIV);
+    _ = simulans::disas(SDIV, 0);
 
-    const MEMORY_SIZE: u64 = (KERNEL_ADDRESS + 2 * SDIV.len()) as u64;
+    const MEMORY_SIZE: u64 = (4 * SDIV.len()) as u64;
     let mut machine = machine::Armv8AMachine::new(MemorySize(NonZero::new(MEMORY_SIZE).unwrap()));
+
+    let entry_point = machine.mem.phys_offset;
 
     let stack_pre = machine.cpu_state.registers.sp;
     machine.cpu_state.registers.x0 = 11;
-    main_loop(&mut machine, KERNEL_ADDRESS, SDIV).unwrap();
+    main_loop(&mut machine, entry_point, SDIV).unwrap();
     let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre - 0x10);
     assert_eq!(machine.cpu_state.registers.x8, 5);
     assert_eq!(machine.cpu_state.registers.x9, 2);
     assert_eq!(
-        machine.mem.map.as_ref()[stack_post as usize - 0x10 + 0x18],
+        machine.mem.map.as_ref()[stack_post as usize - machine.mem.phys_offset + 0x18 - 0x10],
         11
     );
 }

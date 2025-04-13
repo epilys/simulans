@@ -31,7 +31,7 @@ use cranelift_module::{Linkage, Module};
 use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
-use crate::{cpu_state::ExecutionState, machine::Armv8AMachine};
+use crate::{cpu_state::ExecutionState, machine::Armv8AMachine, memory::Address};
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -182,8 +182,19 @@ impl JitContext {
             ref mut cpu_state,
             ..
         } = machine;
-        let decoded_iter =
-            bad64::disasm(&mem.map.deref()[program_counter..], program_counter as u64);
+
+        if program_counter < mem.phys_offset {
+            return Err(format!(
+                "Received program counter {} which is below offset of DRAM {}.",
+                Address(program_counter as u64),
+                Address(mem.phys_offset as u64),
+            )
+            .into());
+        }
+        let decoded_iter = bad64::disasm(
+            &mem.map.deref()[program_counter - mem.phys_offset..],
+            program_counter as u64,
+        );
 
         let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
 
@@ -215,7 +226,8 @@ impl JitContext {
         let sigref = builder.import_signature(builder.func.signature.clone());
         let mut trans = BlockTranslator {
             pointer_type: self.module.target_config().pointer_type(),
-            mem_start: mem.map.as_ptr() as usize as i64,
+            host_mem_start: mem.map.as_ptr() as usize as i64,
+            guest_mem_start: mem.phys_offset as i64,
             cpu_state,
             jit_ctx_ptr,
             machine_ptr,
@@ -257,7 +269,8 @@ impl JitContext {
 
 /// In-progress state of translating instructions into Cranelift IR.
 struct BlockTranslator<'a> {
-    mem_start: i64,
+    host_mem_start: i64,
+    guest_mem_start: i64,
     builder: FunctionBuilder<'a>,
     cpu_state: &'a mut ExecutionState,
     jit_ctx_ptr: Value,
@@ -280,6 +293,19 @@ enum Width {
 }
 
 impl BlockTranslator<'_> {
+    #[inline]
+    fn guest_address_to_host_address(&mut self, target: Value) -> Value {
+        let host_mem_start = self.builder.ins().iconst(I64, self.host_mem_start);
+        let guest_mem_start = self.builder.ins().iconst(I64, self.guest_mem_start);
+        let (target, _ignore_overflow) = self.builder.ins().usub_overflow(target, guest_mem_start);
+        let target = self.builder.ins().uadd_overflow_trap(
+            target,
+            host_mem_start,
+            TrapCode::IntegerOverflow,
+        );
+        target
+    }
+
     #[allow(non_snake_case)]
     /// Return [`Value`] for special registers.
     fn translate_o0_op1_CRn_CRm_op2(&mut self, o0: u8, o1: u8, cm: u8, cn: u8, o2: u8) -> Value {
@@ -940,12 +966,7 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let target = self.translate_operand(&instruction.operands()[1]);
-                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
-                let target = self.builder.ins().uadd_overflow_trap(
-                    target,
-                    mem_start,
-                    TrapCode::IntegerOverflow,
-                );
+                let target = self.guest_address_to_host_address(target);
                 self.builder.ins().store(
                     cranelift::prelude::MemFlags::new(),
                     value,
@@ -962,12 +983,7 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let target = self.translate_operand(&instruction.operands()[1]);
-                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
-                let target = self.builder.ins().uadd_overflow_trap(
-                    target,
-                    mem_start,
-                    TrapCode::IntegerOverflow,
-                );
+                let target = self.guest_address_to_host_address(target);
                 self.builder.ins().istore16(
                     cranelift::prelude::MemFlags::new(),
                     value,
@@ -985,12 +1001,7 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let target = self.translate_operand(&instruction.operands()[1]);
-                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
-                let target = self.builder.ins().uadd_overflow_trap(
-                    target,
-                    mem_start,
-                    TrapCode::IntegerOverflow,
-                );
+                let target = self.guest_address_to_host_address(target);
                 self.builder.ins().istore8(
                     cranelift::prelude::MemFlags::new(),
                     value,
@@ -1002,13 +1013,8 @@ impl BlockTranslator<'_> {
                 let width = self.operand_width(&instruction.operands()[0]);
                 let data1 = self.translate_operand(&instruction.operands()[0]);
                 let data2 = self.translate_operand(&instruction.operands()[1]);
-                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
                 let target = self.translate_operand(&instruction.operands()[2]);
-                let target = self.builder.ins().uadd_overflow_trap(
-                    target,
-                    mem_start,
-                    TrapCode::IntegerOverflow,
-                );
+                let target = self.guest_address_to_host_address(target);
                 let offset = Offset32::new(width as i32);
                 self.builder.ins().store(
                     cranelift::prelude::MemFlags::new(),
@@ -1032,12 +1038,7 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let source_address = self.translate_operand(&instruction.operands()[1]);
-                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
-                let source_address = self.builder.ins().uadd_overflow_trap(
-                    mem_start,
-                    source_address,
-                    TrapCode::IntegerOverflow,
-                );
+                let source_address = self.guest_address_to_host_address(source_address);
                 let value =
                     self.builder
                         .ins()
@@ -1053,12 +1054,7 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let source_address = self.translate_operand(&instruction.operands()[1]);
-                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
-                let source_address = self.builder.ins().uadd_overflow_trap(
-                    mem_start,
-                    source_address,
-                    TrapCode::IntegerOverflow,
-                );
+                let source_address = self.guest_address_to_host_address(source_address);
                 let value = self.builder.ins().uload16(
                     I64,
                     MemFlags::new(),
@@ -1076,12 +1072,7 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let source_address = self.translate_operand(&instruction.operands()[1]);
-                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
-                let source_address = self.builder.ins().uadd_overflow_trap(
-                    mem_start,
-                    source_address,
-                    TrapCode::IntegerOverflow,
-                );
+                let source_address = self.guest_address_to_host_address(source_address);
                 let value = self.builder.ins().uload8(
                     I64,
                     MemFlags::new(),
@@ -1980,12 +1971,7 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let source_address = self.translate_operand(&instruction.operands()[1]);
-                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
-                let source_address = self.builder.ins().uadd_overflow_trap(
-                    mem_start,
-                    source_address,
-                    TrapCode::IntegerOverflow,
-                );
+                let source_address = self.guest_address_to_host_address(source_address);
                 let value = self.builder.ins().uload8(
                     I64,
                     MemFlags::new(),
@@ -2535,12 +2521,7 @@ impl BlockTranslator<'_> {
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let target = self.translate_operand(&instruction.operands()[2]);
-                let mem_start = self.builder.ins().iconst(I64, self.mem_start);
-                let target = self.builder.ins().uadd_overflow_trap(
-                    target,
-                    mem_start,
-                    TrapCode::IntegerOverflow,
-                );
+                let target = self.guest_address_to_host_address(target);
                 self.builder.ins().istore8(
                     cranelift::prelude::MemFlags::new(),
                     value,
