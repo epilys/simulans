@@ -2,6 +2,22 @@
 
 Set the environment variable `RUST_LOG=trace` or `RUST_LOG=debug` to print logs during execution.
 
+## Emulating specific instructions
+
+[Refer to the official Arm documentation about A-profile AArch64 Instructions](https://developer.arm.com/documentation/ddi0601/2025-03/AArch64-Instructions?lang=en)
+
+The code generation for emulated instructions happens in the [`jit`
+module](./src/jit.rs) in the `BlockTranslator::translate_instruction` function.
+
+So far unimplemented instrunctions have a `todo!()` stub which you can replace with the JIT generation logic.
+
+### Special register logic
+
+Some special/system registers have side effects when read/written such as
+trapping or changing the internal state of the Processing Element.
+
+[Refer to the official Arm documentation about A-profile AArch64 Registers](https://developer.arm.com/documentation/ddi0601/2025-03/AArch64-Registers?lang=en)
+
 ## Debugging JIT code
 
 Needless to say, it's not easy.
