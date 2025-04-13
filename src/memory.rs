@@ -46,7 +46,9 @@ impl MemoryRegion {
         let name = CString::new(name).unwrap();
         let fd = memfd::memfd_create(&name, memfd::MemFdCreateFlag::MFD_CLOEXEC)?;
         nix::unistd::ftruncate(&fd, size.get().try_into().unwrap())?;
+        // SAFETY: `fd` is a valid file descriptor.
         let mut map = unsafe { memmap2::MmapOptions::new().map_mut(&fd).unwrap() };
+        // SAFETY: `map`'s pointer is a valid memory address pointer of size `size`.
         unsafe {
             nix::sys::mman::mprotect(
                 std::ptr::NonNull::new(map.as_mut_ptr().cast::<core::ffi::c_void>()).unwrap(),

@@ -75,6 +75,7 @@ impl Armv8AMachine {
             address + input.len(),
             self.mem.len()
         );
+        // SAFETY: We performed boundary checks in the above check.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 input.as_ptr(),
