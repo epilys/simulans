@@ -67,7 +67,7 @@ pub struct RegisterFile {
     // Link Register can be referred to as LR
     pub x30: u64,
     pub xzr: u64,
-    /// Selected `SP` based on current Exception Level and PSTATE's SpSel.
+    /// Selected `SP` based on current Exception Level and PSTATE's [`SpSel`].
     pub sp: u64,
     pub sp_el0: u64,
     pub sp_el1: u64,
@@ -202,7 +202,7 @@ pub struct SavedProgramStatusRegister {
     pub it_b: u6,
     /// Big Endianness. (bit `[9]`)
     pub e: bool,
-    /// SError exception mask. "Set to the value of `PSTATE.A` on taking an
+    /// `SError` exception mask. "Set to the value of `PSTATE.A` on taking an
     /// exception to the current mode, and copied to `PSTATE.A` on executing an
     /// exception return operation in the current mode". (bit `[8]`)
     pub a: bool,
@@ -219,7 +219,7 @@ pub struct SavedProgramStatusRegister {
 #[repr(C)]
 #[derive(Default, Debug)]
 #[allow(non_snake_case)]
-/// `PSTATE` isn't an architectural register for ARMv8. Its bit fields are
+/// `PSTATE` isn't an architectural register for `ARMv8-A`. Its bit fields are
 /// accessed through special-purpose registers.
 ///
 /// The special registers are:
@@ -243,7 +243,7 @@ pub struct PSTATE {
     pub V: u64,
     /// Debug mask bit.
     pub D: u64,
-    /// SError mask bit.
+    /// `SError` mask bit.
     pub A: u64,
     /// IRQ mask bit.
     pub I: u64,

@@ -69,7 +69,7 @@ fn is_vector(reg: &bad64::Reg) -> bool {
 /// JIT context/builder used to disassemble code and JIT compile it.
 pub struct JitContext {
     /// The function builder context, which is reused across multiple
-    /// FunctionBuilder instances.
+    /// `FunctionBuilder` instances.
     builder_context: FunctionBuilderContext,
     /// The main Cranelift context, which holds the state for codegen. Cranelift
     /// separates this from `Module` to allow for parallel compilation, with a
