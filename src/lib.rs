@@ -103,6 +103,9 @@
 )]
 #![allow(clippy::multiple_crate_versions, clippy::cognitive_complexity)]
 
+#[cfg(not(target_pointer_width = "64"))]
+core::compile_error!("Can only be compiled on targets with 64bit address support");
+
 pub mod cpu_state;
 pub mod jit;
 pub mod machine;
