@@ -58,6 +58,51 @@
 //!
 //! - `[tag:interrupts]: Gicv2/Gicv3 related.`
 //! - `[tag:serial]: serial output.`
+
+#![deny(
+    unsafe_op_in_unsafe_fn,
+    // rustdoc
+    rustdoc::redundant_explicit_links,
+    rustdoc::broken_intra_doc_links,
+    // clippy
+    // groups
+    clippy::correctness,
+    clippy::suspicious,
+    clippy::complexity,
+    clippy::perf,
+    clippy::cargo,
+    clippy::nursery,
+    clippy::style,
+    clippy::lint_groups_priority,
+    // restriction
+    clippy::as_underscore,
+    clippy::assertions_on_result_states,
+    clippy::dbg_macro,
+    clippy::missing_safety_doc,
+    clippy::rc_buffer,
+    clippy::undocumented_unsafe_blocks,
+    // pedantic
+    clippy::bool_to_int_with_if,
+    clippy::borrow_as_ptr,
+    clippy::case_sensitive_file_extension_comparisons,
+    clippy::cast_lossless,
+    // This lint is only useful for non-64bit targets which we do not... target.
+    // clippy::cast_possible_wrap,
+    clippy::cast_ptr_alignment,
+    clippy::doc_markdown,
+    clippy::expect_fun_call,
+    clippy::into_iter_without_iter,
+    clippy::large_futures,
+    clippy::manual_hash_one,
+    clippy::or_fun_call,
+    clippy::ptr_as_ptr,
+    clippy::struct_field_names,
+    clippy::unnecessary_fallible_conversions,
+    clippy::unused_enumerate_index,
+    clippy::waker_clone_wake,
+)]
+#![allow(clippy::multiple_crate_versions, clippy::cognitive_complexity)]
+
 pub mod cpu_state;
 pub mod jit;
 pub mod machine;
