@@ -4,6 +4,9 @@ version = "0.0.0"
 authors = ["Manos Pitsidianakis <manos@pitsidianak.is>"]
 license = "EUPL-1.2 OR GPL-3.0-or-later"
 description = "Armv8-A emulation toolkit"
+repository = "https://github.com/epilys/simulans"
+keywords = ["arm", "aarch64", "arm64", "emulation", "emulator"]
+categories = ["emulators", "virtualization", "command-line-utilities"]
 edition = "2021"
 
 [dependencies]
