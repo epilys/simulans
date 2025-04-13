@@ -90,7 +90,7 @@ pub fn main_loop(
     code: &[u8],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut jit_block = jit::JitContext::new();
-    machine.load_kernel(code, start_address)?;
+    machine.load_code(code, start_address)?;
     machine.pc = start_address.try_into().unwrap();
     let mut func = machine.lookup_entry_func;
     while machine.halted == 0 {

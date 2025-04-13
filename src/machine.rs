@@ -61,8 +61,8 @@ impl Armv8AMachine {
         })
     }
 
-    /// Load kernel code.
-    pub fn load_kernel(
+    /// Load code to physical memory address.
+    pub fn load_code(
         &mut self,
         input: &[u8],
         address: usize,
