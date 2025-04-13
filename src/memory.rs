@@ -29,6 +29,12 @@ use nix::{
     sys::{memfd, mman::ProtFlags},
 };
 
+/// Default guest physical address to load kernel code to.
+pub const KERNEL_ADDRESS: usize = 0x40080000;
+
+// Starting offset of DRAM inside the physical address space.
+pub const PHYS_MEM_START: u64 = 0x00000000;
+
 pub struct MemoryRegion {
     pub size: usize,
     pub fd: OwnedFd,
@@ -61,5 +67,21 @@ impl MemoryRegion {
     #[inline]
     pub const fn len(&self) -> usize {
         self.size
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct Address(pub u64);
+
+impl std::fmt::Display for Address {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(fmt, "0x{:x}", self.0)
+    }
+}
+
+impl std::fmt::Debug for Address {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(fmt, "0x{:x}", self.0)
     }
 }

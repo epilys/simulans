@@ -25,9 +25,6 @@ pub mod jit;
 pub mod machine;
 pub mod memory;
 
-/// Default guest physical address to load kernel code to.
-pub const KERNEL_ADDRESS: usize = 0x40080000;
-
 /// Disassembles and prints each decoded aarch64 instruction to stdout using
 /// Capstone library, for debugging.
 pub fn disas(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {

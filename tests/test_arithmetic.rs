@@ -20,7 +20,7 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use simulans::{machine, main_loop, KERNEL_ADDRESS};
+use simulans::{machine, main_loop, memory::KERNEL_ADDRESS};
 
 #[test]
 fn test_sdiv() {

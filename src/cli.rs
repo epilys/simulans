@@ -25,23 +25,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use simulans::KERNEL_ADDRESS;
-
-#[derive(Copy, Clone)]
-#[repr(transparent)]
-pub struct Address(pub u64);
-
-impl std::fmt::Display for Address {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(fmt, "0x{:x}", self.0)
-    }
-}
-
-impl std::fmt::Debug for Address {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(fmt, "0x{:x}", self.0)
-    }
-}
+use simulans::memory::{Address, KERNEL_ADDRESS};
 
 fn maybe_hex(s: &str) -> Result<Address, String> {
     const HEX_PREFIX: &str = "0x";
