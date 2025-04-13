@@ -230,7 +230,7 @@ impl JitContext {
             match insn {
                 Ok(insn) => {
                     log::trace!("{:#?}", insn);
-                    log::trace!("{}", insn);
+                    log::trace!("0x{:x}: {}", insn.address(), insn);
                     if let ControlFlow::Break(jump_pc) = trans.translate_instruction(insn) {
                         next_pc = jump_pc;
                         break;
