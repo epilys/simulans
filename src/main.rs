@@ -41,8 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run_app(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let input = std::fs::read(&args.binary)?;
     // Create the machine instance, which holds the VM state.
-    let mut machine = machine::Armv8AMachine::new(args.memory.0);
-
+    let mut machine = machine::Armv8AMachine::new(args.memory);
     disas(&input)?;
     main_loop(
         &mut machine,

@@ -22,7 +22,7 @@
 
 #![allow(clippy::len_without_is_empty)]
 
-use std::{ffi::CString, os::fd::OwnedFd};
+use std::{ffi::CString, num::NonZero, os::fd::OwnedFd};
 
 use nix::{
     errno::Errno,
@@ -36,21 +36,21 @@ pub const KERNEL_ADDRESS: usize = 0x40080000;
 pub const PHYS_MEM_START: u64 = 0x00000000;
 
 pub struct MemoryRegion {
-    pub size: usize,
+    pub size: MemorySize,
     pub fd: OwnedFd,
     pub map: memmap2::MmapMut,
 }
 
 impl MemoryRegion {
-    pub fn new(name: &str, size: u64) -> Result<Self, Errno> {
+    pub fn new(name: &str, size: MemorySize) -> Result<Self, Errno> {
         let name = CString::new(name).unwrap();
         let fd = memfd::memfd_create(&name, memfd::MemFdCreateFlag::MFD_CLOEXEC)?;
-        nix::unistd::ftruncate(&fd, size.try_into().unwrap())?;
+        nix::unistd::ftruncate(&fd, size.get().try_into().unwrap())?;
         let mut map = unsafe { memmap2::MmapOptions::new().map_mut(&fd).unwrap() };
         unsafe {
             nix::sys::mman::mprotect(
                 std::ptr::NonNull::new(map.as_mut_ptr().cast::<core::ffi::c_void>()).unwrap(),
-                size.try_into().unwrap(),
+                size.get().try_into().unwrap(),
                 ProtFlags::PROT_READ | ProtFlags::PROT_WRITE | ProtFlags::PROT_EXEC,
             )?;
         }
@@ -59,14 +59,14 @@ impl MemoryRegion {
             // Don't include VM memory in dumped core files.
             _ = map.advise(memmap2::Advice::DontDump);
         }
-        let size: usize = size.try_into().map_err(|_| Errno::ERANGE)?;
-        debug_assert_eq!(map.len(), size);
+        let u_size: usize = size.get().try_into().map_err(|_| Errno::ERANGE)?;
+        debug_assert_eq!(map.len(), u_size);
         Ok(Self { size, fd, map })
     }
 
     #[inline]
     pub const fn len(&self) -> usize {
-        self.size
+        self.size.get() as usize
     }
 }
 
@@ -83,5 +83,59 @@ impl std::fmt::Display for Address {
 impl std::fmt::Debug for Address {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(fmt, "0x{:x}", self.0)
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct MemorySize(pub NonZero<u64>);
+
+#[allow(non_upper_case_globals)]
+impl MemorySize {
+    // SAFETY: value is non-zero.
+    pub const KiB: NonZero<u64> = NonZero::new(1024).unwrap();
+    // SAFETY: value is non-zero.
+    pub const MiB: NonZero<u64> = NonZero::new(Self::KiB.get() * 1024).unwrap();
+    // SAFETY: value is non-zero.
+    pub const GiB: NonZero<u64> = NonZero::new(Self::MiB.get() * 1024).unwrap();
+
+    /// Get `u64` value.
+    #[inline]
+    pub const fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+
+impl std::fmt::Display for MemorySize {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let bytes = self.get();
+        if bytes == 0 {
+            write!(fmt, "0")
+        } else if bytes < Self::KiB.get() {
+            write!(fmt, "{}bytes", bytes)
+        } else if bytes < Self::MiB.get() {
+            write!(fmt, "{}KiB", bytes / Self::KiB)
+        } else if bytes < Self::GiB.get() {
+            write!(fmt, "{}MiB", bytes / Self::MiB)
+        } else {
+            write!(fmt, "{}GiB", bytes / Self::GiB)
+        }
+    }
+}
+
+impl std::fmt::Debug for MemorySize {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let bytes = self.get();
+        if bytes == 0 {
+            write!(fmt, "0")
+        } else if bytes < Self::KiB.get() {
+            write!(fmt, "{}bytes", bytes)
+        } else if bytes < Self::MiB.get() {
+            write!(fmt, "{}KiB", bytes / Self::KiB)
+        } else if bytes < Self::GiB.get() {
+            write!(fmt, "{}MiB", bytes / Self::MiB)
+        } else {
+            write!(fmt, "{}GiB", bytes / Self::GiB)
+        }
     }
 }

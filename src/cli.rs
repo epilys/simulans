@@ -20,14 +20,12 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-#![allow(non_upper_case_globals)]
-
-use std::path::PathBuf;
+use std::{borrow::Cow, num::NonZero, path::PathBuf};
 
 use clap::Parser;
-use simulans::memory::{Address, KERNEL_ADDRESS};
+use simulans::memory::{Address, MemorySize, KERNEL_ADDRESS};
 
-fn maybe_hex(s: &str) -> Result<Address, String> {
+fn maybe_hex(s: &str) -> Result<Address, Cow<'static, str>> {
     const HEX_PREFIX: &str = "0x";
     const HEX_PREFIX_UPPER: &str = "0X";
     const HEX_PREFIX_LEN: usize = HEX_PREFIX.len();
@@ -38,76 +36,69 @@ fn maybe_hex(s: &str) -> Result<Address, String> {
         s.parse::<u64>()
     };
 
-    result.map(Address).map_err(|err| err.to_string())
+    result
+        .map(Address)
+        .map_err(|err| Cow::Owned(err.to_string()))
 }
 
-const KiB: u64 = 1024;
-const MiB: u64 = KiB * 1024;
-const GiB: u64 = MiB * 1024;
-
-#[derive(Copy, Clone)]
-#[repr(transparent)]
-pub struct MemorySize(pub u64);
-
-impl std::fmt::Display for MemorySize {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let bytes = self.0;
-        if bytes == 0 {
-            write!(fmt, "0")
-        } else if bytes < KiB {
-            write!(fmt, "{}bytes", bytes)
-        } else if bytes < MiB {
-            write!(fmt, "{}KiB", bytes / KiB)
-        } else if bytes < GiB {
-            write!(fmt, "{}MiB", bytes / MiB)
-        } else {
-            write!(fmt, "{}GiB", bytes / GiB)
-        }
+fn memory_size(s: &str) -> Result<MemorySize, Cow<'static, str>> {
+    fn err<A>(_: A) -> Cow<'static, str> {
+        Cow::Borrowed(
+            "Expected decimal or hexadecimal value, with optional prefixes: B (bytes), K/KiB \
+             (Kibibytes), M/MiB (Mibibytes) or G/GiB. (A kibibyte is 1024 bytes)",
+        )
     }
-}
-
-impl std::fmt::Debug for MemorySize {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let bytes = self.0;
-        if bytes == 0 {
-            write!(fmt, "0")
-        } else if bytes < KiB {
-            write!(fmt, "{}bytes", bytes)
-        } else if bytes < MiB {
-            write!(fmt, "{}KiB", bytes / KiB)
-        } else if bytes < GiB {
-            write!(fmt, "{}MiB", bytes / MiB)
-        } else {
-            write!(fmt, "{}GiB", bytes / GiB)
-        }
-    }
-}
-
-fn memory_size(s: &str) -> Result<MemorySize, String> {
-    fn err<A>(_: A) -> String {
-        "Expected decimal or hexadecimal value, with optional prefixes: B (bytes), K/KiB \
-         (Kibibytes), M/MiB (Mibibytes) or G/GiB. (A kibibyte is 1024 bytes)"
-            .to_string()
+    fn non_zero_map(
+        value: Result<u64, Cow<'static, str>>,
+    ) -> Result<MemorySize, Cow<'static, str>> {
+        Ok(MemorySize(value?.try_into().map_err(|err| {
+            Cow::Owned(format!("Memory size must be non-zero: {err}"))
+        })?))
     }
     if let Ok(num) = maybe_hex(s) {
-        return Ok(MemorySize(num.0));
+        return non_zero_map(Ok(num.0));
     }
 
     if let Some(s) = s.strip_suffix("KiB").or_else(|| s.strip_suffix("K")) {
-        return Ok(MemorySize(maybe_hex(s).map_err(err)?.0 * KiB));
+        let mut value = non_zero_map(maybe_hex(s).map(|v| v.0).map_err(err))?;
+        value.0 = value.0.checked_mul(MemorySize::KiB).ok_or_else(|| {
+            Cow::Owned(format!(
+                "{}KiB is too large be represented in 64 bits",
+                value.0
+            ))
+        })?;
+        return Ok(value);
     }
     if let Some(s) = s.strip_suffix("MiB").or_else(|| s.strip_suffix("M")) {
-        return Ok(MemorySize(maybe_hex(s).map_err(err)?.0 * MiB));
+        let mut value = non_zero_map(maybe_hex(s).map(|v| v.0).map_err(err))?;
+        value.0 = value.0.checked_mul(MemorySize::MiB).ok_or_else(|| {
+            Cow::Owned(format!(
+                "{}MiB is too large be represented in 64 bits",
+                value.0
+            ))
+        })?;
+        return Ok(value);
     }
     if let Some(s) = s.strip_suffix("GiB").or_else(|| s.strip_suffix("G")) {
-        return Ok(MemorySize(maybe_hex(s).map_err(err)?.0 * GiB));
+        let mut value = non_zero_map(maybe_hex(s).map(|v| v.0).map_err(err))?;
+        value.0 = value.0.checked_mul(MemorySize::GiB).ok_or_else(|| {
+            Cow::Owned(format!(
+                "{}GiB is too large be represented in 64 bits",
+                value.0
+            ))
+        })?;
+        return Ok(value);
     }
     if let Some(s) = s.strip_suffix("B") {
-        return Ok(MemorySize(maybe_hex(s).map_err(err)?.0));
+        return non_zero_map(maybe_hex(s).map(|v| v.0).map_err(err));
     }
 
     Err(err(()))
 }
+
+// SAFETY: Value is non-zero.
+const DEFAULT_MEMORY_SIZE: MemorySize =
+    MemorySize(NonZero::new(4 * MemorySize::GiB.get()).unwrap());
 
 /// Armv8-A emulation
 #[derive(Parser, Debug)]
@@ -120,10 +111,11 @@ pub struct Args {
     /// Must be lower than total available memory.
     #[arg(long, default_value_t = Address(KERNEL_ADDRESS as u64), value_parser=maybe_hex)]
     pub start_address: Address,
-    /// Hexadecimal or decimal value of the size of available physical memory to
-    /// the VM.
-    #[arg(long, default_value_t = MemorySize(4 * GiB), value_parser=memory_size)]
+    /// Non-zero hexadecimal or decimal value of the size of available physical
+    /// memory to the VM.
+    #[arg(long, default_value_t = DEFAULT_MEMORY_SIZE, value_parser=memory_size)]
     pub memory: MemorySize,
+
     /// Path to binary file containing aarch64 instructions (NOT an ELF file!)
     #[arg(value_name = "BINARY")]
     pub binary: PathBuf,
@@ -133,7 +125,7 @@ impl Args {
     /// Parse command-line arguments from the process environment.
     pub fn parse() -> Result<Self, String> {
         let retval = <Self as clap::Parser>::parse();
-        if retval.start_address.0 >= retval.memory.0 {
+        if retval.start_address.0 >= retval.memory.0.get() {
             return Err(format!(
                 "Invalid arguments: Given start address {} is out of range for given memory size \
                  {}.",

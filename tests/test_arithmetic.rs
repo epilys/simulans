@@ -20,7 +20,12 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use simulans::{machine, main_loop, memory::KERNEL_ADDRESS};
+use std::num::NonZero;
+
+use simulans::{
+    machine, main_loop,
+    memory::{MemorySize, KERNEL_ADDRESS},
+};
 
 #[test]
 fn test_sdiv() {
@@ -34,7 +39,9 @@ fn test_sdiv() {
         b"\xff\x43\x00\xd1\xe0\x0b\x00\xb9\xe8\x0b\x40\xb9\x49\x00\x80\x52\x08\x0d\xc9\x1a";
     _ = simulans::disas(SDIV);
 
-    let mut machine = machine::Armv8AMachine::new(0x40080000 + 2 * SDIV.len() as u64);
+    const MEMORY_SIZE: u64 = (KERNEL_ADDRESS + 2 * SDIV.len()) as u64;
+    let mut machine = machine::Armv8AMachine::new(MemorySize(NonZero::new(MEMORY_SIZE).unwrap()));
+
     let stack_pre = machine.cpu_state.registers.sp;
     machine.cpu_state.registers.x0 = 11;
     main_loop(&mut machine, KERNEL_ADDRESS, SDIV).unwrap();

@@ -43,10 +43,10 @@ pub struct Armv8AMachine {
 }
 
 impl Armv8AMachine {
-    pub fn new(memory_size: u64) -> Pin<Box<Self>> {
+    pub fn new(memory_size: MemorySize) -> Pin<Box<Self>> {
         let mem = MemoryRegion::new("ram", memory_size).unwrap();
         let mut cpu_state = ExecutionState::default();
-        cpu_state.registers.sp = memory_size / 2;
+        cpu_state.registers.sp = memory_size.get() / 2;
         let entry_blocks = FxHashMap::default();
         Box::pin(Self {
             pc: 0,

@@ -20,7 +20,12 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use simulans::{machine, main_loop, memory::KERNEL_ADDRESS};
+use std::num::NonZero;
+
+use simulans::{
+    machine, main_loop,
+    memory::{MemorySize, KERNEL_ADDRESS},
+};
 
 #[test]
 fn test_simple_if() {
@@ -73,7 +78,7 @@ fn test_simple_if() {
     //     csel    w0, w9, w8, eq
     //     ret
     // ```
-    const FOOBAR: &[u8] =
+    const _FOOBAR: &[u8] =
         b"\x08\x7c\x00\x1b\x09\x78\x1f\x53\x1f\x00\x00\x72\x20\x01\x88\x1a\xc0\x03\x5f\xd6";
     // _ = simulans::disas(FOOBAR);
     // Capstone output:
@@ -104,11 +109,15 @@ fn test_simple_if() {
     // 0x40080050: add sp, sp, #0x10
     // 0x40080054: ret
     // env_logger::init();
-    let mut machine = machine::Armv8AMachine::new(0x40080000 + 2 * FOOBAR_UNOPT.len() as u64); // Pass "10" as `num`
+    const MEMORY_SIZE: u64 = (KERNEL_ADDRESS + 2 * FOOBAR_UNOPT.len()) as u64;
+    let mut machine = machine::Armv8AMachine::new(MemorySize(NonZero::new(MEMORY_SIZE).unwrap()));
+
+    // Pass "10" as `num`
     machine.cpu_state.registers.x0 = 10;
     main_loop(&mut machine, KERNEL_ADDRESS, FOOBAR_UNOPT).unwrap();
     assert_eq!(machine.cpu_state.registers.x0, 20);
-    let mut machine = machine::Armv8AMachine::new(0x40080000 + 2 * FOOBAR_UNOPT.len() as u64);
+    let mut machine = machine::Armv8AMachine::new(MemorySize(NonZero::new(MEMORY_SIZE).unwrap()));
+
     // Pass "11" as `num`
     machine.cpu_state.registers.x0 = 11;
     main_loop(&mut machine, KERNEL_ADDRESS, FOOBAR_UNOPT).unwrap();
