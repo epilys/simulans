@@ -563,7 +563,7 @@ impl BlockTranslator<'_> {
     }
 
     #[inline]
-    fn sysreg_to_var(&mut self, reg: &bad64::SysReg) -> &Variable {
+    fn sysreg_to_var(&self, reg: &bad64::SysReg) -> &Variable {
         self.sys_registers.get(reg).unwrap_or_else(|| {
             unimplemented!("unimplemented sysreg {reg:?}");
         })
@@ -821,7 +821,7 @@ impl BlockTranslator<'_> {
         masked_value
     }
 
-    fn operand_width(&mut self, operand: &bad64::Operand) -> Width {
+    fn operand_width(&self, operand: &bad64::Operand) -> Width {
         use bad64::{Operand, Reg};
 
         let reg = match operand {
