@@ -107,6 +107,7 @@
 core::compile_error!("Can only be compiled on targets with 64bit address support");
 
 pub mod cpu_state;
+pub mod fdt;
 pub mod jit;
 pub mod machine;
 pub mod memory;
@@ -139,7 +140,9 @@ pub fn main_loop(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut jit_block = jit::JitContext::new();
     machine.load_code(code, start_address)?;
-    machine.pc = start_address.try_into().unwrap();
+    if machine.pc == 0 {
+        machine.pc = start_address.try_into().unwrap();
+    }
     let mut func = machine.lookup_entry_func;
     while machine.halted == 0 {
         func = (func.0)(&mut jit_block, machine);

@@ -816,6 +816,7 @@ dependencies = [
  "nix",
  "num-traits",
  "rustc-hash 2.1.1",
+ "vm-fdt",
 ]
 
 [[package]]
@@ -882,6 +883,12 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vm-fdt"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e21282841a059bb62627ce8441c491f09603622cd5a21c43bfedc85a2952f23"
 
 [[package]]
 name = "wasmtime-jit-icache-coherence"

@@ -87,6 +87,10 @@ fn run_app(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     // Create the machine instance, which holds the VM state.
     let mut machine = machine::Armv8AMachine::new(args.memory);
     disas(&input, args.start_address.0)?;
+    if args.generate_fdt {
+        machine.generate_fdt(args.start_address)?;
+    }
+
     main_loop(
         &mut machine,
         args.start_address.0.try_into().unwrap(),

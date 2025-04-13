@@ -119,6 +119,10 @@ pub struct Args {
     /// Path to binary file containing aarch64 instructions (NOT an ELF file!)
     #[arg(value_name = "BINARY")]
     pub binary: PathBuf,
+
+    /// Whether to generate an FDT and pass it as `x0` or not.
+    #[arg(short, long, default_value_t = true)]
+    pub generate_fdt: bool,
 }
 
 impl Args {
