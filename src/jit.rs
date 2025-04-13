@@ -159,7 +159,7 @@ impl JitContext {
         let code = unsafe {
             std::mem::transmute::<
                 *const u8,
-                for<'a, 'b> extern "C" fn(&'a mut JitContext, &'b mut Armv8AMachine) -> Entry,
+                for<'a, 'b> extern "C" fn(&'a mut Self, &'b mut Armv8AMachine) -> Entry,
             >(self.module.get_finalized_function(id))
         };
 
