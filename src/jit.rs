@@ -269,18 +269,15 @@ impl FunctionTranslator<'_> {
     fn translate_o0_op1_CRn_CRm_op2(&mut self, o0: u8, o1: u8, cm: u8, cn: u8, o2: u8) -> Value {
         match (o0, o1, cm, cn, o2) {
             (0b11, 0, 0, 0b111, 0) => {
-                // ID_AA64MMFR0_EL1
-                // FIXME
+                // [ref:FIXME]: ID_AA64MMFR0_EL1
                 self.builder.ins().iconst(I64, 0)
             }
             (0b11, 0, 0, 0, 0) => {
-                // MIDR_EL1
-                // FIXME
+                // [ref:FIXME]: MIDR_EL1
                 self.builder.ins().iconst(I64, 0)
             }
             (3, 0, 0, 0, 5) => {
-                // MPIDR_EL1
-                // FIXME
+                // [ref:FIXME]: MPIDR_EL1
                 self.builder.ins().iconst(I64, 0)
             }
             _other => unimplemented!(
@@ -326,7 +323,7 @@ impl FunctionTranslator<'_> {
         let z = self.builder.ins().uextend(I64, z);
         let c = self.builder.ins().uextend(I64, c);
         let v = self.builder.ins().uextend(I64, v);
-        // FIXME: make sure what kind of int bit width nzcv have
+        // [ref:verify_implementation]: make sure what kind of int bit width nzcv have
         // let n = self.builder.ins().ireduce(I8, n);
         // let z = self.builder.ins().ireduce(I8, z);
         // let c = self.builder.ins().ireduce(I8, c);
@@ -866,7 +863,7 @@ impl FunctionTranslator<'_> {
             Op::NOP => {}
             // Special registers
             Op::MSR => {
-                // TODO: AArch64.CheckSystemAccess
+                // [ref:can_trap]
                 let target = match instruction.operands()[0] {
                     bad64::Operand::SysReg(ref sysreg) => *self.sysreg_to_var(sysreg),
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
@@ -875,8 +872,8 @@ impl FunctionTranslator<'_> {
                 self.builder.def_var(target, value);
             }
             Op::MRS => {
-                // TODO: AArch64.CheckSystemAccess
                 // Move System register to general-purpose register
+                // [ref:can_trap]
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -961,7 +958,8 @@ impl FunctionTranslator<'_> {
                     Offset32::new(0),
                 );
             }
-            Op::STRB => {
+            Op::STLRB | Op::STRB => {
+                // For STLRB: [ref:atomics]: We don't model exclusive access (yet).
                 let value = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -1170,7 +1168,7 @@ impl FunctionTranslator<'_> {
                 self.builder.def_var(target, value);
             }
             Op::SUBS => {
-                // FIXME: update NZCV flags
+                // [ref:FIXME]: update NZCV flags
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -1197,7 +1195,8 @@ impl FunctionTranslator<'_> {
                 self.builder.def_var(target, value);
             }
             Op::SDIV => {
-                // TODO: verify
+                // [ref:verify_implementation]
+
                 // constant bits(datasize) operand1 = X[n, datasize];
                 // constant bits(datasize) operand2 = X[m, datasize];
                 // constant integer dividend = SInt(operand1);
@@ -1372,8 +1371,9 @@ impl FunctionTranslator<'_> {
             }
             // Bit-ops
             Op::BFI => {
-                // TODO: verify
                 // Bitfield insert
+                // [ref:verify_implementation]
+
                 // This instruction copies a bitfield of <width> bits from the least significant
                 // bits of the source register to bit position <lsb> of the destination
                 // register, leaving the other destination bits unchanged.
@@ -1651,7 +1651,7 @@ impl FunctionTranslator<'_> {
             Op::CLASTA => todo!(),
             Op::CLASTB => todo!(),
             Op::CLREX => {
-                // TODO: We don't model exclusive access (yet).
+                // [ref:atomics]: We don't model exclusive access (yet).
             }
             Op::CLS => todo!(),
             Op::CLZ => todo!(),
@@ -1738,7 +1738,7 @@ impl FunctionTranslator<'_> {
             Op::EORTB => todo!(),
             Op::EORV => todo!(),
             Op::ERET => {
-                // FIXME: select current EL from PSTATE, and jump to ELR_ELx.
+                // [ref:FIXME]: select current EL from PSTATE, and jump to ELR_ELx.
             }
             Op::ERETAA => todo!(),
             Op::ERETAB => todo!(),
@@ -1954,7 +1954,7 @@ impl FunctionTranslator<'_> {
             Op::LDAXP => todo!(),
             Op::LDAXR => todo!(),
             Op::LDAXRB => {
-                // TODO: We don't model exclusive access (yet).
+                // [ref:atomics]: We don't model exclusive access (yet).
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -2456,7 +2456,6 @@ impl FunctionTranslator<'_> {
             Op::STLLRB => todo!(),
             Op::STLLRH => todo!(),
             Op::STLR => todo!(),
-            Op::STLRB => todo!(),
             Op::STLRH => todo!(),
             Op::STLUR => todo!(),
             Op::STLURB => todo!(),
@@ -2509,7 +2508,7 @@ impl FunctionTranslator<'_> {
             Op::STXP => todo!(),
             Op::STXR => todo!(),
             Op::STXRB => {
-                // TODO: We don't model exclusive access (yet).
+                // [ref:atomics]: We don't model exclusive access (yet).
                 let status_target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -2615,7 +2614,7 @@ impl FunctionTranslator<'_> {
             Op::UCLAMP => todo!(),
             Op::UCVTF => todo!(),
             Op::UDF => {
-                // FIXME: What should we do here?
+                // [ref:FIXME]: What should we do when encountering UDF instructions? Trap?
                 return ControlFlow::Break(None);
             }
             Op::UDIVR => todo!(),

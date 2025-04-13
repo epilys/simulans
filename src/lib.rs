@@ -20,6 +20,44 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+#![doc = include_str!("../README.md")]
+//!
+//! # Cross-references in source code
+//!
+//! We use [**`tagref`**](https://github.com/stepchowfun/tagref) annotations to manage
+//! cross-references inside source-code. You do not have to use the CLI itself,
+//! it's useful to verify that references are valid and also list/query
+//! references. Otherwise you can just search for tag/ref names manually when
+//! browsing source code.
+//!
+//! Their main use is tracking places of code that lack implementation of
+//! specific features (such as memory atomics).
+//!
+//! ## Authoritative tags
+//!
+//! Tags need to be declared exactly once in source code. Here follows a list,
+//! which since it's included in the source as `rustdoc` comments, they are also
+//! tag definitions.
+//!
+//! ### Generic Code/implementation tags
+//!
+//! - `[tag:TODO]: General TODO items.`
+//! - `[tag:FIXME]: General FIXME items.`
+//! - `[tag:dubious_implementation]: Code that is most definitely not
+//!   implemented correctly.`
+//! - `[tag:verify_implementation]: Code that we should look back at with fresh
+//!   eyes.`
+//!
+//! ### Architectural feature tags
+//!
+//! - `[tag:memory_ordering]: Code that implements memory ordering.`
+//! - `[tag:atomics]: Code that implements exclusive memory access.`
+//! - `[tag:can_trap]: Code that can trap.`
+//!
+//! ### Peripheral (device model) tags
+//!
+//! - `[tag:interrupts]: Gicv2/Gicv3 related.`
+//! - `[tag:serial]: serial output.`
 pub mod cpu_state;
 pub mod jit;
 pub mod machine;

@@ -311,7 +311,7 @@ impl ExecutionState {
             sp_el1 => SysReg::SP_EL1,
             sp_el2 => SysReg::SP_EL2,
             // sp_el3 => SysReg::SP_EL3,
-            // FIXME: bad64 doesn't have an SP_EL3 variant.
+            // [ref:FIXME]: bad64 doesn't have an SP_EL3 variant.
             tcr_el1 => SysReg::TCR_EL1,
             sctlr_el1 => SysReg::SCTLR_EL1,
             sctlr_el2 => SysReg::SCTLR_EL2,
@@ -430,7 +430,7 @@ impl ExecutionState {
             sp_el1 => SysReg::SP_EL1,
             sp_el2 => SysReg::SP_EL2,
             // sp_el3 => SysReg::SP_EL3,
-            // FIXME: bad64 doesn't have an SP_EL3 variant.
+            // [ref:FIXME]: bad64 doesn't have an SP_EL3 variant.
             tcr_el1 => SysReg::TCR_EL1,
             sctlr_el1 => SysReg::SCTLR_EL1,
             sctlr_el2 => SysReg::SCTLR_EL2,
