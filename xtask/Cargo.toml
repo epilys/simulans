@@ -1,0 +1,16 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+authors = ["Manos Pitsidianakis <manos@pitsidianak.is>"]
+description = "A helper binary crate for simulans development following the cargo-xtask workflow recommended in <https://github.com/matklad/cargo-xtask>"
+repository = "https://github.com/epilys/simulans"
+readme = "README.md"
+license = "EUPL-1.2 OR GPL-3.0-or-later"
+edition = "2021"
+publish = false
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+tempfile = "3"
+
+[workspace]

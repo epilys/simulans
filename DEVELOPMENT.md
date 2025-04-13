@@ -76,6 +76,29 @@ Under [`tests/`](./tests/) you will find integration tests that run small
 programs of a few instructions and check the processor state before and after
 execution.
 
+### Generating test case input
+
+#### With `xtask` utility
+
+Instead of the following manual instructions you can use the `xtask` tool provided in this repository that automates the steps.
+
+Example usage:
+
+```sh
+$ cat sdiv.S
+sub sp, sp, #0x10
+str w0, [sp, #8]
+ldr w8, [sp, #8]
+mov w9, #2
+sdiv w8, w8, w9
+$ cargo xtask compile-assembly-to-rust-slice sdiv.S
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running `xtask/target/debug/xtask compile-assembly-to-rust-slice test_sdiv.s`
+const TEST_INPUT: &[u8] = b"\xff\x43\x0\xd1\xe0\xb\x0\xb9\xe8\xb\x40\xb9\x49\x0\x80\x52\x8\xd\xc9\x1a";
+```
+
+#### Manually
+
 You can add new test cases by generating a Rust byte slice literal and including it in the test function.
 
 Example:
@@ -84,7 +107,7 @@ Example:
 xxd -c 1 -plain program.bin|sed -e 's/^/\\x/' |paste -s -d ""
 ```
 
-## Generating binary from assembly code
+##### Generating binary from assembly code
 
 You might wish to test the emulator with custom aarch64 assembly.
 
@@ -92,8 +115,6 @@ You might wish to test the emulator with custom aarch64 assembly.
 2. Convert to object file with `as`, then link into an ELF with `ld`, then extract binary from ELF with `objcopy`:
 
    ```sh
-   #!/bin/sh
-
    base=$(basename "${1}" .s)
    aarch64-linux-gnu-as "${base}.s" -o "${base}.o"
    aarch64-linux-gnu-ld "${base}.o" -o "${base}"
@@ -107,7 +128,7 @@ Pass the `program.bin` path as an argument when you run the application e.g.
 cargo run -- ./program.bin
 ```
 
-## Running the stand-alone test unikernel
+### Running the stand-alone test unikernel
 
 A unikernel in Rust that prints a "hello world" message and halts is included in the `test_kernel/` sub-directory.
 
