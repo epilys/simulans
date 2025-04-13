@@ -20,6 +20,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! Execution state of an emulated CPU or Processing Element (PE), in Arm terms.
+
 #![allow(non_snake_case)]
 
 use bilge::prelude::*;
@@ -28,6 +30,7 @@ use cranelift::prelude::*;
 use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
+/// Regular registers.
 #[derive(Default, Debug)]
 #[repr(C)]
 pub struct RegisterFile {
@@ -117,6 +120,7 @@ pub struct RegisterFile {
 
 #[bitsize(2)]
 #[derive(Default, FromBits, Debug)]
+/// Current exception level, part of [`PSTATE`].
 pub enum CurrentEl {
     EL0 = 0b00,
     EL1 = 0b01,
@@ -127,6 +131,9 @@ pub enum CurrentEl {
 
 #[bitsize(1)]
 #[derive(Default, FromBits, Debug)]
+/// Architectural mode, part of [`PSTATE`].
+///
+/// We only support `Aarch64` mode, but add an enum for it for completeness.
 pub enum ArchMode {
     #[default]
     _64 = 0,
@@ -135,6 +142,7 @@ pub enum ArchMode {
 
 #[bitsize(1)]
 #[derive(Default, FromBits, Debug)]
+/// Stack register selector, part of [`PSTATE`].
 pub enum SpSel {
     #[default]
     SpEl0 = 0,
@@ -143,6 +151,7 @@ pub enum SpSel {
 
 #[bitsize(5)]
 #[derive(Default, FromBits, Debug)]
+/// Processing Element (PE) mode.
 pub enum Mode {
     User = 0b10000,
     FIQ = 0b10001,
@@ -159,6 +168,7 @@ pub enum Mode {
 
 #[bitsize(64)]
 #[derive(Default, Copy, Clone, FromBits, DebugBits)]
+/// Saved status register (`SPSR_ELx`).
 pub struct SavedProgramStatusRegister {
     pub _padding: u32,
     /// Negative condition flag. (bit `[31]`)
@@ -209,6 +219,19 @@ pub struct SavedProgramStatusRegister {
 #[repr(C)]
 #[derive(Default, Debug)]
 #[allow(non_snake_case)]
+/// `PSTATE` isn't an architectural register for ARMv8. Its bit fields are
+/// accessed through special-purpose registers.
+///
+/// The special registers are:
+///
+/// | Special purpose register | Description                                                                                     | `PSTATE` fields |
+/// | ------------------------ | ----------------------------------------------------------------------------------------------- | --------------- |
+/// | `CurrentEL`              | Holds the current Exception level.                                                              | `EL`            |
+/// | `DAIF`                   | Specifies the current interrupt mask bits.                                                      | `D, A, I, F`    |
+/// | `DAIFSet`                | Sets any of the `PSTATE.{D,A, I, F}` bits to `1`                                                | `D, A, I, F`    |
+/// | `DAIFClr`                | Sets any of the `PSTATE.{D,A, I, F}` bits to `0`                                                | `D, A, I, F`    |
+/// | `NZCV`                   | Holds the condition flags.                                                                      | `N, Z, C, V`    |
+/// | `SPSel`                  | At `EL1` or higher, this selects between the `SP` for the current Exception level and `SP_EL0`. | `SP`            |
 pub struct PSTATE {
     /// Negative condition flag.
     pub N: u64,
@@ -232,13 +255,15 @@ pub struct PSTATE {
     pub IL: u64,
     /// (2) Exception level.
     pub EL: CurrentEl,
-    /// Execution state
+    /// Architectural mode.
+    ///
     /// ```text
     /// 0 = 64-bit
     /// 1 = 32-bit
     /// ```
     pub nRW: ArchMode,
     /// Stack pointer selector.
+    ///
     /// ```text
     /// 0 = SP_EL0
     /// 1 = SP_ELn
@@ -249,29 +274,23 @@ pub struct PSTATE {
 #[repr(C)]
 #[derive(Default, Debug)]
 pub struct ExecutionState {
+    /// Regular registers.
     pub registers: RegisterFile,
+    /// Vector (SIMD) registers.
     pub vector_registers: [(u64, u64); 32],
-    /// `PSTATE` isn't an architectural register for ARMv8. Its bit fields are
-    /// accessed through special-purpose registers.
-    ///
-    /// The special registers are:
-    ///
-    /// | Special purpose register | Description                                                                                     | `PSTATE` fields |
-    /// | ------------------------ | ----------------------------------------------------------------------------------------------- | --------------- |
-    /// | `CurrentEL`              | Holds the current Exception level.                                                              | `EL`            |
-    /// | `DAIF`                   | Specifies the current interrupt mask bits.                                                      | `D, A, I, F`    |
-    /// | `DAIFSet`                | Sets any of the `PSTATE.{D,A, I, F}` bits to `1`                                                | `D, A, I, F`    |
-    /// | `DAIFClr`                | Sets any of the `PSTATE.{D,A, I, F}` bits to `0`                                                | `D, A, I, F`    |
-    /// | `NZCV`                   | Holds the condition flags.                                                                      | `N, Z, C, V`    |
-    /// | `SPSel`                  | At `EL1` or higher, this selects between the `SP` for the current Exception level and `SP_EL0`. | `SP`            |
+    /// Process Element state.
     pub pstate: PSTATE,
+    /// Saved status register (`SPSR_ELx`).
     pub spsr: SavedProgramStatusRegister,
+    /// Architectural features this CPU supports.
     pub arch_features: ArchFeatures,
 }
 
 impl ExecutionState {
-    /// Add JIT instructions to assign a variable for each register and set it
-    /// with its value.
+    /// Generate JIT instructions to assign a variable for each register and set
+    /// it with its value.
+    ///
+    /// Used as a preamble to a translation block.
     pub fn load_cpu_state(
         &self,
         builder: &mut FunctionBuilder,
@@ -388,7 +407,9 @@ impl ExecutionState {
         }
     }
 
-    /// Add JIT instructions to store register values back to `self`.
+    /// Generate JIT instructions to store register values back to `self`.
+    ///
+    /// Used as an epilogue of a translation block.
     pub fn save_cpu_state(
         &self,
         builder: &mut FunctionBuilder,
@@ -506,12 +527,14 @@ impl ExecutionState {
 }
 
 bitflags::bitflags! {
+    /// Bitflag of architectural features, currently does not affect emulation at all.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct ArchFeatures: u64 {
         const FEAT_LSE = 0b00000001;
     }
 }
 
+/// Default value is `FEAT_LSE`.
 impl Default for ArchFeatures {
     fn default() -> Self {
         Self::FEAT_LSE

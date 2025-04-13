@@ -20,6 +20,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! Representation of an emulated machine.
+
 use std::pin::Pin;
 
 use rustc_hash::FxHashMap;

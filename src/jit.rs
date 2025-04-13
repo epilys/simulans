@@ -20,6 +20,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! Generation of JIT code as translation blocks.
+
 use std::{ops::ControlFlow, pin::Pin};
 
 use codegen::ir::types::{I64, I8};
@@ -33,8 +35,14 @@ use crate::{cpu_state::ExecutionState, machine::Armv8AMachine};
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
+/// An "entry" function for a block.
+///
+/// It can be either a JIT compiled translation block, or a special emulator
+/// function.
 pub struct Entry(pub extern "C" fn(&mut JitContext, &mut Armv8AMachine) -> Entry);
 
+/// Lookup [`machine.pc`] in cached entry blocks
+/// ([`Armv8AMachine::entry_blocks`]).
 #[no_mangle]
 pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMachine) -> Entry {
     let pc: u64 = machine.pc;
@@ -58,6 +66,7 @@ fn is_vector(reg: &bad64::Reg) -> bool {
     ((Reg::V0 as u32)..=(Reg::Q31 as u32)).contains(&reg)
 }
 
+/// JIT context/builder used to disassemble code and JIT compile it.
 pub struct JitContext {
     /// The function builder context, which is reused across multiple
     /// FunctionBuilder instances.
@@ -72,6 +81,7 @@ pub struct JitContext {
 }
 
 impl JitContext {
+    /// Returns a new [`JitContext`].
     pub fn new() -> Pin<Box<Self>> {
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
@@ -92,6 +102,8 @@ impl JitContext {
         })
     }
 
+    /// Performs compilation of a block starting at `program_counter`] and
+    /// returns an [`Entry`] for it.
     pub fn compile(
         &mut self,
         machine: &mut Armv8AMachine,
@@ -111,6 +123,8 @@ impl JitContext {
         // Actually perform the translation for this translation block
         self.translate(machine, program_counter)?;
 
+        // We generate the translated block as a Cranelift function.
+        //
         // Functions must be declared before they can be called, or defined.
         let id = self.module.declare_function(
             &format!("0x{program_counter:x}"),
@@ -152,7 +166,7 @@ impl JitContext {
         Ok(Entry(code))
     }
 
-    // Translate instructions starting from address `program_counter`.
+    /// Translate instructions starting from address `program_counter`.
     fn translate(
         &mut self,
         machine: &mut Armv8AMachine,
@@ -199,7 +213,7 @@ impl JitContext {
             machine_addr as i64,
         );
         let sigref = builder.import_signature(builder.func.signature.clone());
-        let mut trans = FunctionTranslator {
+        let mut trans = BlockTranslator {
             pointer_type: self.module.target_config().pointer_type(),
             mem_start: mem.map.as_ptr() as usize as i64,
             cpu_state,
@@ -233,16 +247,16 @@ impl JitContext {
             // We are out of code, so halt the machine
             trans.emit_halt();
         }
-        let FunctionTranslator { builder, .. } = trans;
+        let BlockTranslator { builder, .. } = trans;
 
-        // Tell the builder we're done with this function.
+        // Tell the builder we're done with this block (function in Cranelift terms).
         builder.finalize();
         Ok(())
     }
 }
 
 /// In-progress state of translating instructions into Cranelift IR.
-struct FunctionTranslator<'a> {
+struct BlockTranslator<'a> {
     mem_start: i64,
     builder: FunctionBuilder<'a>,
     cpu_state: &'a mut ExecutionState,
@@ -256,6 +270,7 @@ struct FunctionTranslator<'a> {
 
 #[derive(Clone, Copy)]
 #[repr(i32)]
+/// Register/memory width in bits.
 enum Width {
     _128 = 128,
     _64 = 64,
@@ -264,8 +279,9 @@ enum Width {
     _8 = 8,
 }
 
-impl FunctionTranslator<'_> {
+impl BlockTranslator<'_> {
     #[allow(non_snake_case)]
+    /// Return [`Value`] for special registers.
     fn translate_o0_op1_CRn_CRm_op2(&mut self, o0: u8, o1: u8, cm: u8, cn: u8, o2: u8) -> Value {
         match (o0, o1, cm, cn, o2) {
             (0b11, 0, 0, 0b111, 0) => {
@@ -287,11 +303,10 @@ impl FunctionTranslator<'_> {
         }
     }
 
+    /// Perform `AddWithCarry` operation.
+    ///
+    /// Integer addition with carry input, returning result and NZCV flags
     fn add_with_carry(&mut self, x: Value, y: Value, carry_in: bool) -> (Value, [Value; 4]) {
-        // / AddWithCarry()
-        // // ==============
-        // // Integer addition with carry input, returning result and NZCV flags
-
         let (mut unsigned_sum, mut overflow_1) = self.builder.ins().uadd_overflow(x, y);
         if carry_in {
             let one = self.builder.ins().iconst(I64, 1);
@@ -340,6 +355,7 @@ impl FunctionTranslator<'_> {
         (result, [n, z, c, v])
     }
 
+    /// Update CPU state of NZCV flags.
     fn update_nzcv(&mut self, [n, z, c, v]: [Value; 4]) {
         self.builder.ins().store(
             MemFlags::trusted().with_vmctx(),
@@ -840,6 +856,7 @@ impl FunctionTranslator<'_> {
         }
     }
 
+    /// JIT a single instrunction.
     fn translate_instruction(
         &mut self,
         instruction: bad64::Instruction,
@@ -2826,6 +2843,7 @@ impl FunctionTranslator<'_> {
         source_instruction: &bad64::Instruction,
         dest_label: Value,
     ) -> ControlFlow<Option<Value>> {
+        // [ref:TODO]: Check `dest_label` alignment.
         let pc = self
             .builder
             .ins()
