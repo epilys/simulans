@@ -26,9 +26,12 @@ memmap2 = { version = "0.9.5" }
 nix = { version = "0.29.0", features = ["mman", "fs"] }
 num-traits = { version = "0.2.19" }
 rustc-hash = "2.1.1"
+serde = "1"
+serde_derive = "1"
+serde_json = "1"
 vm-fdt = "0.3.0"
 
 [features]
-default = []
+default = ["accurate-pc"]
 # Update program counter before executing an emulated instruction. The performance overhead of this has not been measured.
 accurate-pc = []
