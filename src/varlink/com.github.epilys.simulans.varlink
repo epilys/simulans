@@ -1,0 +1,96 @@
+interface com.github.epilys.simulans
+
+type GenericRegisters (
+  x0: int,
+  x1: int,
+  x2: int,
+  x3: int,
+  x4: int,
+  x5: int,
+  x6: int,
+  x7: int,
+  x8: int,
+  x9: int,
+  x10: int,
+  x11: int,
+  x12: int,
+  x13: int,
+  x14: int,
+  x15: int,
+  x16: int,
+  x17: int,
+  x18: int,
+  x19: int,
+  x20: int,
+  x21: int,
+  x22: int,
+  x23: int,
+  x24: int,
+  x25: int,
+  x26: int,
+  x27: int,
+  x28: int,
+  x29: int,
+  x30: int,
+  sp: int,
+  sp_el0: int,
+  sp_el1: int,
+  sp_el2: int,
+  sp_el3: int,
+  pstate: int
+)
+
+type SystemRegisters (
+  ttbr0_el1: int,
+  vttbr_el2: int,
+  mair_el1: int,
+  vpidr_el2: int,
+  vmpidr_el2: int,
+  id_aa64mmfr0_el1: int,
+  tcr_el1: int,
+  sctlr_el1: int,
+  sctlr_el2: int,
+  sctlr_el3: int,
+  cpacr_el1: int,
+  vbar_el1: int,
+  hcr_el2: int,
+  scr_el3: int,
+  spsr_el3: int,
+  elr_el1: int,
+  elr_el2: int,
+  elr_el3: int
+)
+
+type MemoryRangeValue (
+  offset: int,
+  length: int,
+  content: []int
+)
+
+type MachineProperties (
+  pc: int,
+  prev_pc: int,
+  memory_phys_offset: int,
+  memory_size: int,
+  content: []int,
+  entry_blocks: []int,
+  halted: bool
+)
+
+type Instruction (address: int, assembly: string)
+
+method GetGenericRegisters() -> (registers: GenericRegisters)
+
+method GetSystemRegisters() -> (registers: SystemRegisters)
+
+method GetRegister(name: string) -> (value: ?int)
+
+method GetMemoryValue(address: int) -> (value: ?int)
+
+method GetMemoryRangeValue(address: int, length: int) -> (value: ?MemoryRangeValue)
+
+method GetMachineProperties() -> (value: MachineProperties)
+
+method StepI() -> (new_pc: ?int, halted: ?bool)
+
+method GetDisassembly(address: ?int, length: int) -> (value: []Instruction)
