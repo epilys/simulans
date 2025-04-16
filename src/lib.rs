@@ -108,6 +108,7 @@ core::compile_error!("Can only be compiled on targets with 64bit address support
 
 pub mod cpu_state;
 pub mod fdt;
+pub mod interval_tree;
 pub mod jit;
 pub mod machine;
 pub mod memory;
