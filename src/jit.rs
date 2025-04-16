@@ -52,7 +52,7 @@ pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMac
     }
     log::trace!("generating entry for pc 0x{:x}", pc);
 
-    let next_entry = context.compile(machine, pc.try_into().unwrap()).unwrap();
+    let next_entry = context.compile(machine, pc).unwrap();
     machine.entry_blocks.insert(pc, next_entry);
 
     log::trace!("returning generated entry for pc 0x{:x}", pc);
@@ -107,7 +107,7 @@ impl JitContext {
     pub fn compile(
         &mut self,
         machine: &mut Armv8AMachine,
-        program_counter: usize,
+        program_counter: u64,
     ) -> Result<Entry, Box<dyn std::error::Error>> {
         log::trace!("jit compile called for pc = 0x{:x}", program_counter);
         let mut sig = self.module.make_signature();
@@ -170,7 +170,7 @@ impl JitContext {
     fn translate(
         &mut self,
         machine: &mut Armv8AMachine,
-        program_counter: usize,
+        program_counter: u64,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::ops::Deref;
 
@@ -183,17 +183,17 @@ impl JitContext {
             ..
         } = machine;
 
-        if program_counter < mem.phys_offset {
+        if program_counter < mem.phys_offset.0 {
             return Err(format!(
                 "Received program counter {} which is below offset of DRAM {}.",
-                Address(program_counter as u64),
-                Address(mem.phys_offset as u64),
+                Address(program_counter),
+                mem.phys_offset,
             )
             .into());
         }
         let decoded_iter = bad64::disasm(
-            &mem.map.deref()[program_counter - mem.phys_offset..],
-            program_counter as u64,
+            &mem.map.deref()[(program_counter - mem.phys_offset.0).try_into().unwrap()..],
+            program_counter,
         );
 
         let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
@@ -227,7 +227,7 @@ impl JitContext {
         let mut trans = BlockTranslator {
             pointer_type: self.module.target_config().pointer_type(),
             host_mem_start: mem.map.as_ptr() as usize as i64,
-            guest_mem_start: mem.phys_offset as i64,
+            guest_mem_start: mem.phys_offset.0 as i64,
             cpu_state,
             jit_ctx_ptr,
             machine_ptr,

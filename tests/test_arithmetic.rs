@@ -48,8 +48,9 @@ fn test_sdiv() {
     assert_eq!(stack_post, stack_pre - 0x10);
     assert_eq!(machine.cpu_state.registers.x8, 5);
     assert_eq!(machine.cpu_state.registers.x9, 2);
+    let phys_offset = machine.mem.phys_offset.0 as usize;
     assert_eq!(
-        machine.mem.map.as_ref()[stack_post as usize - machine.mem.phys_offset + 0x18 - 0x10],
+        machine.mem.map.as_ref()[stack_post as usize - phys_offset + 0x18 - 0x10],
         11
     );
 }

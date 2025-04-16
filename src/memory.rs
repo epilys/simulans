@@ -22,12 +22,17 @@
 
 #![allow(clippy::len_without_is_empty)]
 
-use std::{ffi::CString, num::NonZero, os::fd::OwnedFd};
+mod address;
+mod size;
 
+use std::{cmp::Ordering, ffi::CString, ops::Range, os::fd::OwnedFd};
+
+pub use address::*;
 use nix::{
     errno::Errno,
     sys::{memfd, mman::ProtFlags},
 };
+pub use size::*;
 
 /// Default guest physical address to load kernel code to.
 pub const KERNEL_ADDRESS: usize = 0x40080000;
@@ -37,10 +42,55 @@ pub const PHYS_MEM_START: u64 = 0x40000000;
 
 pub struct MemoryRegion {
     /// Offset from start of physical address space.
-    pub phys_offset: usize,
+    pub phys_offset: Address,
     pub size: MemorySize,
     pub fd: OwnedFd,
     pub map: memmap2::MmapMut,
+}
+
+impl std::fmt::Debug for MemoryRegion {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fmt.debug_struct("MemoryRegion")
+            .field("type", &"mmap")
+            .field("size", &self.size)
+            .field("fd", &self.fd)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Ord for MemoryRegion {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let a = Range::<Address>::from(self);
+        let b = Range::<Address>::from(other);
+        (a.start, a.end).cmp(&(b.start, b.end))
+    }
+}
+
+impl PartialOrd for MemoryRegion {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for MemoryRegion {
+    fn eq(&self, other: &Self) -> bool {
+        use std::os::fd::AsRawFd;
+
+        (self.phys_offset, self.size, self.fd.as_raw_fd())
+            == (other.phys_offset, other.size, other.fd.as_raw_fd())
+    }
+}
+
+impl Eq for MemoryRegion {}
+
+impl From<&MemoryRegion> for Range<Address> {
+    fn from(mr: &MemoryRegion) -> Self {
+        let start = mr.phys_offset;
+        Self {
+            start,
+            end: Address(start.0 + mr.size.0.get()),
+        }
+    }
 }
 
 impl MemoryRegion {
@@ -66,7 +116,7 @@ impl MemoryRegion {
         let u_size: usize = size.get().try_into().map_err(|_| Errno::ERANGE)?;
         debug_assert_eq!(map.len(), u_size);
         Ok(Self {
-            phys_offset,
+            phys_offset: Address(phys_offset as u64),
             size,
             fd,
             map,
@@ -79,72 +129,29 @@ impl MemoryRegion {
     }
 }
 
-#[derive(Copy, Clone)]
-#[repr(transparent)]
-pub struct Address(pub u64);
-
-impl std::fmt::Display for Address {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(fmt, "0x{:x}", self.0)
-    }
+/// A non-owning analogue of [`MemoryRegion`] that describes its characteristics
+/// but does not own its memory or holds any reference to it.
+pub struct MemoryRegionDescription {
+    pub start_offset: Address,
+    pub size: MemorySize,
 }
 
-impl std::fmt::Debug for Address {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(fmt, "0x{:x}", self.0)
-    }
-}
-
-#[derive(Copy, Clone)]
-#[repr(transparent)]
-pub struct MemorySize(pub NonZero<u64>);
-
-#[allow(non_upper_case_globals)]
-impl MemorySize {
-    // SAFETY: value is non-zero.
-    pub const KiB: NonZero<u64> = NonZero::new(1024).unwrap();
-    // SAFETY: value is non-zero.
-    pub const MiB: NonZero<u64> = NonZero::new(Self::KiB.get() * 1024).unwrap();
-    // SAFETY: value is non-zero.
-    pub const GiB: NonZero<u64> = NonZero::new(Self::MiB.get() * 1024).unwrap();
-
-    /// Get `u64` value.
-    #[inline]
-    pub const fn get(self) -> u64 {
-        self.0.get()
-    }
-}
-
-impl std::fmt::Display for MemorySize {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let bytes = self.get();
-        if bytes == 0 {
-            write!(fmt, "0")
-        } else if bytes < Self::KiB.get() {
-            write!(fmt, "{}bytes", bytes)
-        } else if bytes < Self::MiB.get() {
-            write!(fmt, "{}KiB", bytes / Self::KiB)
-        } else if bytes < Self::GiB.get() {
-            write!(fmt, "{}MiB", bytes / Self::MiB)
-        } else {
-            write!(fmt, "{}GiB", bytes / Self::GiB)
+impl From<&MemoryRegion> for MemoryRegionDescription {
+    fn from(value: &MemoryRegion) -> Self {
+        Self {
+            start_offset: value.phys_offset,
+            size: value.size,
         }
     }
 }
 
-impl std::fmt::Debug for MemorySize {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let bytes = self.get();
-        if bytes == 0 {
-            write!(fmt, "0")
-        } else if bytes < Self::KiB.get() {
-            write!(fmt, "{}bytes", bytes)
-        } else if bytes < Self::MiB.get() {
-            write!(fmt, "{}KiB", bytes / Self::KiB)
-        } else if bytes < Self::GiB.get() {
-            write!(fmt, "{}MiB", bytes / Self::MiB)
-        } else {
-            write!(fmt, "{}GiB", bytes / Self::GiB)
+impl MemoryRegionDescription {
+    #[inline]
+    pub const fn into_range(&self) -> Range<Address> {
+        let start = self.start_offset;
+        Range {
+            start,
+            end: Address(start.0 + self.size.0.get()),
         }
     }
 }

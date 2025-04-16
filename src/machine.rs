@@ -48,7 +48,7 @@ impl Armv8AMachine {
     pub fn new(memory_size: MemorySize) -> Pin<Box<Self>> {
         let mem = MemoryRegion::new("ram", memory_size, PHYS_MEM_START as usize).unwrap();
         let mut cpu_state = ExecutionState::default();
-        cpu_state.registers.sp = mem.phys_offset as u64 + memory_size.get() / 2;
+        cpu_state.registers.sp = mem.phys_offset.0 + memory_size.get() / 2;
         let entry_blocks = FxHashMap::default();
         Box::pin(Self {
             pc: 0,
@@ -89,13 +89,14 @@ impl Armv8AMachine {
             )
             .into());
         }
-        self.load_code(&fdt, fdt_offset)?;
+        let dtb_ptr = Address(fdt_offset.try_into()?);
+        self.load_code(&fdt, dtb_ptr)?;
 
         let bootloader = Armv8ABootloader {
             entry_point,
-            dtb_ptr: Address(fdt_offset.try_into()?),
+            dtb_ptr,
         };
-        bootloader.write_to_memory(0x4, self)?;
+        bootloader.write_to_memory(Address(0x4), self)?;
         self.pc = 0x4;
 
         Ok(())
@@ -105,44 +106,45 @@ impl Armv8AMachine {
     pub fn load_code(
         &mut self,
         input: &[u8],
-        address: usize,
+        address: Address,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let Some(input_size) = NonZero::new(input.len().try_into()?) else {
             log::info!("Called `load_code` with empty slice which does nothing.");
             return Ok(());
         };
-        if address < self.mem.phys_offset {
+        if address.0 < self.mem.phys_offset.0 {
             return Err(format!(
                 "Cannot load code to address {} which is below start of DRAM {}.",
-                Address(address as u64),
-                Address(self.mem.phys_offset as u64),
+                address, self.mem.phys_offset
             )
             .into());
         }
-        if (address - self.mem.phys_offset) >= self.mem.len() {
+        if (address.0 - self.mem.phys_offset.0) as usize >= self.mem.len() {
             return Err(format!(
                 "Address {} does not fit into DRAM of size {}.",
-                Address(address as u64),
-                self.mem.size
+                address, self.mem.size
             )
             .into());
         }
-        if (address + input.len() - self.mem.phys_offset) >= self.mem.len() {
+        if (address.0 as usize + input.len() - self.mem.phys_offset.0 as usize) >= self.mem.len() {
             return Err(format!(
                 "Input of size {} cannot fit in DRAM of size {} starting from address {}.",
                 MemorySize(input_size),
                 self.mem.size,
-                Address(address as u64),
+                address
             )
             .into());
         }
-        let address_inside_region = address - self.mem.phys_offset;
+        let address_inside_region = address.0 - self.mem.phys_offset.0;
 
         // SAFETY: We performed boundary checks in the above check.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 input.as_ptr(),
-                self.mem.map.as_mut_ptr().add(address_inside_region),
+                self.mem
+                    .map
+                    .as_mut_ptr()
+                    .add(address_inside_region as usize),
                 input.len(),
             )
         };
@@ -159,7 +161,7 @@ pub struct Armv8ABootloader {
 impl Armv8ABootloader {
     pub fn write_to_memory(
         self,
-        destination: usize,
+        destination: Address,
         machine: &mut Armv8AMachine,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // ```shell

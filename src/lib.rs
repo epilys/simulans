@@ -136,13 +136,13 @@ pub fn disas(input: &[u8], starting_address: u64) -> Result<(), Box<dyn std::err
 
 pub fn main_loop(
     machine: &mut machine::Armv8AMachine,
-    start_address: usize,
+    start_address: memory::Address,
     code: &[u8],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut jit_block = jit::JitContext::new();
     machine.load_code(code, start_address)?;
     if machine.pc == 0 {
-        machine.pc = start_address.try_into().unwrap();
+        machine.pc = start_address.0;
     }
     let mut func = machine.lookup_entry_func;
     while machine.halted == 0 {
