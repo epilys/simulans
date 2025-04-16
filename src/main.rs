@@ -91,11 +91,7 @@ fn run_app(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         machine.generate_fdt(args.start_address)?;
     }
 
-    main_loop(
-        &mut machine,
-        args.start_address.0.try_into().unwrap(),
-        &input,
-    )?;
+    main_loop(&mut machine, args.start_address, &input)?;
     // let sp_el0 = run_aarch64(&mut machine, &input, args.start_address.0)?;
     // log::trace!("sp_el0 = 0x{:x}", sp_el0);
     // log::trace!("cpu state after running is {:#?}", &machine.cpu_state);
