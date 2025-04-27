@@ -2029,8 +2029,31 @@ impl BlockTranslator<'_> {
             Op::CLREX => {
                 // [ref:atomics]: We don't model exclusive access (yet).
             }
-            Op::CLS => todo!(),
-            Op::CLZ => todo!(),
+            Op::CLS => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                // [ref:verify_implementation]
+                let value = self.builder.ins().cls(value);
+                self.builder.def_var(target, value);
+            }
+            Op::CLZ => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().clz(value);
+                self.builder.def_var(target, value);
+            }
             Op::CMEQ => todo!(),
             Op::CMGE => todo!(),
             Op::CMGT => todo!(),
@@ -2565,7 +2588,18 @@ impl BlockTranslator<'_> {
             Op::NAND => todo!(),
             Op::NANDS => todo!(),
             Op::NBSL => todo!(),
-            Op::NEG => todo!(),
+            Op::NEG => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().ineg(value);
+                self.builder.def_var(target, value);
+            }
             Op::NEGS => todo!(),
             Op::NGC => todo!(),
             Op::NGCS => todo!(),
@@ -2619,13 +2653,35 @@ impl BlockTranslator<'_> {
             Op::RADDHNB => todo!(),
             Op::RADDHNT => todo!(),
             Op::RAX1 => todo!(),
-            Op::RBIT => todo!(),
+            Op::RBIT => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().bitrev(value);
+                self.builder.def_var(target, value);
+            }
             Op::RDFFR => todo!(),
             Op::RDFFRS => todo!(),
             Op::RDVL => todo!(),
             Op::RETAA => todo!(),
             Op::RETAB => todo!(),
-            Op::REV => todo!(),
+            Op::REV => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().bswap(value);
+                self.builder.def_var(target, value);
+            }
             Op::REV16 => todo!(),
             Op::REV32 => todo!(),
             Op::REV64 => todo!(),
