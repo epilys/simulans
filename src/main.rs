@@ -64,7 +64,11 @@
 )]
 #![allow(clippy::multiple_crate_versions, clippy::cognitive_complexity)]
 
-use simulans::{disas, machine, main_loop};
+use simulans::{
+    devices::Device,
+    disas, machine, main_loop,
+    memory::{Address, MemoryMap, MemoryRegion, MemorySize},
+};
 
 mod cli;
 use cli::Args;
@@ -85,24 +89,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run_app(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let input = std::fs::read(&args.binary)?;
     // Create the machine instance, which holds the VM state.
-    let mut machine = machine::Armv8AMachine::new(args.memory);
-    disas(&input, args.start_address.0)?;
+
+    let dram_size = args.dram_size();
+    let dram = MemoryRegion::new("ram", dram_size, args.dram_start_address())?;
+    let mut memory_map_builder = MemoryMap::builder(args.memory()).with_region(dram)?;
+    let pl011 = simulans::devices::pl011::PL011State::new(0);
+    memory_map_builder.add_region(MemoryRegion::new_io(
+        MemorySize::new(0x100).unwrap(),
+        Address(0x9000000),
+        pl011.ops(),
+    )?)?;
     if args.generate_fdt {
-        machine.generate_fdt(args.start_address)?;
+        // Add Boot ROM
+        let mut boot_rom = MemoryRegion::new(
+            "boot-rom",
+            MemorySize::new(64 * MemorySize::MiB.get()).unwrap(),
+            Address(0x0),
+        )?;
+        if let Some(rom) = boot_rom.as_mmap_mut() {
+            // Read by gdbstub's memory map XML method.
+            rom.read_only = true;
+        }
+
+        memory_map_builder.add_region(boot_rom)?;
+    }
+    let memory = memory_map_builder.build();
+    let mut machine = machine::Armv8AMachine::new(memory);
+    disas(&input, args.entry_point_address().0)?;
+    if args.generate_fdt {
+        machine.generate_fdt(args.entry_point_address())?;
     }
 
-    main_loop(&mut machine, args.start_address, &input)?;
-    // let sp_el0 = run_aarch64(&mut machine, &input, args.start_address.0)?;
-    // log::trace!("sp_el0 = 0x{:x}", sp_el0);
-    // log::trace!("cpu state after running is {:#?}", &machine.cpu_state);
+    if let Some(path) = args.gdb_stub_path.as_ref() {
+        machine.load_code(&input, args.entry_point_address())?;
+        let gdb_stub = simulans::gdb::GdbStub::new(machine, args.entry_point_address(), 24);
+        simulans::gdb::main_loop(gdb_stub, path);
+    } else {
+        main_loop(&mut machine, args.entry_point_address(), &input)?;
+    }
+
     Ok(())
 }
-
-// fn run_aarch64(
-//     machine: &mut machine::Armv8AMachine,
-//     input: &[u8],
-//     start_address: u64,
-// ) -> Result<i64, Box<dyn std::error::Error>> {
-//     let ret: i64 = unsafe { run_code(machine, start_address.try_into()?,
-// input, ())? };     Ok(ret)
-// }
