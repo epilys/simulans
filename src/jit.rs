@@ -1215,6 +1215,20 @@ impl BlockTranslator<'_> {
             );
         }
         let op = instruction.op();
+
+        // Common implementations
+        macro_rules! b_cnd {
+            ($cnd:ident) => {{
+                let result = self.condition_holds(bad64::Condition::$cnd);
+                let result = self.builder.ins().uextend(I64, result);
+                let label = match instruction.operands()[0] {
+                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
+                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                };
+                let label_value = self.builder.ins().iconst(I64, label as i64);
+                self.branch_if_non_zero(instruction, result, label_value);
+            }};
+        }
         match op {
             Op::NOP => {}
             // Special registers
@@ -1970,40 +1984,22 @@ impl BlockTranslator<'_> {
             Op::BSL1N => todo!(),
             Op::BSL2N => todo!(),
             Op::BTI => todo!(),
-            Op::B_AL => todo!(),
-            Op::B_CC => todo!(),
-            Op::B_CS => {
-                let result = self.condition_holds(bad64::Condition::CS);
-                let result = self.builder.ins().uextend(I64, result);
-                let label = match instruction.operands()[0] {
-                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
-                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
-                };
-                let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(instruction, result, label_value);
-            }
-            Op::B_EQ => {
-                let result = self.condition_holds(bad64::Condition::EQ);
-                let result = self.builder.ins().uextend(I64, result);
-                let label = match instruction.operands()[0] {
-                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
-                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
-                };
-                let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(instruction, result, label_value);
-            }
-            Op::B_GE => todo!(),
-            Op::B_GT => todo!(),
-            Op::B_HI => todo!(),
-            Op::B_LE => todo!(),
-            Op::B_LS => todo!(),
-            Op::B_LT => todo!(),
-            Op::B_MI => todo!(),
-            Op::B_NE => todo!(),
-            Op::B_NV => todo!(),
-            Op::B_PL => todo!(),
-            Op::B_VC => todo!(),
-            Op::B_VS => todo!(),
+            Op::B_AL => b_cnd!(AL),
+            Op::B_CC => b_cnd!(CC),
+            Op::B_CS => b_cnd!(CS),
+            Op::B_EQ => b_cnd!(EQ),
+            Op::B_GE => b_cnd!(GE),
+            Op::B_GT => b_cnd!(GT),
+            Op::B_HI => b_cnd!(HI),
+            Op::B_LE => b_cnd!(LE),
+            Op::B_LS => b_cnd!(LS),
+            Op::B_LT => b_cnd!(LT),
+            Op::B_MI => b_cnd!(MI),
+            Op::B_NE => b_cnd!(NE),
+            Op::B_NV => b_cnd!(NV),
+            Op::B_PL => b_cnd!(PL),
+            Op::B_VC => b_cnd!(VC),
+            Op::B_VS => b_cnd!(VS),
             Op::CADD => todo!(),
             Op::CAS => todo!(),
             Op::CASA => todo!(),
