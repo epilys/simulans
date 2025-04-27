@@ -22,14 +22,13 @@
 
 use std::num::NonZero;
 
-use simulans::{machine, main_loop, memory::MemorySize};
+use simulans::{machine, main_loop, memory::*};
 
 #[test]
 fn test_simple_if() {
     // This code was compiled from this C function:
     // ```c
-    /* Type your code here, or load an example. */
-    //int foobar(int num) {
+    // int foobar(int num) {
     //    if ((num % 2) == 0 ) {
     //        return 2 * num;
     //    }
@@ -108,27 +107,41 @@ fn test_simple_if() {
     // 0x58: add sp, sp, #0x10
     // 0x5c: ret
     // 0x60: nop
-    env_logger::init();
-    const MEMORY_SIZE: u64 = (4 * FOOBAR_UNOPT.len()) as u64;
-    let mut machine = machine::Armv8AMachine::new(MemorySize(NonZero::new(MEMORY_SIZE).unwrap()));
+    _ = env_logger::builder().is_test(true).try_init();
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * FOOBAR_UNOPT.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    {
+        let memory = MemoryMap::builder(MEMORY_SIZE)
+            .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
+            .unwrap()
+            .build();
+        let mut machine = machine::Armv8AMachine::new(memory);
 
-    let entry_point = machine.mem.phys_offset;
+        // Pass "10" as `num`
+        machine.cpu_state.registers.x0 = 10;
+        machine.cpu_state.registers.sp = 4 * FOOBAR_UNOPT.len() as u64 - 4;
+        main_loop(&mut machine, entry_point, FOOBAR_UNOPT).unwrap();
+        assert_eq!(machine.cpu_state.registers.x0, 20);
+    }
+    {
+        let memory = MemoryMap::builder(MEMORY_SIZE)
+            .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
+            .unwrap()
+            .build();
+        let mut machine = machine::Armv8AMachine::new(memory);
 
-    // Pass "10" as `num`
-    machine.cpu_state.registers.x0 = 10;
-    main_loop(&mut machine, entry_point, FOOBAR_UNOPT).unwrap();
-    assert_eq!(machine.cpu_state.registers.x0, 20);
-    let mut machine = machine::Armv8AMachine::new(MemorySize(NonZero::new(MEMORY_SIZE).unwrap()));
-
-    // Pass "11" as `num`
-    machine.cpu_state.registers.x0 = 11;
-    main_loop(&mut machine, entry_point, FOOBAR_UNOPT).unwrap();
-    assert_eq!(
-        machine.cpu_state.registers.x0,
-        11 * 11,
-        "{:?}",
-        machine.cpu_state.registers
-    );
+        // Pass "11" as `num`
+        machine.cpu_state.registers.x0 = 11;
+        machine.cpu_state.registers.sp = 4 * FOOBAR_UNOPT.len() as u64 - 4;
+        main_loop(&mut machine, entry_point, FOOBAR_UNOPT).unwrap();
+        assert_eq!(
+            machine.cpu_state.registers.x0,
+            11 * 11,
+            "{:?}",
+            machine.cpu_state.registers
+        );
+    }
     // // Optimized
     // let mut machine = machine::Armv8AMachine::new(0x40080000 + 2 *
     // FOOBAR.len()); // Pass "10" as `num`

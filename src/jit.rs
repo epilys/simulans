@@ -24,14 +24,19 @@
 
 use std::{ops::ControlFlow, pin::Pin};
 
-use codegen::ir::types::{I64, I8};
-use cranelift::{codegen::ir::immediates::Offset32, prelude::*};
+use codegen::ir::types::{I128, I16, I32, I64, I8};
+use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{Linkage, Module};
+use cranelift_module::{FuncId, Linkage, Module};
 use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
+use rustc_hash::FxHashMap;
 
-use crate::{cpu_state::ExecutionState, machine::Armv8AMachine, memory::Address};
+use crate::{
+    cpu_state::ExecutionState,
+    machine::Armv8AMachine,
+    memory::{Address, Width},
+};
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -46,6 +51,11 @@ pub struct Entry(pub extern "C" fn(&mut JitContext, &mut Armv8AMachine) -> Entry
 #[no_mangle]
 pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMachine) -> Entry {
     let pc: u64 = machine.pc;
+    if context.single_step {
+        // Do not cache single step blocks
+        let next_entry = context.compile(machine, pc).unwrap();
+        return next_entry;
+    }
     if let Some(entry) = machine.entry_blocks.get(&pc) {
         log::trace!("lookup entry entry found for 0x{:x}", pc);
         return *entry;
@@ -57,13 +67,6 @@ pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMac
 
     log::trace!("returning generated entry for pc 0x{:x}", pc);
     next_entry
-}
-
-#[inline]
-fn is_vector(reg: &bad64::Reg) -> bool {
-    use bad64::Reg;
-    let reg = *reg as u32;
-    ((Reg::V0 as u32)..=(Reg::Q31 as u32)).contains(&reg)
 }
 
 /// JIT context/builder used to disassemble code and JIT compile it.
@@ -78,6 +81,108 @@ pub struct JitContext {
     /// The module, with the jit backend, which manages the JIT'd
     /// functions.
     module: JITModule,
+    func_ids: FxHashMap<u64, FuncId>,
+    pub single_step: bool,
+}
+
+struct MemOpsTable {
+    write_sigrefs: [codegen::ir::SigRef; 5],
+    read_sigrefs: [codegen::ir::SigRef; 5],
+}
+
+impl MemOpsTable {
+    fn write(&self, width: Width) -> (i64, &codegen::ir::SigRef) {
+        match width {
+            Width::_8 => (
+                crate::memory::ops::memory_region_write_8 as usize as u64 as i64,
+                &self.write_sigrefs[0],
+            ),
+            Width::_16 => (
+                crate::memory::ops::memory_region_write_16 as usize as u64 as i64,
+                &self.write_sigrefs[1],
+            ),
+            Width::_32 => (
+                crate::memory::ops::memory_region_write_32 as usize as u64 as i64,
+                &self.write_sigrefs[2],
+            ),
+            Width::_64 => (
+                crate::memory::ops::memory_region_write_64 as usize as u64 as i64,
+                &self.write_sigrefs[3],
+            ),
+            Width::_128 => (
+                crate::memory::ops::memory_region_write_64 as usize as u64 as i64,
+                &self.write_sigrefs[4],
+            ),
+        }
+    }
+
+    fn read(&self, width: Width) -> (i64, &codegen::ir::SigRef) {
+        match width {
+            Width::_8 => (
+                crate::memory::ops::memory_region_read_8 as usize as u64 as i64,
+                &self.read_sigrefs[0],
+            ),
+            Width::_16 => (
+                crate::memory::ops::memory_region_read_16 as usize as u64 as i64,
+                &self.read_sigrefs[1],
+            ),
+            Width::_32 => (
+                crate::memory::ops::memory_region_read_32 as usize as u64 as i64,
+                &self.read_sigrefs[2],
+            ),
+            Width::_64 => (
+                crate::memory::ops::memory_region_read_64 as usize as u64 as i64,
+                &self.read_sigrefs[3],
+            ),
+            Width::_128 => (
+                crate::memory::ops::memory_region_read_64 as usize as u64 as i64,
+                &self.read_sigrefs[4],
+            ),
+        }
+    }
+
+    fn new(module: &JITModule, builder: &mut FunctionBuilder<'_>) -> Self {
+        macro_rules! sigref {
+            (write $t:expr) => {{
+                let mut sig = module.make_signature();
+                sig.params
+                    .push(AbiParam::new(module.target_config().pointer_type()));
+                sig.params
+                    .push(AbiParam::new(module.target_config().pointer_type()));
+                sig.params.push(AbiParam::new($t));
+                builder.import_signature(sig)
+            }};
+            (read $t:expr) => {{
+                let mut sig = module.make_signature();
+                sig.params
+                    .push(AbiParam::new(module.target_config().pointer_type()));
+                sig.params
+                    .push(AbiParam::new(module.target_config().pointer_type()));
+                sig.returns.push(AbiParam::new($t));
+                builder.import_signature(sig)
+            }};
+        }
+        let write_sigrefs = [
+            sigref! { write I8 },
+            sigref! { write I16 },
+            sigref! { write I32 },
+            sigref! { write I64 },
+            sigref! { write I64 },
+        ];
+
+        let read_sigrefs = [
+            sigref! { read I8 },
+            sigref! { read I16 },
+            sigref! { read I32 },
+            sigref! { read I64 },
+            sigref! { read I64 },
+        ];
+
+        Self {
+            write_sigrefs,
+            read_sigrefs,
+        }
+    }
 }
 
 impl JitContext {
@@ -85,20 +190,25 @@ impl JitContext {
     pub fn new() -> Pin<Box<Self>> {
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
-        flag_builder.set("is_pic", "false").unwrap();
+        // PIC is required for `hotswapping`, i.e. re-defining functions with the same
+        // name (We use PC for the name.
+        flag_builder.set("is_pic", "true").unwrap();
         let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
             panic!("host machine is not supported: {}", msg);
         });
         let isa = isa_builder
             .finish(settings::Flags::new(flag_builder))
             .unwrap();
-        let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        builder.hotswap(true);
 
         let module = JITModule::new(builder);
         Box::pin(Self {
             builder_context: FunctionBuilderContext::new(),
             ctx: module.make_context(),
+            func_ids: FxHashMap::default(),
             module,
+            single_step: false,
         })
     }
 
@@ -120,6 +230,11 @@ impl JitContext {
         self.ctx.func.signature = sig;
         // self.ctx.set_disasm(true);
 
+        if let Some(func_id) = self.func_ids.remove(&program_counter) {
+            assert!(self.single_step);
+            self.module.prepare_for_function_redefine(func_id)?;
+        }
+
         // Actually perform the translation for this translation block
         self.translate(machine, program_counter)?;
 
@@ -134,6 +249,7 @@ impl JitContext {
 
         // Define the function to jit. This finishes compilation.
         self.module.define_function(id, &mut self.ctx)?;
+        self.func_ids.insert(program_counter, id);
 
         // {
         //     let pc = program_counter;
@@ -178,25 +294,35 @@ impl JitContext {
         let self_addr = std::ptr::addr_of!(*self);
 
         let Armv8AMachine {
-            ref mut mem,
+            ref mut memory,
             ref mut cpu_state,
             ..
         } = machine;
 
-        if program_counter < mem.phys_offset.0 {
+        let Some(mem_region) = memory.find_region(Address(program_counter)) else {
             return Err(format!(
-                "Received program counter {} which is below offset of DRAM {}.",
+                "Received program counter {} which is unmapped in physical memory.",
                 Address(program_counter),
-                mem.phys_offset,
             )
             .into());
-        }
+        };
+        let Some(mmapped_region) = mem_region.as_mmap() else {
+            return Err(format!(
+                "Received program counter {} which is mapped in device memory.",
+                Address(program_counter),
+            )
+            .into());
+        };
         let decoded_iter = bad64::disasm(
-            &mem.map.deref()[(program_counter - mem.phys_offset.0).try_into().unwrap()..],
+            &mmapped_region.map.deref()[(program_counter - mem_region.phys_offset.0)
+                .try_into()
+                .unwrap()..],
             program_counter,
         );
 
         let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
+
+        let memops_table = MemOpsTable::new(&self.module, &mut builder);
 
         // Create the entry block, to start emitting code in.
         let entry_block = builder.create_block();
@@ -213,6 +339,17 @@ impl JitContext {
         let mut registers = IndexMap::new();
         let mut sys_registers = IndexMap::new();
 
+        let registers_sigref = {
+            let mut sig = self.module.make_signature();
+            sig.params
+                .push(AbiParam::new(self.module.target_config().pointer_type()));
+            sig.params.push(AbiParam::new(I8));
+            builder.import_signature(sig)
+        };
+        let registers_print_func = builder.ins().iconst(
+            I64,
+            crate::cpu_state::print_registers as usize as u64 as i64,
+        );
         // Declare variables for each register.
         // Emit code to load register values into variables.
         cpu_state.load_cpu_state(&mut builder, &mut registers, &mut sys_registers);
@@ -223,28 +360,52 @@ impl JitContext {
             self.module.target_config().pointer_type(),
             machine_addr as i64,
         );
-        let sigref = builder.import_signature(builder.func.signature.clone());
+        let entry_lookup_sigref = builder.import_signature(builder.func.signature.clone());
+        let address_lookup_sigref = {
+            let mut sig = self.module.make_signature();
+            sig.params
+                .push(AbiParam::new(self.module.target_config().pointer_type()));
+            sig.params
+                .push(AbiParam::new(self.module.target_config().pointer_type()));
+            sig.returns
+                .push(AbiParam::new(self.module.target_config().pointer_type()));
+            sig.returns
+                .push(AbiParam::new(self.module.target_config().pointer_type()));
+            builder.import_signature(sig)
+        };
         let mut trans = BlockTranslator {
             pointer_type: self.module.target_config().pointer_type(),
-            host_mem_start: mem.map.as_ptr() as usize as i64,
-            guest_mem_start: mem.phys_offset.0 as i64,
+            memops_table,
             cpu_state,
             jit_ctx_ptr,
             machine_ptr,
-            sigref,
+            registers_print_func,
+            registers_sigref,
+            entry_lookup_sigref,
+            address_lookup_sigref,
             builder,
             registers,
             sys_registers,
         };
         let mut next_pc = None;
+        let mut prev_pc = program_counter;
         // Translate each decoded instruction
         for insn in decoded_iter {
             match insn {
                 Ok(insn) => {
                     log::trace!("{:#?}", insn);
                     log::trace!("0x{:x}: {}", insn.address(), insn);
-                    if let ControlFlow::Break(jump_pc) = trans.translate_instruction(insn) {
+                    if let ControlFlow::Break(jump_pc) = trans.translate_instruction(&insn) {
+                        prev_pc = insn.address();
                         next_pc = jump_pc;
+                        break;
+                    } else if self.single_step {
+                        next_pc = Some(
+                            trans
+                                .builder
+                                .ins()
+                                .iconst(I64, (program_counter + 4) as i64),
+                        );
                         break;
                     }
                 }
@@ -254,7 +415,7 @@ impl JitContext {
             }
         }
         if let Some(next_pc) = next_pc {
-            trans.emit_jump(next_pc);
+            trans.emit_jump(prev_pc, next_pc);
         } else {
             // We are out of code, so halt the machine
             trans.emit_halt();
@@ -269,41 +430,82 @@ impl JitContext {
 
 /// In-progress state of translating instructions into Cranelift IR.
 struct BlockTranslator<'a> {
-    host_mem_start: i64,
-    guest_mem_start: i64,
     builder: FunctionBuilder<'a>,
     cpu_state: &'a mut ExecutionState,
     jit_ctx_ptr: Value,
     machine_ptr: Value,
     pointer_type: Type,
-    sigref: codegen::ir::SigRef,
+    registers_print_func: Value,
+    registers_sigref: codegen::ir::SigRef,
+    entry_lookup_sigref: codegen::ir::SigRef,
+    memops_table: MemOpsTable,
+    address_lookup_sigref: codegen::ir::SigRef,
     registers: IndexMap<bad64::Reg, Variable>,
     sys_registers: IndexMap<bad64::SysReg, Variable>,
 }
 
-#[derive(Clone, Copy)]
-#[repr(i32)]
-/// Register/memory width in bits.
-enum Width {
-    _128 = 128,
-    _64 = 64,
-    _32 = 32,
-    _16 = 16,
-    _8 = 8,
+#[inline]
+fn is_vector(reg: &bad64::Reg) -> bool {
+    use bad64::Reg;
+    let reg = *reg as u32;
+    ((Reg::V0 as u32)..=(Reg::Q31 as u32)).contains(&reg)
 }
 
 impl BlockTranslator<'_> {
     #[inline]
-    fn guest_address_to_host_address(&mut self, target: Value) -> Value {
-        let host_mem_start = self.builder.ins().iconst(I64, self.host_mem_start);
-        let guest_mem_start = self.builder.ins().iconst(I64, self.guest_mem_start);
-        let (target, _ignore_overflow) = self.builder.ins().usub_overflow(target, guest_mem_start);
-        let target = self.builder.ins().uadd_overflow_trap(
-            target,
-            host_mem_start,
-            TrapCode::IntegerOverflow,
+    fn generate_write(&mut self, target_address: Value, value: Value, width: Width) {
+        let (write_func, sigref) = self.memops_table.write(width);
+        let address_lookup_func = self
+            .builder
+            .ins()
+            .iconst(I64, crate::machine::address_lookup as usize as u64 as i64);
+        let call = self.builder.ins().call_indirect(
+            self.address_lookup_sigref,
+            address_lookup_func,
+            &[self.machine_ptr, target_address],
         );
-        target
+        let (memory_region_ptr, address_inside_region) = {
+            let results = self.builder.inst_results(call);
+            (results[0], results[1])
+        };
+        let write_func = self.builder.ins().iconst(I64, write_func);
+        let value = match width {
+            Width::_8 => self.builder.ins().ireduce(I8, value),
+            Width::_16 => self.builder.ins().ireduce(I16, value),
+            Width::_32 => self.builder.ins().ireduce(I32, value),
+            Width::_64 => value,
+            Width::_128 => self.builder.ins().uextend(I128, value),
+        };
+        let call = self.builder.ins().call_indirect(
+            *sigref,
+            write_func,
+            &[memory_region_ptr, address_inside_region, value],
+        );
+        self.builder.inst_results(call);
+    }
+
+    #[inline]
+    fn generate_read(&mut self, target_address: Value, width: Width) -> Value {
+        let (read_func, sigref) = self.memops_table.read(width);
+        let address_lookup_func = self
+            .builder
+            .ins()
+            .iconst(I64, crate::machine::address_lookup as usize as u64 as i64);
+        let call = self.builder.ins().call_indirect(
+            self.address_lookup_sigref,
+            address_lookup_func,
+            &[self.machine_ptr, target_address],
+        );
+        let resolved = {
+            let results = self.builder.inst_results(call);
+            [results[0], results[1]]
+        };
+        let read_func = self.builder.ins().iconst(I64, read_func);
+        let call = self
+            .builder
+            .ins()
+            .call_indirect(*sigref, read_func, &resolved);
+        self.builder.inst_results(call)[0]
     }
 
     #[allow(non_snake_case)]
@@ -332,13 +534,20 @@ impl BlockTranslator<'_> {
     /// Perform `AddWithCarry` operation.
     ///
     /// Integer addition with carry input, returning result and NZCV flags
-    fn add_with_carry(&mut self, x: Value, y: Value, carry_in: bool) -> (Value, [Value; 4]) {
+    fn add_with_carry(
+        &mut self,
+        x: Value,
+        y: Value,
+        orig_y: Value,
+        carry_in: bool,
+    ) -> (Value, [Value; 4]) {
         let (mut unsigned_sum, mut overflow_1) = self.builder.ins().uadd_overflow(x, y);
         if carry_in {
             let one = self.builder.ins().iconst(I64, 1);
             let (carry_add, carry_overflow) = self.builder.ins().uadd_overflow(unsigned_sum, one);
             unsigned_sum = carry_add;
             overflow_1 = self.builder.ins().bor(overflow_1, carry_overflow);
+            _ = overflow_1;
         }
         let (mut signed_sum, mut overflow_2) = self.builder.ins().sadd_overflow(x, y);
         if carry_in {
@@ -347,91 +556,197 @@ impl BlockTranslator<'_> {
             signed_sum = carry_add;
             overflow_2 = self.builder.ins().bor(overflow_2, carry_overflow);
         }
-        let nth_bit_mask = self
+        let result = self
             .builder
             .ins()
-            .iconst(I64, (u64::MAX & !(1 << 63)) as i64);
-        eprintln!("u64::MAX & !(1 << 64) = 0x:{:x}", u64::MAX & !(1 << 63));
-        let result = self.builder.ins().band(unsigned_sum, nth_bit_mask);
+            .band_imm(unsigned_sum, (u64::MAX & !(1 << 63)) as i64);
         let n = self
             .builder
             .ins()
             .icmp_imm(IntCC::SignedLessThan, signed_sum, 0);
-        let z = self.builder.ins().icmp_imm(IntCC::Equal, result, 0);
-        let c = self.builder.ins().icmp_imm(IntCC::NotEqual, overflow_2, 0);
-        let v = self.builder.ins().icmp_imm(IntCC::NotEqual, overflow_1, 0);
+        let z = self.builder.ins().icmp(IntCC::Equal, x, orig_y);
+        let c = self
+            .builder
+            .ins()
+            .icmp(IntCC::UnsignedGreaterThanOrEqual, x, orig_y);
+        let v = self.builder.ins().icmp_imm(IntCC::NotEqual, overflow_2, 0);
         let n = self.builder.ins().uextend(I64, n);
         let z = self.builder.ins().uextend(I64, z);
         let c = self.builder.ins().uextend(I64, c);
         let v = self.builder.ins().uextend(I64, v);
-        // [ref:verify_implementation]: make sure what kind of int bit width nzcv have
-        // let n = self.builder.ins().ireduce(I8, n);
-        // let z = self.builder.ins().ireduce(I8, z);
-        // let c = self.builder.ins().ireduce(I8, c);
-        // let v = self.builder.ins().ireduce(I8, v);
-        // (bits(N), bits(4)) AddWithCarry(bits(N) x, bits(N) y, bit carry_in)
-        // constant integer unsigned_sum = UInt(x) + UInt(y) + UInt(carry_in);
-        // constant integer signed_sum = SInt(x) + SInt(y) + UInt(carry_in);
-        // constant bits(N) result = unsigned_sum<N-1:0>; // same value as
-        // signed_sum<N-1:0> constant bit n = result<N-1>;
-        // constant bit z = if IsZero(result) then '1' else '0';
-        // constant bit c = if UInt(result) == unsigned_sum then '0' else '1';
-        // constant bit v = if SInt(result) == signed_sum then '0' else '1';
-        // return (result, n:z:c:v);
         (result, [n, z, c, v])
+    }
+
+    /// Return true iff `condition` currently holds
+    ///
+    /// Based on pseudocode for
+    /// [`shared/functions/system/ConditionHolds`](https://developer.arm.com/documentation/ddi0602/2024-12/Shared-Pseudocode/shared-functions-system?lang=en#impl-shared.ConditionHolds.1).
+    fn condition_holds(&mut self, condition: bad64::Condition) -> Value {
+        use bad64::Condition;
+
+        let var = *self.sysreg_to_var(&bad64::SysReg::NZCV);
+        let var = self.builder.use_var(var);
+
+        macro_rules! cmp_pstate {
+            (PSTATE.N) => {{
+                let n = self.builder.ins().band_imm(var, (1 << 31));
+                self.builder
+                    .ins()
+                    .icmp_imm(cranelift::prelude::IntCC::UnsignedGreaterThan, n, 0)
+            }};
+            (PSTATE.Z) => {{
+                let z = self.builder.ins().band_imm(var, (1 << 30));
+                self.builder
+                    .ins()
+                    .icmp_imm(cranelift::prelude::IntCC::UnsignedGreaterThan, z, 0)
+            }};
+            (PSTATE.C) => {{
+                let c = self.builder.ins().band_imm(var, (1 << 29));
+                self.builder
+                    .ins()
+                    .icmp_imm(cranelift::prelude::IntCC::UnsignedGreaterThan, c, 0)
+            }};
+            (PSTATE.V) => {{
+                let v = self.builder.ins().band_imm(var, (1 << 28));
+                self.builder
+                    .ins()
+                    .icmp_imm(cranelift::prelude::IntCC::UnsignedGreaterThan, v, 0)
+            }};
+            (PSTATE.$field:ident == $imm:literal) => {{
+                #[allow(non_snake_case)]
+                let $field = cmp_pstate!(PSTATE.$field);
+                self.builder
+                    .ins()
+                    .icmp_imm(cranelift::prelude::IntCC::Equal, $field, $imm)
+            }};
+            (PSTATE.$field1:ident == PSTATE.$field2:ident) => {{
+                #[allow(non_snake_case)]
+                let $field1 = cmp_pstate!(PSTATE.$field1);
+                #[allow(non_snake_case)]
+                let $field2 = cmp_pstate!(PSTATE.$field2);
+                self.builder
+                    .ins()
+                    .icmp(cranelift::prelude::IntCC::Equal, $field1, $field2)
+            }};
+            (( $($t1:tt)* ) && ( $($t2:tt)* )) => {{
+                let result1 = cmp_pstate!($($t1)*);
+                let result2 = cmp_pstate!($($t2)*);
+                self.builder
+                    .ins()
+                    .band(result1, result2)
+            }};
+            (!(( $($t1:tt)* ) && ( $($t2:tt)* ))) => {{
+                let result = cmp_pstate!(($($t1)*) && ($($t2)*));
+                self.builder
+                    .ins()
+                    .icmp_imm(cranelift::prelude::IntCC::Equal, result, 0)
+            }};
+        }
+
+        // | Condition | Meaning               | A, B    | NZCV
+        // |-----------|-----------------------|---------|--------------------
+        // | EQ        | Equal                 | A == B  | Z == 1
+        // | NE        | Not Equal             | A != B  | Z == 0
+        // | CS        | Carry set             | A >= B  | C == 1
+        // | CC        | Carry clear           | A < B   | C == 0
+        // | HI        | Higher                | A > B   | C == 1 && Z == 0
+        // | LS        | Lower or same         | A <= B  | !(C == 1 && Z == 0)
+        // | GE        | Greater than or equal | A >= B  | N == V
+        // | LT        | Less than             | A < B   | N != V
+        // | GT        | Greater than          | A > B   | Z == 0 && N == V
+        // | LE        | Less than or equal    | A <= B  | !(Z == 0 && N == V)
+        // | MI        | Minus, negative       | A < B   | N == 1
+        // | PL        | Plus or zero          | A >= B  | N == 0
+        // | VS        | Overflow set          | -       | V == 1
+        // | VC        | Overflow clear        | -       | V == 0
+        // | AL, NV    | Always                | true    | -
+
+        let result = match condition {
+            Condition::EQ => {
+                cmp_pstate!(PSTATE.Z == 1)
+            }
+            Condition::NE => {
+                cmp_pstate!(PSTATE.Z == 0)
+            }
+            Condition::CS => {
+                cmp_pstate!(PSTATE.C == 1)
+            }
+            Condition::CC => {
+                cmp_pstate!(PSTATE.C == 0)
+            }
+            Condition::MI => {
+                cmp_pstate!(PSTATE.N == 1)
+            }
+            Condition::PL => {
+                cmp_pstate!(PSTATE.N == 0)
+            }
+            Condition::VS => {
+                cmp_pstate!(PSTATE.V == 1)
+            }
+            Condition::VC => {
+                cmp_pstate!(PSTATE.V == 0)
+            }
+            Condition::HI => {
+                cmp_pstate!((PSTATE.C == 1) && (PSTATE.Z == 0))
+            }
+            Condition::LS => {
+                cmp_pstate!(!((PSTATE.C == 1) && (PSTATE.Z == 0)))
+            }
+            Condition::GE => {
+                cmp_pstate!(PSTATE.N == PSTATE.V)
+            }
+            Condition::LT => {
+                let result = cmp_pstate!(PSTATE.N == PSTATE.V);
+                self.builder
+                    .ins()
+                    .icmp_imm(cranelift::prelude::IntCC::Equal, result, 0)
+            }
+            Condition::GT => {
+                cmp_pstate!((PSTATE.N == PSTATE.V) && (PSTATE.Z == 0))
+            }
+            Condition::LE => {
+                cmp_pstate!(!((PSTATE.N == PSTATE.V) && (PSTATE.Z == 0)))
+            }
+            // Always true.
+            Condition::AL | Condition::NV => self.builder.ins().iconst(I8, 1),
+        };
+
+        result
     }
 
     /// Update CPU state of NZCV flags.
     fn update_nzcv(&mut self, [n, z, c, v]: [Value; 4]) {
-        self.builder.ins().store(
-            MemFlags::trusted().with_vmctx(),
-            n,
-            self.machine_ptr,
-            std::mem::offset_of!(Armv8AMachine, cpu_state.pstate.N) as i32,
-        );
-        self.builder.ins().store(
-            MemFlags::trusted().with_vmctx(),
-            z,
-            self.machine_ptr,
-            std::mem::offset_of!(Armv8AMachine, cpu_state.pstate.Z) as i32,
-        );
-        self.builder.ins().store(
-            MemFlags::trusted().with_vmctx(),
-            c,
-            self.machine_ptr,
-            std::mem::offset_of!(Armv8AMachine, cpu_state.pstate.C) as i32,
-        );
-        self.builder.ins().store(
-            MemFlags::trusted().with_vmctx(),
-            v,
-            self.machine_ptr,
-            std::mem::offset_of!(Armv8AMachine, cpu_state.pstate.V) as i32,
-        );
+        let var = *self.sysreg_to_var(&bad64::SysReg::NZCV);
+        let n = self.builder.ins().rotl_imm(n, 31);
+        let z = self.builder.ins().rotl_imm(z, 30);
+        let c = self.builder.ins().rotl_imm(c, 29);
+        let v = self.builder.ins().rotl_imm(v, 28);
+        let value = self.builder.ins().bor(n, z);
+        let value = self.builder.ins().bor(value, c);
+        let value = self.builder.ins().bor(value, v);
+        self.builder.def_var(var, value)
     }
 
-    fn branch_if_non_zero(&mut self, is_zero_value: Value, label_value: Value) {
+    fn branch_if_non_zero(
+        &mut self,
+        instruction: &bad64::Instruction,
+        test_value: Value,
+        label_value: Value,
+    ) {
         let branch_not_taken_block = self.builder.create_block();
         let branch_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
-        self.builder.append_block_param(merge_block, I64);
-        self.builder.ins().brif(
-            is_zero_value,
-            branch_not_taken_block,
-            &[],
-            branch_block,
-            &[],
-        );
-        self.builder.switch_to_block(branch_not_taken_block);
-        self.builder.seal_block(branch_not_taken_block);
-        // Jump to the merge block, passing it the block return value.
-        self.builder.ins().jump(merge_block, &[is_zero_value]);
+        self.builder
+            .ins()
+            .brif(test_value, branch_block, &[], branch_not_taken_block, &[]);
         self.builder.switch_to_block(branch_block);
         self.builder.seal_block(branch_block);
-        self.emit_jump(label_value);
-        // Switch to the merge block for subsequent statements.
+        self.emit_jump(instruction.address(), label_value);
+        self.builder.switch_to_block(branch_not_taken_block);
+        self.builder.seal_block(branch_not_taken_block);
+        self.builder.ins().nop();
+        self.builder.ins().jump(merge_block, &[]);
         self.builder.switch_to_block(merge_block);
-
-        // We've now seen all the predecessors of the merge block.
         self.builder.seal_block(merge_block);
     }
 
@@ -490,14 +805,14 @@ impl BlockTranslator<'_> {
                             imm_value,
                             TrapCode::IntegerOverflow,
                         );
-                        let reg_var = *self.reg_to_var(reg, false);
+                        let reg_var = *self.reg_to_var(reg, true);
                         self.builder.def_var(reg_var, post_value);
                     }
                     Imm::Signed(imm) if *imm < 0 => {
                         let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
                         let (post_value, _overflow_flag) =
                             self.builder.ins().usub_overflow(reg_val, imm_value);
-                        let reg_var = *self.reg_to_var(reg, false);
+                        let reg_var = *self.reg_to_var(reg, true);
                         self.builder.def_var(reg_var, post_value);
                     }
                     Imm::Signed(imm) => {
@@ -507,7 +822,7 @@ impl BlockTranslator<'_> {
                             imm_value,
                             TrapCode::IntegerOverflow,
                         );
-                        let reg_var = *self.reg_to_var(reg, false);
+                        let reg_var = *self.reg_to_var(reg, true);
                         self.builder.def_var(reg_var, post_value);
                     }
                 }
@@ -515,9 +830,7 @@ impl BlockTranslator<'_> {
             }
             Operand::Imm64 { imm, shift } => {
                 let const_value = match imm {
-                    Imm::Unsigned(imm) => {
-                        self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap())
-                    }
+                    Imm::Unsigned(imm) => self.builder.ins().iconst(I64, *imm as i64),
                     Imm::Signed(imm) => self.builder.ins().iconst(I64, *imm),
                 };
                 match shift {
@@ -882,10 +1195,10 @@ impl BlockTranslator<'_> {
         }
     }
 
-    /// JIT a single instrunction.
+    /// JIT a single instruction.
     fn translate_instruction(
         &mut self,
-        instruction: bad64::Instruction,
+        instruction: &bad64::Instruction,
     ) -> ControlFlow<Option<Value>> {
         use bad64::Op;
 
@@ -949,15 +1262,11 @@ impl BlockTranslator<'_> {
                     } => *self.reg_to_var(reg, true),
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
-                let imm_value = self.translate_operand(&instruction.operands()[1]);
-                let pc = self.builder.ins().iconst(I64, instruction.address() as i64);
-                let value =
-                    self.builder
-                        .ins()
-                        .uadd_overflow_trap(pc, imm_value, TrapCode::IntegerOverflow);
+                let value = self.translate_operand(&instruction.operands()[1]);
                 self.builder.def_var(target, value);
             }
-            Op::STR => {
+            Op::STLR | Op::STR => {
+                // For STLR: [ref:atomics]: We don't model exclusive access (yet).
                 let value = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -966,13 +1275,8 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let target = self.translate_operand(&instruction.operands()[1]);
-                let target = self.guest_address_to_host_address(target);
-                self.builder.ins().store(
-                    cranelift::prelude::MemFlags::new(),
-                    value,
-                    target,
-                    Offset32::new(0),
-                );
+                let width = self.operand_width(&instruction.operands()[0]);
+                self.generate_write(target, value, width);
             }
             Op::STRH => {
                 let value = match instruction.operands()[0] {
@@ -983,13 +1287,7 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let target = self.translate_operand(&instruction.operands()[1]);
-                let target = self.guest_address_to_host_address(target);
-                self.builder.ins().istore16(
-                    cranelift::prelude::MemFlags::new(),
-                    value,
-                    target,
-                    Offset32::new(0),
-                );
+                self.generate_write(target, value, Width::_16);
             }
             Op::STLRB | Op::STRB => {
                 // For STLRB: [ref:atomics]: We don't model exclusive access (yet).
@@ -1001,35 +1299,19 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let target = self.translate_operand(&instruction.operands()[1]);
-                let target = self.guest_address_to_host_address(target);
-                self.builder.ins().istore8(
-                    cranelift::prelude::MemFlags::new(),
-                    value,
-                    target,
-                    Offset32::new(0),
-                );
+                self.generate_write(target, value, Width::_8);
             }
             Op::STP => {
                 let width = self.operand_width(&instruction.operands()[0]);
                 let data1 = self.translate_operand(&instruction.operands()[0]);
                 let data2 = self.translate_operand(&instruction.operands()[1]);
                 let target = self.translate_operand(&instruction.operands()[2]);
-                let target = self.guest_address_to_host_address(target);
-                let offset = Offset32::new(width as i32);
-                self.builder.ins().store(
-                    cranelift::prelude::MemFlags::new(),
-                    data1,
-                    target,
-                    Offset32::new(0),
-                );
-                self.builder.ins().store(
-                    cranelift::prelude::MemFlags::new(),
-                    data2,
-                    target,
-                    offset,
-                );
+                self.generate_write(target, data1, width);
+                let target = self.builder.ins().iadd_imm(target, i64::from(width as i32));
+                self.generate_write(target, data2, width);
             }
-            Op::LDR => {
+            Op::LDAR | Op::LDR => {
+                // For LDAR: [ref:atomics]: We don't model exclusive access (yet).
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -1037,13 +1319,59 @@ impl BlockTranslator<'_> {
                     } => *self.reg_to_var(reg, true),
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
+                let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
-                let source_address = self.guest_address_to_host_address(source_address);
-                let value =
-                    self.builder
-                        .ins()
-                        .load(I64, MemFlags::new(), source_address, Offset32::new(0));
-                self.builder.def_var(target, value);
+                let value = self.generate_read(source_address, width);
+                match width {
+                    Width::_64 => self.builder.def_var(target, value),
+                    Width::_32 => {
+                        let value = self.builder.ins().uextend(I64, value);
+                        self.builder.def_var(target, value)
+                    }
+                    _ => panic!(),
+                }
+            }
+            Op::LDP => {
+                let width = self.operand_width(&instruction.operands()[0]);
+                let target1 = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let target2 = match instruction.operands()[1] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+
+                let source_address = self.translate_operand(&instruction.operands()[2]);
+
+                let value = self.generate_read(source_address, width);
+                match width {
+                    Width::_64 => self.builder.def_var(target1, value),
+                    Width::_32 => {
+                        let value = self.builder.ins().uextend(I64, value);
+                        self.builder.def_var(target1, value)
+                    }
+                    _ => panic!(),
+                }
+                let source_address = self
+                    .builder
+                    .ins()
+                    .iadd_imm(source_address, i64::from(width as i32));
+                let value = self.generate_read(source_address, width);
+                match width {
+                    Width::_64 => self.builder.def_var(target2, value),
+                    Width::_32 => {
+                        let value = self.builder.ins().uextend(I64, value);
+                        self.builder.def_var(target2, value)
+                    }
+                    _ => panic!(),
+                }
             }
             Op::LDRH => {
                 let target = match instruction.operands()[0] {
@@ -1053,15 +1381,17 @@ impl BlockTranslator<'_> {
                     } => *self.reg_to_var(reg, true),
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
+                let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
-                let source_address = self.guest_address_to_host_address(source_address);
-                let value = self.builder.ins().uload16(
-                    I64,
-                    MemFlags::new(),
-                    source_address,
-                    Offset32::new(0),
-                );
-                self.builder.def_var(target, value);
+                let value = self.generate_read(source_address, width);
+                match width {
+                    Width::_64 => self.builder.def_var(target, value),
+                    Width::_32 | Width::_16 => {
+                        let value = self.builder.ins().uextend(I64, value);
+                        self.builder.def_var(target, value)
+                    }
+                    _ => panic!(),
+                }
             }
             Op::LDRB => {
                 let target = match instruction.operands()[0] {
@@ -1071,17 +1401,18 @@ impl BlockTranslator<'_> {
                     } => *self.reg_to_var(reg, true),
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
+                let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
-                let source_address = self.guest_address_to_host_address(source_address);
-                let value = self.builder.ins().uload8(
-                    I64,
-                    MemFlags::new(),
-                    source_address,
-                    Offset32::new(0),
-                );
-                self.builder.def_var(target, value);
+                let value = self.generate_read(source_address, width);
+                match width {
+                    Width::_64 => self.builder.def_var(target, value),
+                    Width::_8 | Width::_32 | Width::_16 => {
+                        let value = self.builder.ins().uextend(I64, value);
+                        self.builder.def_var(target, value)
+                    }
+                    _ => panic!(),
+                }
             }
-
             // Moves
             Op::MOV => {
                 let target = match instruction.operands()[0] {
@@ -1103,7 +1434,7 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
                 let (imm_value, shift_mask): (Value, u64) = match &instruction.operands()[1] {
-                    bad64::Operand::Imm32 { imm, shift } | bad64::Operand::Imm64 { imm, shift } => {
+                    bad64::Operand::Imm32 { imm, shift } => {
                         let const_value = match imm {
                             bad64::Imm::Unsigned(imm) => {
                                 self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap())
@@ -1111,16 +1442,29 @@ impl BlockTranslator<'_> {
                             bad64::Imm::Signed(imm) => self.builder.ins().iconst(I64, *imm),
                         };
                         match shift {
-                            None => (const_value, !0xf),
+                            None => (const_value, !u64::from(u32::MAX)),
                             Some(bad64::Shift::LSL(lsl)) => {
-                                let lsl_value = self.builder.ins().iconst(I64, i64::from(*lsl));
-                                let const_value = self.builder.ins().ishl(const_value, lsl_value);
-                                let shift_mask = match lsl {
-                                    16 => !0xf0,
-                                    32 => !0xf00,
-                                    48 => !0xf000,
-                                    other => panic!("other shift {other}"),
-                                };
+                                let const_value =
+                                    self.builder.ins().ishl_imm(const_value, i64::from(*lsl));
+                                let shift_mask = !(u64::from(u32::MAX) << lsl);
+                                (const_value, shift_mask)
+                            }
+                            other => unimplemented!("unimplemented shift {other:?}"),
+                        }
+                    }
+                    bad64::Operand::Imm64 { imm, shift } => {
+                        let const_value = match imm {
+                            bad64::Imm::Unsigned(imm) => {
+                                self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap())
+                            }
+                            bad64::Imm::Signed(imm) => self.builder.ins().iconst(I64, *imm),
+                        };
+                        match shift {
+                            None => (const_value, !u64::MAX),
+                            Some(bad64::Shift::LSL(lsl)) => {
+                                let const_value =
+                                    self.builder.ins().ishl_imm(const_value, i64::from(*lsl));
+                                let shift_mask = !(u64::MAX << lsl);
                                 (const_value, shift_mask)
                             }
                             other => unimplemented!("unimplemented shift {other:?}"),
@@ -1176,7 +1520,6 @@ impl BlockTranslator<'_> {
                 self.builder.def_var(target, value);
             }
             Op::SUBS => {
-                // [ref:FIXME]: update NZCV flags
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -1184,10 +1527,12 @@ impl BlockTranslator<'_> {
                     } => *self.reg_to_var(reg, true),
                     other => panic!("unexpected lhs in load: {:?}", other),
                 };
-                let a = self.translate_operand(&instruction.operands()[1]);
-                let b = self.translate_operand(&instruction.operands()[2]);
-                let (value, _ignore_overflow) = self.builder.ins().usub_overflow(a, b);
-                self.builder.def_var(target, value);
+                let operand1 = self.translate_operand(&instruction.operands()[1]);
+                let operand2 = self.translate_operand(&instruction.operands()[2]);
+                let negoperand2 = self.builder.ins().bnot(operand2);
+                let (result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, true);
+                self.builder.def_var(target, result);
+                self.update_nzcv(nzcv);
             }
             Op::MUL => {
                 let target = match instruction.operands()[0] {
@@ -1228,11 +1573,10 @@ impl BlockTranslator<'_> {
                 let divisor = self.translate_operand(&instruction.operands()[2]);
                 // if divisor == 0 then
                 // result = 0;
-                let zero = self.reg_to_value(&bad64::Reg::XZR);
                 let first_condition_value =
                     self.builder
                         .ins()
-                        .icmp(cranelift::prelude::IntCC::Equal, divisor, zero);
+                        .icmp_imm(cranelift::prelude::IntCC::Equal, divisor, 0);
 
                 let zero_block = self.builder.create_block();
                 let else_block = self.builder.create_block();
@@ -1248,6 +1592,7 @@ impl BlockTranslator<'_> {
                 self.builder.switch_to_block(zero_block);
                 self.builder.seal_block(zero_block);
                 // Jump to the merge block, passing it the block return value.
+                let zero = self.reg_to_value(&bad64::Reg::XZR);
                 self.builder.ins().jump(merge_block, &[zero]);
 
                 self.builder.switch_to_block(else_block);
@@ -1280,11 +1625,10 @@ impl BlockTranslator<'_> {
                 let divisor = self.translate_operand(&instruction.operands()[2]);
                 // if divisor == 0 then
                 // result = 0;
-                let zero = self.reg_to_value(&bad64::Reg::XZR);
                 let first_condition_value =
                     self.builder
                         .ins()
-                        .icmp(cranelift::prelude::IntCC::Equal, divisor, zero);
+                        .icmp_imm(cranelift::prelude::IntCC::Equal, divisor, 0);
 
                 let zero_block = self.builder.create_block();
                 let else_block = self.builder.create_block();
@@ -1300,6 +1644,7 @@ impl BlockTranslator<'_> {
                 self.builder.switch_to_block(zero_block);
                 self.builder.seal_block(zero_block);
                 // Jump to the merge block, passing it the block return value.
+                let zero = self.reg_to_value(&bad64::Reg::XZR);
                 self.builder.ins().jump(merge_block, &[zero]);
 
                 self.builder.switch_to_block(else_block);
@@ -1331,7 +1676,7 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected branch address in {op:?}: {:?}", other),
                 };
                 let next_pc = self.builder.ins().iconst(I64, label as i64);
-                return self.unconditional_jump_epilogue(&instruction, next_pc);
+                return self.unconditional_jump_epilogue(instruction, next_pc);
             }
             Op::BR => {
                 // This instruction branches unconditionally to an address in a register, with a
@@ -1340,11 +1685,11 @@ impl BlockTranslator<'_> {
                 // constant boolean branch_conditional = FALSE;
                 // BranchTo(target, BranchType_INDIR, branch_conditional);
                 let next_pc = self.translate_operand(&instruction.operands()[0]);
-                return self.unconditional_jump_epilogue(&instruction, next_pc);
+                return self.unconditional_jump_epilogue(instruction, next_pc);
             }
             Op::RET => {
                 let next_pc = self.reg_to_value(&bad64::Reg::X30);
-                return self.unconditional_jump_epilogue(&instruction, next_pc);
+                return self.unconditional_jump_epilogue(instruction, next_pc);
             }
             // Compares
             Op::CBNZ => {
@@ -1353,14 +1698,13 @@ impl BlockTranslator<'_> {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     other => panic!("unexpected branch address in {op:?}: {:?}", other),
                 };
-                let zero = self.reg_to_value(&bad64::Reg::XZR);
                 let is_zero_value =
                     self.builder
                         .ins()
-                        .icmp(cranelift::prelude::IntCC::Equal, operand1, zero);
-                let is_zero_value = self.builder.ins().sextend(I64, is_zero_value);
+                        .icmp_imm(cranelift::prelude::IntCC::NotEqual, operand1, 0);
+                let is_zero_value = self.builder.ins().uextend(I64, is_zero_value);
                 let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(is_zero_value, label_value);
+                self.branch_if_non_zero(instruction, is_zero_value, label_value);
             }
             Op::CBZ => {
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
@@ -1368,14 +1712,13 @@ impl BlockTranslator<'_> {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     other => panic!("unexpected branch address in {op:?}: {:?}", other),
                 };
-                let zero = self.reg_to_value(&bad64::Reg::XZR);
                 let is_not_zero_value =
                     self.builder
                         .ins()
-                        .icmp(cranelift::prelude::IntCC::NotEqual, operand1, zero);
-                let is_not_zero_value = self.builder.ins().sextend(I64, is_not_zero_value);
+                        .icmp_imm(cranelift::prelude::IntCC::Equal, operand1, 0);
+                let is_not_zero_value = self.builder.ins().uextend(I64, is_not_zero_value);
                 let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(is_not_zero_value, label_value);
+                self.branch_if_non_zero(instruction, is_not_zero_value, label_value);
             }
             // Bit-ops
             Op::BFI => {
@@ -1469,6 +1812,20 @@ impl BlockTranslator<'_> {
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
                 let value = self.builder.ins().band(a, b);
+                self.builder.def_var(target, value);
+            }
+            Op::EOR => {
+                // Bitwise XOR
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let value = self.builder.ins().bxor(a, b);
                 self.builder.def_var(target, value);
             }
             Op::LSL => {
@@ -1567,8 +1924,10 @@ impl BlockTranslator<'_> {
             Op::BIF => todo!(),
             Op::BIT => todo!(),
             Op::BL => {
-                let link_pc = instruction.address() + 4;
-                let link_pc = self.builder.ins().iconst(I64, link_pc as i64);
+                let link_pc = self
+                    .builder
+                    .ins()
+                    .iconst(I64, (instruction.address() + 4) as i64);
                 let link_register = *self.reg_to_var(&bad64::Reg::X30, true);
                 self.builder.def_var(link_register, link_pc);
                 let label = match instruction.operands()[0] {
@@ -1576,9 +1935,18 @@ impl BlockTranslator<'_> {
                     other => panic!("unexpected branch address in {op:?}: {:?}", other),
                 };
                 let label_value = self.builder.ins().iconst(I64, label as i64);
-                return self.unconditional_jump_epilogue(&instruction, label_value);
+                return self.unconditional_jump_epilogue(instruction, label_value);
             }
-            Op::BLR => todo!(),
+            Op::BLR => {
+                let link_pc = self
+                    .builder
+                    .ins()
+                    .iconst(I64, (instruction.address() + 4) as i64);
+                let link_register = *self.reg_to_var(&bad64::Reg::X30, true);
+                self.builder.def_var(link_register, link_pc);
+                let next_pc = self.translate_operand(&instruction.operands()[0]);
+                return self.unconditional_jump_epilogue(instruction, next_pc);
+            }
             Op::BLRAA => todo!(),
             Op::BLRAAZ => todo!(),
             Op::BLRAB => todo!(),
@@ -1605,21 +1973,25 @@ impl BlockTranslator<'_> {
             Op::B_AL => todo!(),
             Op::B_CC => todo!(),
             Op::B_CS => {
-                let carry_is_set = self.builder.ins().load(
-                    I64,
-                    MemFlags::trusted().with_vmctx(),
-                    self.machine_ptr,
-                    std::mem::offset_of!(Armv8AMachine, cpu_state.pstate.C) as i32,
-                );
+                let result = self.condition_holds(bad64::Condition::CS);
+                let result = self.builder.ins().uextend(I64, result);
                 let label = match instruction.operands()[0] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     other => panic!("unexpected branch address in {op:?}: {:?}", other),
                 };
-                // let carry_is_set = self.builder.ins().uextend(I64, carry_is_set);
                 let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(carry_is_set, label_value);
+                self.branch_if_non_zero(instruction, result, label_value);
             }
-            Op::B_EQ => todo!(),
+            Op::B_EQ => {
+                let result = self.condition_holds(bad64::Condition::EQ);
+                let result = self.builder.ins().uextend(I64, result);
+                let label = match instruction.operands()[0] {
+                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
+                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                };
+                let label_value = self.builder.ins().iconst(I64, label as i64);
+                self.branch_if_non_zero(instruction, result, label_value);
+            }
             Op::B_GE => todo!(),
             Op::B_GT => todo!(),
             Op::B_HI => todo!(),
@@ -1675,8 +2047,8 @@ impl BlockTranslator<'_> {
             Op::CMP => {
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
                 let operand2 = self.translate_operand(&instruction.operands()[1]);
-                let operand2 = self.builder.ins().bnot(operand2);
-                let (_result, nzcv) = self.add_with_carry(operand1, operand2, true);
+                let negoperand2 = self.builder.ins().bnot(operand2);
+                let (_result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, true);
                 // discard result, only update NZCV flags.
                 self.update_nzcv(nzcv);
             }
@@ -1712,7 +2084,44 @@ impl BlockTranslator<'_> {
             Op::CRC32W => todo!(),
             Op::CRC32X => todo!(),
             Op::CSDB => todo!(),
-            Op::CSEL => todo!(),
+            Op::CSEL => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let true_value = self.translate_operand(&instruction.operands()[1]);
+                let false_value = self.translate_operand(&instruction.operands()[2]);
+                let cond = match instruction.operands()[3] {
+                    bad64::Operand::Cond(cond) => cond,
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let result = self.condition_holds(cond);
+                let result = self.builder.ins().uextend(I64, result);
+                let true_block = self.builder.create_block();
+                let false_block = self.builder.create_block();
+                let merge_block = self.builder.create_block();
+
+                self.builder.append_block_param(merge_block, I64);
+                self.builder
+                    .ins()
+                    .brif(result, true_block, &[], false_block, &[]);
+                self.builder.switch_to_block(true_block);
+                self.builder.seal_block(true_block);
+                self.builder.ins().jump(merge_block, &[true_value]);
+
+                self.builder.switch_to_block(false_block);
+                self.builder.seal_block(false_block);
+                self.builder.ins().jump(merge_block, &[false_value]);
+
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
+
+                let phi = self.builder.block_params(merge_block)[0];
+                self.builder.def_var(target, phi);
+            }
             Op::CSET => todo!(),
             Op::CSETM => todo!(),
             Op::CSINC => todo!(),
@@ -1739,7 +2148,6 @@ impl BlockTranslator<'_> {
             Op::DUPM => todo!(),
             Op::DVP => todo!(),
             Op::EON => todo!(),
-            Op::EOR => todo!(),
             Op::EOR3 => todo!(),
             Op::EORBT => todo!(),
             Op::EORS => todo!(),
@@ -1872,8 +2280,12 @@ impl BlockTranslator<'_> {
             Op::HINT => todo!(),
             Op::HISTCNT => todo!(),
             Op::HISTSEG => todo!(),
-            Op::HLT => todo!(),
-            Op::HVC => todo!(),
+            Op::HLT => {
+                return ControlFlow::Break(None);
+            }
+            Op::HVC => {
+                return ControlFlow::Break(None);
+            }
             Op::IC => {
                 // Instruction cache operation
             }
@@ -1956,11 +2368,30 @@ impl BlockTranslator<'_> {
             Op::LDAPURSB => todo!(),
             Op::LDAPURSH => todo!(),
             Op::LDAPURSW => todo!(),
-            Op::LDAR => todo!(),
             Op::LDARB => todo!(),
             Op::LDARH => todo!(),
             Op::LDAXP => todo!(),
-            Op::LDAXR => todo!(),
+            Op::LDAXR => {
+                // [ref:atomics]: We don't model exclusive access (yet).
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let width = self.operand_width(&instruction.operands()[0]);
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read(source_address, width);
+                match width {
+                    Width::_64 => self.builder.def_var(target, value),
+                    Width::_8 | Width::_32 | Width::_16 => {
+                        let value = self.builder.ins().uextend(I64, value);
+                        self.builder.def_var(target, value)
+                    }
+                    _ => panic!(),
+                }
+            }
             Op::LDAXRB => {
                 // [ref:atomics]: We don't model exclusive access (yet).
                 let target = match instruction.operands()[0] {
@@ -1970,15 +2401,17 @@ impl BlockTranslator<'_> {
                     } => *self.reg_to_var(reg, true),
                     other => panic!("unexpected lhs in {op:?}: {:?}", other),
                 };
+                let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
-                let source_address = self.guest_address_to_host_address(source_address);
-                let value = self.builder.ins().uload8(
-                    I64,
-                    MemFlags::new(),
-                    source_address,
-                    Offset32::new(0),
-                );
-                self.builder.def_var(target, value);
+                let value = self.generate_read(source_address, width);
+                match width {
+                    Width::_64 => self.builder.def_var(target, value),
+                    Width::_8 | Width::_32 | Width::_16 => {
+                        let value = self.builder.ins().uextend(I64, value);
+                        self.builder.def_var(target, value)
+                    }
+                    _ => panic!(),
+                }
             }
             Op::LDAXRH => todo!(),
             Op::LDCLR => todo!(),
@@ -2032,7 +2465,6 @@ impl BlockTranslator<'_> {
             Op::LDNT1SH => todo!(),
             Op::LDNT1SW => todo!(),
             Op::LDNT1W => todo!(),
-            Op::LDP => todo!(),
             Op::LDPSW => todo!(),
             Op::LDRAA => todo!(),
             Op::LDRAB => todo!(),
@@ -2458,7 +2890,6 @@ impl BlockTranslator<'_> {
             Op::STLLR => todo!(),
             Op::STLLRB => todo!(),
             Op::STLLRH => todo!(),
-            Op::STLR => todo!(),
             Op::STLRH => todo!(),
             Op::STLUR => todo!(),
             Op::STLURB => todo!(),
@@ -2509,7 +2940,27 @@ impl BlockTranslator<'_> {
             Op::STURB => todo!(),
             Op::STURH => todo!(),
             Op::STXP => todo!(),
-            Op::STXR => todo!(),
+            Op::STXR => {
+                // [ref:atomics]: We don't model exclusive access (yet).
+                let status_target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let target = self.translate_operand(&instruction.operands()[2]);
+                let width = self.operand_width(&instruction.operands()[2]);
+                self.generate_write(target, value, width);
+                // > [..] Is the 32-bit name of the general-purpose register into which the status
+                // > result of the store exclusive is written, encoded in the "Rs" field. The
+                // > value returned is:
+                // > - 0 If the operation updates memory.
+                // > - 1 If the operation fails to update memory.
+                let zero = self.builder.ins().iconst(I64, 0);
+                self.builder.def_var(status_target, zero);
+            }
             Op::STXRB => {
                 // [ref:atomics]: We don't model exclusive access (yet).
                 let status_target = match instruction.operands()[0] {
@@ -2521,15 +2972,14 @@ impl BlockTranslator<'_> {
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let target = self.translate_operand(&instruction.operands()[2]);
-                let target = self.guest_address_to_host_address(target);
-                self.builder.ins().istore8(
-                    cranelift::prelude::MemFlags::new(),
-                    value,
-                    target,
-                    Offset32::new(0),
-                );
-                let one = self.builder.ins().iconst(I64, 1);
-                self.builder.def_var(status_target, one);
+                self.generate_write(target, value, Width::_8);
+                // > [..] Is the 32-bit name of the general-purpose register into which the status
+                // > result of the store exclusive is written, encoded in the "Rs" field. The
+                // > value returned is:
+                // > - 0 If the operation updates memory.
+                // > - 1 If the operation fails to update memory.
+                let zero = self.builder.ins().iconst(I64, 0);
+                self.builder.def_var(status_target, zero);
             }
             Op::STXRH => todo!(),
             Op::STZ2G => todo!(),
@@ -2570,9 +3020,53 @@ impl BlockTranslator<'_> {
             Op::SYS => todo!(),
             Op::SYSL => todo!(),
             Op::TBL => todo!(),
-            Op::TBNZ => todo!(),
+            Op::TBNZ => {
+                let value = self.translate_operand(&instruction.operands()[0]);
+                let bit_field = match instruction.operands()[1] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(imm),
+                        shift: _,
+                    } => imm,
+                    other => panic!("unexpected bit field in {op:?}: {:?}", other),
+                };
+                let bit_mask = self.builder.ins().iconst(I64, 1 << bit_field);
+                let result = self.builder.ins().band(value, bit_mask);
+                let label = match instruction.operands()[2] {
+                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
+                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                };
+                let is_not_zero_value =
+                    self.builder
+                        .ins()
+                        .icmp_imm(cranelift::prelude::IntCC::NotEqual, result, 0);
+                let is_not_zero_value = self.builder.ins().uextend(I64, is_not_zero_value);
+                let label_value = self.builder.ins().iconst(I64, label as i64);
+                self.branch_if_non_zero(instruction, is_not_zero_value, label_value);
+            }
             Op::TBX => todo!(),
-            Op::TBZ => todo!(),
+            Op::TBZ => {
+                let value = self.translate_operand(&instruction.operands()[0]);
+                let bit_field = match instruction.operands()[1] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(imm),
+                        shift: _,
+                    } => imm,
+                    other => panic!("unexpected bit field in {op:?}: {:?}", other),
+                };
+                let bit_mask = self.builder.ins().iconst(I64, 1 << bit_field);
+                let result = self.builder.ins().band(value, bit_mask);
+                let label = match instruction.operands()[2] {
+                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
+                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                };
+                let is_zero_value =
+                    self.builder
+                        .ins()
+                        .icmp_imm(cranelift::prelude::IntCC::Equal, result, 0);
+                let is_zero_value = self.builder.ins().uextend(I64, is_zero_value);
+                let label_value = self.builder.ins().iconst(I64, label as i64);
+                self.branch_if_non_zero(instruction, is_zero_value, label_value);
+            }
             Op::TCANCEL => todo!(),
             Op::TCOMMIT => todo!(),
             Op::TLBI => {
@@ -2612,7 +3106,25 @@ impl BlockTranslator<'_> {
             Op::UCLAMP => todo!(),
             Op::UCVTF => todo!(),
             Op::UDF => {
-                // [ref:FIXME]: What should we do when encountering UDF instructions? Trap?
+                // [ref:can_trap]: always traps
+                // [ref:FIXME]: Trap:
+                // <https://developer.arm.com/documentation/ddi0602/2024-12/Shared-Pseudocode/aarch64-exceptions-traps?lang=en#aarch64.exceptions.traps.AArch64.Undefined>
+
+                // AArch64.Undefined()
+                //
+                //     route_to_el2 = PSTATE.EL == EL0 && EL2Enabled() && HCR_EL2.TGE == '1';
+                //     constant bits(64) preferred_exception_return = ThisInstrAddr(64);
+                //     vect_offset = 0x0;
+                //
+                //     except = ExceptionSyndrome(Exception_Uncategorized);
+                //
+                //     if UInt(PSTATE.EL) > UInt(EL1) then
+                //         AArch64.TakeException(PSTATE.EL, except, preferred_exception_return,
+                // vect_offset);     elsif route_to_el2 then
+                //         AArch64.TakeException(EL2, except, preferred_exception_return,
+                // vect_offset);     else
+                //         AArch64.TakeException(EL1, except, preferred_exception_return,
+                // vect_offset);
                 return ControlFlow::Break(None);
             }
             Op::UDIVR => todo!(),
@@ -2742,7 +3254,7 @@ impl BlockTranslator<'_> {
     }
 
     /// Save state and resolve the next entry block.
-    fn emit_jump(&mut self, pc_value: Value) {
+    fn emit_jump(&mut self, prev_pc: u64, next_pc_value: Value) {
         {
             {
                 let Self {
@@ -2754,9 +3266,18 @@ impl BlockTranslator<'_> {
                 } = self;
                 cpu_state.save_cpu_state(builder, registers, sys_registers);
             }
+            if cfg!(feature = "accurate-pc") {
+                let prev_pc = self.builder.ins().iconst(I64, prev_pc as i64);
+                self.builder.ins().store(
+                    MemFlags::trusted().with_vmctx(),
+                    prev_pc,
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
+                );
+            }
             self.builder.ins().store(
                 MemFlags::trusted().with_vmctx(),
-                pc_value,
+                next_pc_value,
                 self.machine_ptr,
                 std::mem::offset_of!(Armv8AMachine, pc) as i32,
             );
@@ -2769,12 +3290,21 @@ impl BlockTranslator<'_> {
             //     self.machine_ptr,
             //     std::mem::offset_of!(Armv8AMachine, lookup_entry_func) as i32,
             // );
+            {
+                let false_value = self.builder.ins().iconst(I8, 0);
+                let call = self.builder.ins().call_indirect(
+                    self.registers_sigref,
+                    self.registers_print_func,
+                    &[self.machine_ptr, false_value],
+                );
+                self.builder.inst_results(call);
+            }
             let translate_func = self
                 .builder
                 .ins()
                 .iconst(I64, lookup_entry as usize as u64 as i64);
             let call = self.builder.ins().call_indirect(
-                self.sigref,
+                self.entry_lookup_sigref,
                 translate_func,
                 &[self.jit_ctx_ptr, self.machine_ptr],
             );
@@ -2810,7 +3340,7 @@ impl BlockTranslator<'_> {
             std::mem::offset_of!(Armv8AMachine, lookup_entry_func) as i32,
         );
         let call = self.builder.ins().call_indirect(
-            self.sigref,
+            self.entry_lookup_sigref,
             translate_func,
             &[self.jit_ctx_ptr, self.machine_ptr],
         );
@@ -2824,17 +3354,19 @@ impl BlockTranslator<'_> {
         source_instruction: &bad64::Instruction,
         dest_label: Value,
     ) -> ControlFlow<Option<Value>> {
-        // [ref:TODO]: Check `dest_label` alignment.
-        let pc = self
-            .builder
-            .ins()
-            .iconst(I64, source_instruction.address() as i64);
-        self.builder.ins().store(
-            MemFlags::trusted().with_vmctx(),
-            pc,
-            self.machine_ptr,
-            std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
-        );
+        // [ref:can_trap]: Check `dest_label` alignment.
+        if cfg!(feature = "accurate-pc") {
+            let pc = self
+                .builder
+                .ins()
+                .iconst(I64, source_instruction.address() as i64);
+            self.builder.ins().store(
+                MemFlags::trusted().with_vmctx(),
+                pc,
+                self.machine_ptr,
+                std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
+            );
+        }
         self.builder.ins().store(
             MemFlags::trusted().with_vmctx(),
             dest_label,

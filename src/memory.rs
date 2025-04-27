@@ -20,138 +20,53 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-#![allow(clippy::len_without_is_empty)]
+mod map;
+mod region;
 
 mod address;
 mod size;
 
-use std::{cmp::Ordering, ffi::CString, ops::Range, os::fd::OwnedFd};
-
 pub use address::*;
-use nix::{
-    errno::Errno,
-    sys::{memfd, mman::ProtFlags},
-};
+pub use map::*;
+pub use region::*;
 pub use size::*;
+
+//#[repr(transparent)]
+//#[derive(Clone, Copy)]
+///// An "entry" function for a block.
+/////
+///// It can be either a JIT compiled translation block, or a special emulator
+///// function.
+//pub type Entry(pub extern "C" fn(&mut JitContext, &mut Armv8AMachine) ->
+// Entry);
 
 /// Default guest physical address to load kernel code to.
 pub const KERNEL_ADDRESS: usize = 0x40080000;
 
-// Starting offset of DRAM inside the physical address space.
-pub const PHYS_MEM_START: u64 = 0x40000000;
+// Default starting offset of DRAM inside the physical address space.
+pub const PHYS_MEM_START: u64 = 0x4000_0000;
 
-pub struct MemoryRegion {
-    /// Offset from start of physical address space.
-    pub phys_offset: Address,
-    pub size: MemorySize,
-    pub fd: OwnedFd,
-    pub map: memmap2::MmapMut,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(i32)]
+/// Register/memory width in bits.
+pub enum Width {
+    _128 = 128,
+    _64 = 64,
+    _32 = 32,
+    _16 = 16,
+    _8 = 8,
 }
 
-impl std::fmt::Debug for MemoryRegion {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        fmt.debug_struct("MemoryRegion")
-            .field("type", &"mmap")
-            .field("size", &self.size)
-            .field("fd", &self.fd)
-            .finish_non_exhaustive()
-    }
-}
+impl From<Width> for cranelift::prelude::Type {
+    fn from(width: Width) -> Self {
+        use cranelift::codegen::ir::types::{I128, I16, I32, I64, I8};
 
-impl Ord for MemoryRegion {
-    fn cmp(&self, other: &Self) -> Ordering {
-        let a = Range::<Address>::from(self);
-        let b = Range::<Address>::from(other);
-        (a.start, a.end).cmp(&(b.start, b.end))
-    }
-}
-
-impl PartialOrd for MemoryRegion {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for MemoryRegion {
-    fn eq(&self, other: &Self) -> bool {
-        use std::os::fd::AsRawFd;
-
-        (self.phys_offset, self.size, self.fd.as_raw_fd())
-            == (other.phys_offset, other.size, other.fd.as_raw_fd())
-    }
-}
-
-impl Eq for MemoryRegion {}
-
-impl From<&MemoryRegion> for Range<Address> {
-    fn from(mr: &MemoryRegion) -> Self {
-        let start = mr.phys_offset;
-        Self {
-            start,
-            end: Address(start.0 + mr.size.0.get()),
-        }
-    }
-}
-
-impl MemoryRegion {
-    pub fn new(name: &str, size: MemorySize, phys_offset: usize) -> Result<Self, Errno> {
-        let name = CString::new(name).unwrap();
-        let fd = memfd::memfd_create(&name, memfd::MemFdCreateFlag::MFD_CLOEXEC)?;
-        nix::unistd::ftruncate(&fd, size.get().try_into().unwrap())?;
-        // SAFETY: `fd` is a valid file descriptor.
-        let mut map = unsafe { memmap2::MmapOptions::new().map_mut(&fd).unwrap() };
-        // SAFETY: `map`'s pointer is a valid memory address pointer of size `size`.
-        unsafe {
-            nix::sys::mman::mprotect(
-                std::ptr::NonNull::new(map.as_mut_ptr().cast::<core::ffi::c_void>()).unwrap(),
-                size.get().try_into().unwrap(),
-                ProtFlags::PROT_READ | ProtFlags::PROT_WRITE | ProtFlags::PROT_EXEC,
-            )?;
-        }
-        #[cfg(target_os = "linux")]
-        {
-            // Don't include VM memory in dumped core files.
-            _ = map.advise(memmap2::Advice::DontDump);
-        }
-        let u_size: usize = size.get().try_into().map_err(|_| Errno::ERANGE)?;
-        debug_assert_eq!(map.len(), u_size);
-        Ok(Self {
-            phys_offset: Address(phys_offset as u64),
-            size,
-            fd,
-            map,
-        })
-    }
-
-    #[inline]
-    pub const fn len(&self) -> usize {
-        self.size.get() as usize
-    }
-}
-
-/// A non-owning analogue of [`MemoryRegion`] that describes its characteristics
-/// but does not own its memory or holds any reference to it.
-pub struct MemoryRegionDescription {
-    pub start_offset: Address,
-    pub size: MemorySize,
-}
-
-impl From<&MemoryRegion> for MemoryRegionDescription {
-    fn from(value: &MemoryRegion) -> Self {
-        Self {
-            start_offset: value.phys_offset,
-            size: value.size,
-        }
-    }
-}
-
-impl MemoryRegionDescription {
-    #[inline]
-    pub const fn into_range(&self) -> Range<Address> {
-        let start = self.start_offset;
-        Range {
-            start,
-            end: Address(start.0 + self.size.0.get()),
+        match width {
+            Width::_8 => I8,
+            Width::_16 => I16,
+            Width::_32 => I32,
+            Width::_64 => I64,
+            Width::_128 => I128,
         }
     }
 }

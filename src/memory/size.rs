@@ -35,6 +35,14 @@ impl MemorySize {
     // SAFETY: value is non-zero.
     pub const GiB: NonZero<u64> = NonZero::new(Self::MiB.get() * 1024).unwrap();
 
+    #[inline]
+    pub const fn new(value: u64) -> Option<Self> {
+        if value == 0 {
+            return None;
+        }
+        Some(Self(NonZero::new(value).unwrap()))
+    }
+
     /// Get `u64` value.
     #[inline]
     pub const fn get(self) -> u64 {

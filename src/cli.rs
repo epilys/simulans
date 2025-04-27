@@ -23,7 +23,7 @@
 use std::{borrow::Cow, num::NonZero, path::PathBuf};
 
 use clap::Parser;
-use simulans::memory::{Address, MemorySize, KERNEL_ADDRESS};
+use simulans::memory::{Address, MemorySize, KERNEL_ADDRESS, PHYS_MEM_START};
 
 fn maybe_hex(s: &str) -> Result<Address, Cow<'static, str>> {
     const HEX_PREFIX: &str = "0x";
@@ -106,15 +106,23 @@ const DEFAULT_MEMORY_SIZE: MemorySize =
 pub struct Args {
     #[arg(short, long, default_value_t = 0, action = clap::ArgAction::Count)]
     pub verbose: u8,
+
     /// Hexadecimal or decimal value of the address to load the binary in to.
     ///
     /// Must be lower than total available memory.
     #[arg(long, default_value_t = Address(KERNEL_ADDRESS as u64), value_parser=maybe_hex)]
-    pub start_address: Address,
+    entry_point_address: Address,
+
+    /// Hexadecimal or decimal value of the address where DRAM starts.
+    ///
+    /// Must be lower than total available memory.
+    #[arg(long, default_value_t = Address(PHYS_MEM_START as u64), value_parser=maybe_hex)]
+    dram_start_address: Address,
+
     /// Non-zero hexadecimal or decimal value of the size of available physical
     /// memory to the VM.
     #[arg(long, default_value_t = DEFAULT_MEMORY_SIZE, value_parser=memory_size)]
-    pub memory: MemorySize,
+    memory: MemorySize,
 
     /// Path to binary file containing aarch64 instructions (NOT an ELF file!)
     #[arg(value_name = "BINARY")]
@@ -123,19 +131,63 @@ pub struct Args {
     /// Whether to generate an FDT and pass it as `x0` or not.
     #[arg(short, long, default_value_t = true)]
     pub generate_fdt: bool,
+
+    /// Start a GDB stub instead at given Unix domain socket path.
+    #[arg(long)]
+    pub gdb_stub_path: Option<PathBuf>,
 }
 
 impl Args {
     /// Parse command-line arguments from the process environment.
     pub fn parse() -> Result<Self, String> {
         let retval = <Self as clap::Parser>::parse();
-        if retval.start_address.0 >= retval.memory.0.get() {
+        if retval.dram_start_address.0 >= retval.memory.0.get() {
             return Err(format!(
-                "Invalid arguments: Given start address {} is out of range for given memory size \
+                "Invalid arguments: Given DRAM start address {} is out of range for given memory \
+                 size {}.",
+                retval.dram_start_address, retval.memory
+            ));
+        }
+        if retval.entry_point_address.0 >= retval.memory.0.get() {
+            return Err(format!(
+                "Invalid arguments: Given entry point address {} is out of range for given memory \
+                 size {}.",
+                retval.entry_point_address, retval.memory
+            ));
+        }
+        if retval.entry_point_address.0 < retval.dram_start_address.0 {
+            return Err(format!(
+                "Invalid arguments: Given entry point address {} is below start of DRAM address \
                  {}.",
-                retval.start_address, retval.memory
+                retval.entry_point_address, retval.dram_start_address
             ));
         }
         Ok(retval)
+    }
+
+    #[inline]
+    pub const fn dram_size(&self) -> MemorySize {
+        // Guaranteed to not underflow because of checks
+        MemorySize(NonZero::new(self.memory.get() - self.dram_start_address.0).unwrap())
+    }
+
+    /// Hexadecimal or decimal value of the address to load the binary in to.
+    ///
+    /// Must be lower than total available memory.
+    pub const fn entry_point_address(&self) -> Address {
+        self.entry_point_address
+    }
+
+    /// Hexadecimal or decimal value of the address where DRAM starts.
+    ///
+    /// Must be lower than total available memory.
+    pub const fn dram_start_address(&self) -> Address {
+        self.dram_start_address
+    }
+
+    /// Non-zero hexadecimal or decimal value of the size of available physical
+    /// memory to the VM.
+    pub const fn memory(&self) -> MemorySize {
+        self.memory
     }
 }

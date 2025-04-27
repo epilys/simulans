@@ -22,7 +22,10 @@
 
 use std::num::NonZero;
 
-use simulans::{machine, main_loop, memory::MemorySize};
+use simulans::{devices::Device, machine, main_loop, memory::*};
+
+#[macro_use]
+mod utils;
 
 /// Test a simple function that squares its input.
 #[test]
@@ -50,9 +53,14 @@ fn test_square() {
     // 0x24: nop
     // ```
 
-    const MEMORY_SIZE: u64 = (4 * SQUARED.len()) as u64;
-    let mut machine = machine::Armv8AMachine::new(MemorySize(NonZero::new(MEMORY_SIZE).unwrap()));
-    let entry_point = machine.mem.phys_offset;
+    const MEMORY_SIZE: MemorySize = MemorySize(NonZero::new((4 * SQUARED.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    let memory = MemoryMap::builder(MEMORY_SIZE)
+        .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
+        .unwrap()
+        .build();
+    let mut machine = machine::Armv8AMachine::new(memory);
+    machine.cpu_state.registers.sp = 4 * SQUARED.len() as u64 - 4;
 
     let stack_pre = machine.cpu_state.registers.sp;
     // Pass "25" as `num`
@@ -74,30 +82,38 @@ fn test_load_stores() {
     const LOAD_STORES: &[u8] = b"\xe0\x0f\x1f\xf8\xe1\x07\x41\xf8";
     // _ = simulans::disas(LOAD_STORES, 0);
 
-    const MEMORY_SIZE: u64 = (4 * LOAD_STORES.len()) as u64;
-    let mut machine = machine::Armv8AMachine::new(MemorySize(NonZero::new(MEMORY_SIZE).unwrap()));
-    let entry_point = machine.mem.phys_offset;
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * LOAD_STORES.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    let memory = MemoryMap::builder(MEMORY_SIZE)
+        .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
+        .unwrap()
+        .build();
+    let mut machine = machine::Armv8AMachine::new(memory);
+    machine.cpu_state.registers.sp = 4 * LOAD_STORES.len() as u64 - 4;
 
     let stack_pre = machine.cpu_state.registers.sp;
     machine.cpu_state.registers.x0 = 0xbadbeef;
     main_loop(&mut machine, entry_point, LOAD_STORES).unwrap();
     let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre);
-    let phys_offset = machine.mem.phys_offset.0 as usize;
+    let mem = machine.memory.find_region(entry_point).unwrap();
+    let phys_offset = mem.phys_offset.0 as usize;
+    let mem = mem.as_mmap().unwrap();
     assert_eq!(
-        machine.mem.map.as_ref()[stack_post as usize - phys_offset - 0x10],
+        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10],
         0xef
     );
     assert_eq!(
-        machine.mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 1],
+        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 1],
         0xbe
     );
     assert_eq!(
-        machine.mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 2],
+        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 2],
         0xad
     );
     assert_eq!(
-        machine.mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 3],
+        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 3],
         0x0b
     );
     assert_eq!(machine.cpu_state.registers.x0, 0xbadbeef);
@@ -115,9 +131,14 @@ fn test_load_stores_2() {
     const STACK_ADD: &[u8] = b"\x80\x46\x82\xd2\xe0\x0f\x1f\xf8\xe1\x07\x41\xf8\x00\x00\x01\x8b";
     // _ = simulans::disas(STACK_ADD, 0);
 
-    const MEMORY_SIZE: u64 = (4 * STACK_ADD.len()) as u64;
-    let mut machine = machine::Armv8AMachine::new(MemorySize(NonZero::new(MEMORY_SIZE).unwrap()));
-    let entry_point = machine.mem.phys_offset;
+    const MEMORY_SIZE: MemorySize = MemorySize(NonZero::new((4 * STACK_ADD.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    let memory = MemoryMap::builder(MEMORY_SIZE)
+        .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
+        .unwrap()
+        .build();
+    let mut machine = machine::Armv8AMachine::new(memory);
+    machine.cpu_state.registers.sp = 4 * STACK_ADD.len() as u64 - 4;
 
     let stack_pre = machine.cpu_state.registers.sp;
     machine.cpu_state.registers.x0 = 0xbadbeef;
@@ -126,13 +147,15 @@ fn test_load_stores_2() {
     assert_eq!(stack_post, stack_pre);
     assert_eq!(machine.cpu_state.registers.x0, 2 * 0x1234);
     assert_eq!(machine.cpu_state.registers.x1, 0x1234);
-    let phys_offset = machine.mem.phys_offset.0 as usize;
+    let mem = machine.memory.find_region(entry_point).unwrap();
+    let phys_offset = mem.phys_offset.0 as usize;
+    let mem = mem.as_mmap().unwrap();
     assert_eq!(
-        machine.mem.map.as_ref()[stack_post as usize - phys_offset - 0x10],
+        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10],
         0x34
     );
     assert_eq!(
-        machine.mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 1],
+        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 1],
         0x12
     );
 }
@@ -169,9 +192,14 @@ fn test_exception_levels() {
     const BOOT: &[u8] = b"\x20\x00\x80\xd2\x00\x00\x7f\xb2\x00\x00\x7e\xb2\x00\x00\x7d\xb2\x00\x00\x78\xb2\x00\x00\x76\xb2\x00\x00\x75\xb2\x00\x11\x1e\xd5\xe0\x03\x1d\x32\x00\x00\x7c\xb2\x00\x00\x61\xb2\x00\x11\x1c\xd5\x00\x00\x38\xd5\x00\x00\x1c\xd5\xa0\x00\x38\xd5\xa0\x00\x1c\xd5\x1f\x21\x1c\xd5\x1f\x10\x1c\xd5\x1f\x10\x18\xd5\xe0\x00\x00\x58\x20\x40\x1e\xd5\xe0\x00\x00\x58\x00\x40\x1e\xd5\xe0\x03\x9f\xd6\x1f\x20\x03\xd5\x00\x00\x00\x00\xd8\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
     // _ = simulans::disas(BOOT, 0);
 
-    const MEMORY_SIZE: u64 = (4 * BOOT.len()) as u64;
-    let mut machine = machine::Armv8AMachine::new(MemorySize(NonZero::new(MEMORY_SIZE).unwrap()));
-    let entry_point = machine.mem.phys_offset;
+    const MEMORY_SIZE: MemorySize = MemorySize(NonZero::new((4 * BOOT.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    let memory = MemoryMap::builder(MEMORY_SIZE)
+        .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
+        .unwrap()
+        .build();
+    let mut machine = machine::Armv8AMachine::new(memory);
+    machine.cpu_state.registers.sp = 4 * BOOT.len() as u64 - 4;
 
     let stack_pre = machine.cpu_state.registers.sp;
     main_loop(&mut machine, entry_point, BOOT).unwrap();
@@ -181,4 +209,44 @@ fn test_exception_levels() {
     assert_eq!(machine.cpu_state.registers.hcr_el2, 0x80000018);
     assert_eq!(machine.cpu_state.registers.scr_el3, 0xd0f);
     assert_eq!(machine.cpu_state.registers.elr_el3, 0x4000d8);
+}
+
+#[test]
+fn test_uart_write_str() {
+    _ = env_logger::builder().is_test(true).try_init();
+
+    const TEST_INPUT: &[u8] = b"\xde\x02\x00\x10\x02\x02\x00\xb4\x21\x02\x00\x10\x29\x00\x02\x8b\x2a\x14\x40\x38\x0b\x34\x40\x79\xeb\x00\x28\x37\x3f\x00\x09\xeb\x0a\x00\x00\x79\x00\x01\x00\x54\x2a\x14\x40\x38\x0b\x34\x40\x79\x6b\xff\x2f\x36\xdf\x3f\x03\xd5\x0b\x34\x40\x79\xcb\xff\x2f\x37\xf7\xff\xff\x17\xe0\x03\x1f\x2a\xc0\x03\x5f\xd6\x48\x65\x6c\x6c\x6f\x20\x77\x6f\x72\x6c\x64\x0a\x1f\x20\x03\xd5";
+
+    const DRAM_MEMORY_SIZE: MemorySize = MemorySize(NonZero::new(TEST_INPUT.len() as u64).unwrap());
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+
+    _ = simulans::disas(TEST_INPUT, 0);
+    let entry_point = Address(0);
+    let pl011_addr = Address(TEST_INPUT.len() as u64);
+    {
+        let pl011 = simulans::devices::pl011::PL011State::new(0);
+        let memory = MemoryMap::builder(MEMORY_SIZE)
+            .with_region(MemoryRegion::new("ram", DRAM_MEMORY_SIZE, entry_point).unwrap())
+            .unwrap()
+            .with_region(
+                MemoryRegion::new_io(MemorySize::new(0x100).unwrap(), pl011_addr, pl011.ops())
+                    .unwrap(),
+            )
+            .unwrap()
+            .build();
+        let mut machine = machine::Armv8AMachine::new(memory);
+        machine.cpu_state.registers.x0 = pl011_addr.0;
+        machine.cpu_state.registers.x2 = "Hello world\n".len() as u64;
+
+        main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+
+        macro_rules! reg {
+            ($reg:ident) => {
+                machine.cpu_state.registers.$reg
+            };
+        }
+
+        assert_hex_eq!(reg!(x0), 0x0);
+    }
 }

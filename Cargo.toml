@@ -20,6 +20,8 @@ cranelift-jit = "0.97.1"
 cranelift-module = "0.97.1"
 cranelift-native = "0.97.1"
 env_logger = { version = "0.11.6", default-features = false }
+gdbstub = { version = "0.7.1", optional = true }
+gdbstub_arch = { version = "0.3.0", optional = true }
 indexmap = { version = "2.7.1" }
 log = { version = "0.4.26", default-features = false }
 memmap2 = { version = "0.9.5" }
@@ -32,6 +34,8 @@ serde_json = "1"
 vm-fdt = "0.3.0"
 
 [features]
-default = ["accurate-pc"]
+default = ["accurate-pc", "gdbstub"]
 # Update program counter before executing an emulated instruction. The performance overhead of this has not been measured.
 accurate-pc = []
+# Add support for running a guest under a gdbstub server listening on a Unix socket. See output of `--help` for how to use.
+gdbstub = ["dep:gdbstub", "dep:gdbstub_arch"]

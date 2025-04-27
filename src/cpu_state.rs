@@ -30,6 +30,24 @@ use cranelift::prelude::*;
 use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
+pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine, is_entry: bool) {
+    if is_entry {
+        log::trace!(
+            "entering block pc = 0x{:x}, prev_pc = 0x{:x} with registers:\n{:#?}",
+            machine.pc,
+            machine.prev_pc,
+            machine.cpu_state.registers
+        );
+    } else {
+        log::trace!(
+            "exiting block from 0x{:x} to pc 0x{:x} with registers:\n{:#?}",
+            machine.prev_pc,
+            machine.pc,
+            machine.cpu_state.registers
+        );
+    }
+}
+
 /// Regular registers.
 #[derive(Default, Debug)]
 #[repr(C)]
@@ -116,6 +134,7 @@ pub struct RegisterFile {
     pub elr_el1: u64,
     pub elr_el2: u64,
     pub elr_el3: u64,
+    pub nzcv: NZCV,
 }
 
 #[bitsize(2)]
@@ -164,6 +183,22 @@ pub enum Mode {
     Undefined = 0b11011,
     #[default]
     System = 0b11111,
+}
+
+#[bitsize(64)]
+#[derive(Default, Copy, Clone, PartialEq, Eq, FromBits, DebugBits)]
+/// Condition flags pseudo-register
+pub struct NZCV {
+    pub _padding2: u28,
+    /// Overflow condition flag. (bit `[28]`)
+    pub v: bool,
+    /// Carry condition flag. (bit `[29]`)
+    pub c: bool,
+    /// Zero condition flag. (bit `[30]`)
+    pub z: bool,
+    /// Negative condition flag. (bit `[31]`)
+    pub n: bool,
+    pub _padding: u32,
 }
 
 #[bitsize(64)]
@@ -233,14 +268,14 @@ pub struct SavedProgramStatusRegister {
 /// | `NZCV`                   | Holds the condition flags.                                                                      | `N, Z, C, V`    |
 /// | `SPSel`                  | At `EL1` or higher, this selects between the `SP` for the current Exception level and `SP_EL0`. | `SP`            |
 pub struct PSTATE {
-    /// Negative condition flag.
-    pub N: u64,
-    /// Zero condition flag.
-    pub Z: u64,
-    /// Carry condition flag.
-    pub C: u64,
-    /// oVerflow condition flag.
-    pub V: u64,
+    // /// Negative condition flag.
+    // pub N: u64,
+    // /// Zero condition flag.
+    // pub Z: u64,
+    // /// Carry condition flag.
+    // pub C: u64,
+    // /// oVerflow condition flag.
+    // pub V: u64,
     /// Debug mask bit.
     pub D: u64,
     /// `SError` mask bit.
@@ -352,6 +387,7 @@ impl ExecutionState {
             elr_el1 => SysReg::ELR_EL1,
             elr_el2 => SysReg::ELR_EL2,
             elr_el3 => SysReg::ELR_EL3,
+            nzcv => SysReg::NZCV,
         }
         reg_field! {
             x0 => Reg::X0,
@@ -481,6 +517,7 @@ impl ExecutionState {
             elr_el1 => SysReg::ELR_EL1,
             elr_el2 => SysReg::ELR_EL2,
             elr_el3 => SysReg::ELR_EL3,
+            nzcv => SysReg::NZCV,
         };
         reg_field! {
             x0 => Reg::X0,

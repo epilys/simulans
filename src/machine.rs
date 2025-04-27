@@ -32,69 +32,68 @@ use crate::{
     memory::*,
 };
 
+#[repr(C)]
+pub struct ResolvedAddress<'a> {
+    pub mem_region: &'a MemoryRegion,
+    pub address_inside_region: u64,
+}
+
+pub extern "C" fn address_lookup(machine: &mut Armv8AMachine, address: u64) -> ResolvedAddress {
+    log::trace!(
+        "address lookup from pc 0x{:x} for address 0x{:x}",
+        machine.pc,
+        address
+    );
+    let Some(mem_region) = machine.memory.find_region(Address(address)) else {
+        panic!(
+            "Could not look up address {} in physical memory map.",
+            address
+        );
+    };
+    let address_inside_region = address - mem_region.phys_offset.0;
+    ResolvedAddress {
+        mem_region,
+        address_inside_region,
+    }
+}
+
 /// The state of the emulated machine.
 #[repr(C)]
 pub struct Armv8AMachine {
     pub pc: u64,
     pub prev_pc: u64,
     pub cpu_state: ExecutionState,
-    pub mem: MemoryRegion,
+    pub memory: MemoryMap,
     pub entry_blocks: FxHashMap<u64, Entry>,
     pub lookup_entry_func: Entry,
     pub halted: u8,
 }
 
 impl Armv8AMachine {
-    pub fn new(memory_size: MemorySize) -> Pin<Box<Self>> {
-        let mem = MemoryRegion::new("ram", memory_size, PHYS_MEM_START as usize).unwrap();
-        let mut cpu_state = ExecutionState::default();
-        cpu_state.registers.sp = mem.phys_offset.0 + memory_size.get() / 2;
-        let entry_blocks = FxHashMap::default();
+    pub fn new(memory: MemoryMap) -> Pin<Box<Self>> {
         Box::pin(Self {
             pc: 0,
             prev_pc: 0,
-            cpu_state,
-            mem,
-            entry_blocks,
+            cpu_state: ExecutionState::default(),
+            memory,
+            entry_blocks: FxHashMap::default(),
             lookup_entry_func: Entry(lookup_entry),
             halted: 0,
         })
     }
 
     pub fn generate_fdt(&mut self, entry_point: Address) -> Result<(), Box<dyn std::error::Error>> {
-        let fdt_offset =
-            crate::fdt::calculate_fdt_offset(crate::memory::PHYS_MEM_START, self.mem.size);
-        let fdt = crate::fdt::FdtBuilder {
-            phys_mem_start: crate::memory::PHYS_MEM_START,
-            cmdline: None,
-            mem_size: self.mem.size,
-            num_vcpus: NonZero::new(1).unwrap(),
-        }
-        .build()?;
-        if fdt_offset > self.mem.len() {
-            return Err(format!(
-                "fdt_offset 0x{fdt_offset:x} ({} bytes) is larger than memory size of {} bytes",
-                fdt_offset,
-                self.mem.len()
-            )
-            .into());
-        }
-        if fdt_offset + fdt.len() > self.mem.len() {
-            return Err(format!(
-                "fdt_offset 0x{fdt_offset:x} plus fdt size {} bytes (total: {} bytes) is larger \
-                 than memory size of {} bytes",
-                fdt.len(),
-                fdt_offset + fdt.len(),
-                self.mem.len()
-            )
-            .into());
-        }
-        let dtb_ptr = Address(fdt_offset.try_into()?);
-        self.load_code(&fdt, dtb_ptr)?;
+        let dram = self.memory.iter().next().unwrap();
+        let fdt = crate::fdt::FdtBuilder::new(dram, self.memory.max_size())?
+            .num_vcpus(NonZero::new(1).unwrap())
+            .cmdline(None)
+            .build()?;
+
+        self.load_code(&fdt.bytes, fdt.address)?;
 
         let bootloader = Armv8ABootloader {
             entry_point,
-            dtb_ptr,
+            fdt_address: fdt.address,
         };
         bootloader.write_to_memory(Address(0x4), self)?;
         self.pc = 0x4;
@@ -112,36 +111,44 @@ impl Armv8AMachine {
             log::info!("Called `load_code` with empty slice which does nothing.");
             return Ok(());
         };
-        if address.0 < self.mem.phys_offset.0 {
+        let Some(mem_region) = self.memory.find_region_mut(address) else {
             return Err(format!(
-                "Cannot load code to address {} which is below start of DRAM {}.",
-                address, self.mem.phys_offset
+                "Cannot load code to address {} which is not covered by a RAM memory region.",
+                address
             )
             .into());
-        }
-        if (address.0 - self.mem.phys_offset.0) as usize >= self.mem.len() {
-            return Err(format!(
-                "Address {} does not fit into DRAM of size {}.",
-                address, self.mem.size
-            )
-            .into());
-        }
-        if (address.0 as usize + input.len() - self.mem.phys_offset.0 as usize) >= self.mem.len() {
+        };
+
+        if address + input.len() > mem_region.last_addr() {
             return Err(format!(
                 "Input of size {} cannot fit in DRAM of size {} starting from address {}.",
                 MemorySize(input_size),
-                self.mem.size,
+                mem_region.len(),
                 address
             )
             .into());
         }
-        let address_inside_region = address.0 - self.mem.phys_offset.0;
+        let address_inside_region = address.0 - mem_region.phys_offset.0;
+        log::trace!(
+            "loading code of {} in address {} (address inside region of size {} is {})",
+            MemorySize((input.len() as u64).try_into().unwrap()),
+            address,
+            mem_region.size,
+            Address(address_inside_region)
+        );
+        let Some(mmapped_region) = mem_region.as_mmap_mut() else {
+            return Err(format!(
+                "Cannot load code to address {} which is mapped to device memory",
+                address
+            )
+            .into());
+        };
 
         // SAFETY: We performed boundary checks in the above check.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 input.as_ptr(),
-                self.mem
+                mmapped_region
                     .map
                     .as_mut_ptr()
                     .add(address_inside_region as usize),
@@ -155,7 +162,7 @@ impl Armv8AMachine {
 #[derive(Clone, Copy, Debug)]
 pub struct Armv8ABootloader {
     pub entry_point: Address,
-    pub dtb_ptr: Address,
+    pub fdt_address: Address,
 }
 
 impl Armv8ABootloader {
@@ -195,9 +202,9 @@ impl Armv8ABootloader {
                                              * pseudo-instruction (PC-relative address) */
             /* 14: */ 0x80001fd6_u32.swap_bytes(), // `br  x4`
             /* 18: */
-            lower_32bit!(self.dtb_ptr.0), // arg: .word @dtb lower 32bit
+            lower_32bit!(self.fdt_address.0), // arg: .word @dtb lower 32bit
             /* 1c: */
-            higher_32bit!(self.dtb_ptr.0), // .word @dtb higher 32bit
+            higher_32bit!(self.fdt_address.0), // .word @dtb higher 32bit
             /* 20: */
             lower_32bit!(self.entry_point.0), // entry: .word @kernel entry lower 32bit
             /* 24: */
@@ -205,25 +212,6 @@ impl Armv8ABootloader {
         ];
         // SAFETY: integers can be re-interpreted as bytes.
         let byte_slice = unsafe { std::mem::transmute::<[u32; 10], [u8; 10 * 4]>(code) };
-        {
-            use capstone::prelude::*;
-
-            let mut cs = Capstone::new()
-                .arm64()
-                .mode(capstone::arch::arm64::ArchMode::Arm)
-                .endian(capstone::Endian::Little)
-                .detail(true)
-                .build()
-                .expect("Failed to create Capstone object");
-            cs.set_syntax(capstone::Syntax::Intel)?;
-            cs.set_skipdata(false)?;
-            let decoded_iter = cs.disasm_all(&byte_slice, 0)?;
-            eprintln!("Bootloader output:");
-            for insn in decoded_iter.as_ref() {
-                eprintln!("{}", insn);
-            }
-            eprintln!("Bootloader output done");
-        }
         machine.load_code(&byte_slice, destination)
     }
 }
