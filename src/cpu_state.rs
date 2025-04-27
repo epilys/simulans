@@ -299,10 +299,15 @@ impl ExecutionState {
     ) {
         use bad64::{Reg, SysReg};
 
+        let memflags = MemFlags::trusted()
+            .with_endianness(codegen::ir::Endianness::Little)
+            .with_vmctx();
         macro_rules! reg_field {
             ($($field:ident$([$index:expr])? => $bad_reg:expr),*$(,)?) => {{
                 $(
-                    let value = builder.ins().iconst(I64, self.registers.$field$([$index])* as i64);
+                    let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
+                    let offset = core::mem::offset_of!(RegisterFile, $field) $(+ $index * std::mem::size_of::<u128>())*;
+                    let value = builder.ins().load(I64, memflags, addr, i32::try_from(offset).unwrap());
                     let var = Variable::new(registers.len() + sys_registers.len());
                     assert!(!registers.contains_key(&$bad_reg));
                     registers.insert($bad_reg, var);
@@ -310,9 +315,11 @@ impl ExecutionState {
                     builder.def_var(var, value);
                 )*
             }};
-            (sys $($field:ident$($conversion:expr)? => $bad_sys_reg:expr),*$(,)?) => {{
+            (sys $($field:ident => $bad_sys_reg:expr),*$(,)?) => {{
                 $(
-                    let value = builder.ins().iconst(I64, $($conversion)*(self.registers.$field) as u64 as i64);
+                    let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
+                    let offset = core::mem::offset_of!(RegisterFile, $field);
+                    let value = builder.ins().load(I64, memflags, addr, i32::try_from(offset).unwrap());
                     let var = Variable::new(registers.len() + sys_registers.len());
                     assert!(!sys_registers.contains_key(&$bad_sys_reg));
                     sys_registers.insert($bad_sys_reg, var);
@@ -341,7 +348,7 @@ impl ExecutionState {
             scr_el3 => SysReg::SCR_EL3,
             vpidr_el2 => SysReg::VPIDR_EL2,
             vmpidr_el2 => SysReg::VMPIDR_EL2,
-            spsr_el3 u64::from =>  SysReg::SPSR_EL3,
+            spsr_el3 =>  SysReg::SPSR_EL3,
             elr_el1 => SysReg::ELR_EL1,
             elr_el2 => SysReg::ELR_EL2,
             elr_el3 => SysReg::ELR_EL3,
@@ -381,24 +388,30 @@ impl ExecutionState {
             xzr => Reg::XZR,
             sp => Reg::SP,
         }
+        let vector_addr = builder
+            .ins()
+            .iconst(I64, std::ptr::addr_of!(self.vector_registers) as i64);
         for i in 0_u32..=31 {
             let d_reg = bad64::Reg::from_u32(bad64::Reg::D0 as u32 + i).unwrap();
             assert!(!registers.contains_key(&d_reg));
             let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
             assert!(!registers.contains_key(&v_reg));
+            let offset = i * std::mem::size_of::<(u64, u64)>() as u32;
+            let offset = i32::try_from(offset).unwrap();
             {
-                let d_value = builder
-                    .ins()
-                    .iconst(I64, self.vector_registers[i as usize].1 as i64);
+                let d_value = builder.ins().load(I64, memflags, vector_addr, offset);
                 let d_var = Variable::new(registers.len() + sys_registers.len());
                 registers.insert(d_reg, d_var);
                 builder.declare_var(d_var, I64);
                 builder.def_var(d_var, d_value);
             }
             {
-                let v_value = builder
-                    .ins()
-                    .iconst(I64, self.vector_registers[i as usize].0 as i64);
+                let v_value = builder.ins().load(
+                    I64,
+                    memflags,
+                    vector_addr,
+                    offset + std::mem::size_of::<u64>() as i32,
+                );
                 let v_var = Variable::new(registers.len() + sys_registers.len());
                 registers.insert(v_reg, v_var);
                 builder.declare_var(v_var, I64);
@@ -418,7 +431,9 @@ impl ExecutionState {
     ) {
         use bad64::{Reg, SysReg};
 
-        let memflags = MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
+        let memflags = MemFlags::trusted()
+            .with_endianness(codegen::ir::Endianness::Little)
+            .with_vmctx();
         macro_rules! reg_field {
             ($($field:ident$([$index:expr])? => $bad_reg:expr),*$(,)?) => {{
                 $(
@@ -501,10 +516,10 @@ impl ExecutionState {
             x30 => Reg::X30,
             sp => Reg::SP,
         }
+        let vector_addr = builder
+            .ins()
+            .iconst(I64, std::ptr::addr_of!(self.vector_registers) as i64);
         for i in 0_u32..=31 {
-            let addr = builder
-                .ins()
-                .iconst(I64, std::ptr::addr_of!(self.vector_registers) as i64);
             let offset = i * std::mem::size_of::<(u64, u64)>() as u32;
             let d_reg = bad64::Reg::from_u32(bad64::Reg::D0 as u32 + i).unwrap();
             let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
@@ -513,13 +528,15 @@ impl ExecutionState {
             let var = &registers[&d_reg];
             let low_bits_value = builder.use_var(*var);
             let offset = i32::try_from(offset).unwrap();
-            builder.ins().store(memflags, low_bits_value, addr, offset);
+            builder
+                .ins()
+                .store(memflags, low_bits_value, vector_addr, offset);
             let var = &registers[&v_reg];
             let high_bits_value = builder.use_var(*var);
             builder.ins().store(
                 memflags,
                 high_bits_value,
-                addr,
+                vector_addr,
                 offset + std::mem::size_of::<u64>() as i32,
             );
         }
