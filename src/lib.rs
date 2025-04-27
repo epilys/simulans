@@ -112,7 +112,6 @@ pub mod interval_tree;
 pub mod jit;
 pub mod machine;
 pub mod memory;
-pub mod varlink;
 
 /// Disassembles and prints each decoded aarch64 instruction to stdout using
 /// Capstone library, for debugging.
