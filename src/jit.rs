@@ -758,6 +758,14 @@ impl BlockTranslator<'_> {
                 ref reg,
                 arrspec: None,
             } => self.reg_to_value(reg),
+            Operand::ShiftReg {
+                ref reg,
+                shift: bad64::Shift::LSL(lsl),
+            } => {
+                let value = self.reg_to_value(reg);
+                let lsl = self.builder.ins().iconst(I64, i64::from(*lsl));
+                self.builder.ins().ishl(value, lsl)
+            }
             Operand::MemPreIdx { ref reg, imm } => {
                 let reg_val = self.reg_to_value(reg);
                 match imm {
