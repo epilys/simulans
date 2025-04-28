@@ -475,6 +475,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
 
 [[package]]
+name = "flat_device_tree"
+version = "3.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d29ba76ecf314f211601c5641d6fc4393d8f56a3b7764b3c8544639aad965a9"
+
+[[package]]
 name = "gdbstub"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -909,6 +915,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native",
  "env_logger",
+ "flat_device_tree",
  "gdbstub",
  "gdbstub_arch",
  "indexmap 2.9.0",
