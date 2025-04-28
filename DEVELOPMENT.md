@@ -2,6 +2,54 @@
 
 Set the environment variable `RUST_LOG=trace` or `RUST_LOG=debug` to print logs during execution.
 
+## Debugging the VM as a remote `aarch64` target with the integrated GDB stub
+
+Running a binary with `--gdb-stub-path <PATH_TO_GDB_SOCKET>` arguments will create a UNIX socket at `PATH_TO_GDB_SOCKET` and launch the emulator via a GDB stub (i.e. a server process) instead of the usual emulation loop.
+
+You can then connect to the stub server by launching `gdb-multiarch` and running the gdb command `target remote <PATH_TO_GDB_SOCKET>`.
+
+```sh
+$ cargo run -- ./test_kernel.bin --gdb-stub-path ./gdb
+[INFO  simulans::gdb] Waiting for a GDB connection on ./gdb...
+```
+
+From another terminal:
+
+```sh
+$ gdb-multiarch ./test_kernel
+Reading symbols from ./test_kernel....
+(gdb) target remote ./gdb
+Remote debugging using ./gdb
+0x0000000000000004 in ?? ()
+(gdb) disas $pc,+20
+Dump of assembler code from 0x4 to 0x18:
+=> 0x0000000000000004:  ldr     x0, 0x1c
+   0x0000000000000008:  mov     x1, xzr
+   0x000000000000000c:  mov     x2, xzr
+   0x0000000000000010:  mov     x3, xzr
+   0x0000000000000014:  ldr     x4, 0x24
+End of assembler dump.
+(gdb) stepi
+0x0000000000000004 in ?? ()
+(gdb) stepi
+0x0000000000000008 in ?? ()
+(gdb) disas $pc,+1
+Dump of assembler code from 0x8 to 0x9:
+=> 0x0000000000000008:  mov     x1, xzr
+End of assembler dump.
+```
+
+You can inspect registers and memory as usual:
+
+```sh
+(gdb) info mem
+(gdb) info registers
+(gdb) p/x $x0
+(gdb) p/x $pc
+```
+
+You can also view current register state and assembly by enabling the `asm` and `regs` TUI layouts.
+
 ## Emulating specific instructions
 
 [Refer to the official Arm documentation about A-profile AArch64 Instructions](https://developer.arm.com/documentation/ddi0601/2025-03/AArch64-Instructions?lang=en)
