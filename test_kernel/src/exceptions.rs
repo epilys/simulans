@@ -1,6 +1,7 @@
 //! Exception handlers.
 
 use core::arch::asm;
+
 use log::error;
 use smccc::{psci::system_off, Hvc};
 
