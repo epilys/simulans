@@ -24,13 +24,14 @@
 
 use std::{num::NonZero, pin::Pin};
 
-use rustc_hash::FxHashMap;
-
 use crate::{
     cpu_state::*,
     jit::{lookup_entry, Entry},
     memory::*,
 };
+
+mod entry_blocks;
+pub use entry_blocks::EntryBlocks;
 
 #[repr(C)]
 pub struct ResolvedAddress<'a> {
@@ -64,7 +65,7 @@ pub struct Armv8AMachine {
     pub prev_pc: u64,
     pub cpu_state: ExecutionState,
     pub memory: MemoryMap,
-    pub entry_blocks: FxHashMap<u64, Entry>,
+    pub entry_blocks: EntryBlocks,
     pub lookup_entry_func: Entry,
     pub halted: u8,
 }
@@ -76,7 +77,7 @@ impl Armv8AMachine {
             prev_pc: 0,
             cpu_state: ExecutionState::default(),
             memory,
-            entry_blocks: FxHashMap::default(),
+            entry_blocks: EntryBlocks::new(),
             lookup_entry_func: Entry(lookup_entry),
             halted: 0,
         })

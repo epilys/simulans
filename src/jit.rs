@@ -53,17 +53,22 @@ pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMac
     let pc: u64 = machine.pc;
     if context.single_step {
         // Do not cache single step blocks
-        let next_entry = context.compile(machine, pc).unwrap();
+        let (_, next_entry) = context.compile(machine, pc).unwrap();
         return next_entry;
     }
     if let Some(entry) = machine.entry_blocks.get(&pc) {
-        log::trace!("lookup entry entry found for 0x{:x}", pc);
-        return *entry;
+        log::trace!("lookup entry entry found for 0x{:x}-0x{:x}", pc, entry.0);
+        // let mem_region = machine.memory.find_region(Address(pc)).unwrap();
+        // let mmapped_region = mem_region.as_mmap().unwrap();
+        // let input = &mmapped_region.as_ref()[(pc -
+        // mem_region.phys_offset.0).try_into().unwrap()..]     [..(entry.0 as
+        // usize - pc as usize + 4)]; _ = crate::disas(input, pc);
+        return entry.1;
     }
     log::trace!("generating entry for pc 0x{:x}", pc);
 
-    let next_entry = context.compile(machine, pc).unwrap();
-    machine.entry_blocks.insert(pc, next_entry);
+    let (pc_range, next_entry) = context.compile(machine, pc).unwrap();
+    machine.entry_blocks.insert(pc_range, next_entry);
 
     log::trace!("returning generated entry for pc 0x{:x}", pc);
     next_entry
@@ -218,7 +223,7 @@ impl JitContext {
         &mut self,
         machine: &mut Armv8AMachine,
         program_counter: u64,
-    ) -> Result<Entry, Box<dyn std::error::Error>> {
+    ) -> Result<(std::ops::RangeInclusive<u64>, Entry), Box<dyn std::error::Error>> {
         log::trace!("jit compile called for pc = 0x{:x}", program_counter);
         let mut sig = self.module.make_signature();
         sig.params
@@ -236,7 +241,7 @@ impl JitContext {
         }
 
         // Actually perform the translation for this translation block
-        self.translate(machine, program_counter)?;
+        let last_pc = self.translate(machine, program_counter)?;
 
         // We generate the translated block as a Cranelift function.
         //
@@ -279,7 +284,7 @@ impl JitContext {
             >(self.module.get_finalized_function(id))
         };
 
-        Ok(Entry(code))
+        Ok((program_counter..=last_pc, Entry(code)))
     }
 
     /// Translate instructions starting from address `program_counter`.
@@ -287,7 +292,7 @@ impl JitContext {
         &mut self,
         machine: &mut Armv8AMachine,
         program_counter: u64,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<u64, Box<dyn std::error::Error>> {
         use std::ops::Deref;
 
         let machine_addr = std::ptr::addr_of!(*machine);
@@ -313,7 +318,7 @@ impl JitContext {
             )
             .into());
         };
-        let decoded_iter = bad64::disasm(
+        let mut decoded_iter = bad64::disasm(
             &mmapped_region.map.deref()[(program_counter - mem_region.phys_offset.0)
                 .try_into()
                 .unwrap()..],
@@ -389,28 +394,39 @@ impl JitContext {
         };
         let mut next_pc = None;
         let mut prev_pc = program_counter;
+        let mut last_pc = program_counter;
         // Translate each decoded instruction
-        for insn in decoded_iter {
-            match insn {
-                Ok(insn) => {
-                    log::trace!("{:#?}", insn);
-                    log::trace!("0x{:x}: {}", insn.address(), insn);
-                    if let ControlFlow::Break(jump_pc) = trans.translate_instruction(&insn) {
-                        prev_pc = insn.address();
-                        next_pc = jump_pc;
-                        break;
-                    } else if self.single_step {
-                        next_pc = Some(
-                            trans
-                                .builder
-                                .ins()
-                                .iconst(I64, (program_counter + 4) as i64),
-                        );
-                        break;
+        if let Some(first) = decoded_iter.next() {
+            let first = first.map_err(|err| format!("Error decoding instruction: {}", err))?;
+            last_pc = first.address();
+            if let ControlFlow::Break(jump_pc) = trans.translate_instruction(&first) {
+                prev_pc = first.address();
+                next_pc = jump_pc;
+            } else if self.single_step {
+                next_pc = Some(
+                    trans
+                        .builder
+                        .ins()
+                        .iconst(I64, (program_counter + 4) as i64),
+                );
+            } else {
+                for insn in decoded_iter {
+                    match insn {
+                        Ok(insn) => {
+                            last_pc = insn.address();
+                            log::trace!("{:#?}", insn);
+                            log::trace!("0x{:x}: {}", insn.address(), insn);
+                            if let ControlFlow::Break(jump_pc) = trans.translate_instruction(&insn)
+                            {
+                                prev_pc = insn.address();
+                                next_pc = jump_pc;
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            return Err(format!("Error decoding instruction: {}", err).into());
+                        }
                     }
-                }
-                Err(err) => {
-                    log::error!("Error decoding instruction: {}", err);
                 }
             }
         }
@@ -424,7 +440,7 @@ impl JitContext {
 
         // Tell the builder we're done with this block (function in Cranelift terms).
         builder.finalize();
-        Ok(())
+        Ok(last_pc)
     }
 }
 
