@@ -22,7 +22,7 @@
 
 //! Representation of an emulated machine.
 
-use std::{num::NonZero, pin::Pin};
+use std::{collections::BTreeSet, num::NonZero, pin::Pin};
 
 use crate::{
     cpu_state::*,
@@ -67,6 +67,7 @@ pub struct Armv8AMachine {
     pub memory: MemoryMap,
     pub entry_blocks: EntryBlocks,
     pub lookup_entry_func: Entry,
+    pub hw_breakpoints: BTreeSet<Address>,
     pub halted: u8,
 }
 
@@ -79,6 +80,7 @@ impl Armv8AMachine {
             memory,
             entry_blocks: EntryBlocks::new(),
             lookup_entry_func: Entry(lookup_entry),
+            hw_breakpoints: BTreeSet::new(),
             halted: 0,
         })
     }
