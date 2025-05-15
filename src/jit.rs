@@ -311,8 +311,6 @@ impl JitContext {
         machine: &mut Armv8AMachine,
         program_counter: u64,
     ) -> Result<u64, Box<dyn std::error::Error>> {
-        use std::ops::Deref;
-
         let machine_addr = std::ptr::addr_of!(*machine);
         let self_addr = std::ptr::addr_of!(*self);
 
@@ -337,7 +335,7 @@ impl JitContext {
             .into());
         };
         let mut decoded_iter = bad64::disasm(
-            &mmapped_region.map.deref()[(program_counter - mem_region.phys_offset.0)
+            &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
                 .try_into()
                 .unwrap()..],
             program_counter,

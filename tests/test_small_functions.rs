@@ -100,20 +100,17 @@ fn test_load_stores() {
     let mem = machine.memory.find_region(entry_point).unwrap();
     let phys_offset = mem.phys_offset.0 as usize;
     let mem = mem.as_mmap().unwrap();
+    assert_eq!(mem.as_ref()[stack_post as usize - phys_offset - 0x10], 0xef);
     assert_eq!(
-        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10],
-        0xef
-    );
-    assert_eq!(
-        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 1],
+        mem.as_ref()[stack_post as usize - phys_offset - 0x10 + 1],
         0xbe
     );
     assert_eq!(
-        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 2],
+        mem.as_ref()[stack_post as usize - phys_offset - 0x10 + 2],
         0xad
     );
     assert_eq!(
-        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 3],
+        mem.as_ref()[stack_post as usize - phys_offset - 0x10 + 3],
         0x0b
     );
     assert_eq!(machine.cpu_state.registers.x0, 0xbadbeef);
@@ -150,12 +147,9 @@ fn test_load_stores_2() {
     let mem = machine.memory.find_region(entry_point).unwrap();
     let phys_offset = mem.phys_offset.0 as usize;
     let mem = mem.as_mmap().unwrap();
+    assert_eq!(mem.as_ref()[stack_post as usize - phys_offset - 0x10], 0x34);
     assert_eq!(
-        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10],
-        0x34
-    );
-    assert_eq!(
-        mem.map.as_ref()[stack_post as usize - phys_offset - 0x10 + 1],
+        mem.as_ref()[stack_post as usize - phys_offset - 0x10 + 1],
         0x12
     );
 }

@@ -150,7 +150,6 @@ impl Armv8AMachine {
             std::ptr::copy_nonoverlapping(
                 input.as_ptr(),
                 mmapped_region
-                    .map
                     .as_mut_ptr()
                     .add(address_inside_region as usize),
                 input.len(),
