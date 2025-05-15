@@ -1454,7 +1454,7 @@ impl BlockTranslator<'_> {
                     _ => panic!(),
                 }
             }
-            Op::LDRB => {
+            Op::LDURB | Op::LDUR | Op::LDRB => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -2639,8 +2639,6 @@ impl BlockTranslator<'_> {
             Op::LDUMINL => todo!(),
             Op::LDUMINLB => todo!(),
             Op::LDUMINLH => todo!(),
-            Op::LDUR => todo!(),
-            Op::LDURB => todo!(),
             Op::LDURH => todo!(),
             Op::LDURSB => todo!(),
             Op::LDURSH => todo!(),
