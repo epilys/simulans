@@ -26,7 +26,7 @@ check:
 	cargo check $(BUILD_ARGS) --config 'build.rustflags="--cfg platform=\"qemu\""'
 
 $(kernel_bin): build
-	aarch64-linux-gnu-objcopy -O binary $(kernel) $(kernel_bin)
+	$(objcopy) -O binary $(kernel) $(kernel_bin)
 
 asm: kernel
 	$(objdump) -d $(kernel) | less
