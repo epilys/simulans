@@ -1493,6 +1493,26 @@ impl BlockTranslator<'_> {
                     _ => panic!(),
                 }
             }
+            Op::LDRSW => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let width = self.operand_width(&instruction.operands()[0]);
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read(source_address, width);
+                match width {
+                    Width::_64 => self.builder.def_var(target, value),
+                    Width::_8 | Width::_32 | Width::_16 => {
+                        let value = self.builder.ins().sextend(I64, value);
+                        self.builder.def_var(target, value)
+                    }
+                    _ => panic!(),
+                }
+            }
             // Moves
             Op::MOV => {
                 let target = match instruction.operands()[0] {
@@ -2591,7 +2611,6 @@ impl BlockTranslator<'_> {
             Op::LDRAB => todo!(),
             Op::LDRSB => todo!(),
             Op::LDRSH => todo!(),
-            Op::LDRSW => todo!(),
             Op::LDSET => todo!(),
             Op::LDSETA => todo!(),
             Op::LDSETAB => todo!(),
