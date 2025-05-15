@@ -197,7 +197,9 @@ impl JitContext {
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
         // PIC is required for `hotswapping`, i.e. re-defining functions with the same
         // name (We use PC for the name.
-        flag_builder.set("is_pic", "true").unwrap();
+        if cfg!(target_arch = "x86_64") {
+            flag_builder.set("is_pic", "true").unwrap();
+        }
         let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
             panic!("host machine is not supported: {}", msg);
         });
@@ -205,7 +207,9 @@ impl JitContext {
             .finish(settings::Flags::new(flag_builder))
             .unwrap();
         let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
-        builder.hotswap(true);
+        if cfg!(target_arch = "x86_64") {
+            builder.hotswap(true);
+        }
 
         let module = JITModule::new(builder);
         Box::pin(Self {
@@ -225,6 +229,25 @@ impl JitContext {
         program_counter: u64,
     ) -> Result<(std::ops::RangeInclusive<u64>, Entry), Box<dyn std::error::Error>> {
         log::trace!("jit compile called for pc = 0x{:x}", program_counter);
+        if let Some(func_id) = self.func_ids.remove(&program_counter) {
+            if cfg!(target_arch = "x86_64") {
+                self.module.prepare_for_function_redefine(func_id)?;
+            } else {
+                // Cranelift doesn't support PIC on non-x86-64 host archs, so just re-allocate
+                // the JIT builder context.
+                let Self {
+                    builder_context,
+                    ctx,
+                    func_ids,
+                    module,
+                    ..
+                } = *Pin::into_inner(Self::new());
+                self.builder_context = builder_context;
+                self.ctx = ctx;
+                self.func_ids = func_ids;
+                self.module = module;
+            }
+        }
         let mut sig = self.module.make_signature();
         sig.params
             .push(AbiParam::new(self.module.target_config().pointer_type()));
@@ -234,11 +257,6 @@ impl JitContext {
             .push(AbiParam::new(self.module.target_config().pointer_type()));
         self.ctx.func.signature = sig;
         // self.ctx.set_disasm(true);
-
-        if let Some(func_id) = self.func_ids.remove(&program_counter) {
-            assert!(self.single_step);
-            self.module.prepare_for_function_redefine(func_id)?;
-        }
 
         // Actually perform the translation for this translation block
         let last_pc = self.translate(machine, program_counter)?;
