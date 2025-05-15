@@ -129,9 +129,9 @@ pub fn disas(input: &[u8], starting_address: u64) -> Result<(), Box<dyn std::err
         .expect("Failed to create Capstone object");
     cs.set_syntax(capstone::Syntax::Intel)?;
     let decoded_iter = cs.disasm_all(input, starting_address)?;
-    eprintln!("Capstone output:");
+    log::trace!("Capstone output:");
     for insn in decoded_iter.as_ref() {
-        eprintln!("{}", insn);
+        log::trace!("{}", insn);
     }
     Ok(())
 }
