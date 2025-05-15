@@ -608,9 +608,17 @@ impl run_blocking::BlockingEventLoop for GdbEventLoop {
     }
 }
 
+struct SocketListener(UnixListener, std::path::PathBuf);
+
+impl Drop for SocketListener {
+    fn drop(&mut self) {
+        _ = std::fs::remove_file(&self.1);
+    }
+}
+
 pub fn main_loop(mut gdbstub: GdbStub, path: &std::path::Path) {
     let listener = match UnixListener::bind(path) {
-        Ok(s) => s,
+        Ok(s) => SocketListener(s, path.to_path_buf()),
         Err(e) => {
             error!("Failed to create a Unix domain socket listener: {}", e);
             return;
@@ -618,7 +626,7 @@ pub fn main_loop(mut gdbstub: GdbStub, path: &std::path::Path) {
     };
     info!("Waiting for a GDB connection on {}...", path.display());
 
-    let (stream, addr) = match listener.accept() {
+    let (stream, addr) = match listener.0.accept() {
         Ok(v) => v,
         Err(e) => {
             error!("Failed to accept a connection from GDB: {}", e);
@@ -643,5 +651,4 @@ pub fn main_loop(mut gdbstub: GdbStub, path: &std::path::Path) {
             error!("error occurred in GDB session: {}", e);
         }
     }
-    _ = std::fs::remove_file(path);
 }
