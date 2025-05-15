@@ -179,7 +179,7 @@ impl SingleThreadBase for GdbStub {
             );
             return Err(TargetError::NonFatal);
         };
-        let r: &[u8] = &mmapped_region.map.as_ref()[address_inside_region as usize..];
+        let r: &[u8] = &mmapped_region.as_ref()[address_inside_region as usize..];
         for (dst, v) in data.iter_mut().zip(r.iter()) {
             *dst = *v;
         }

@@ -22,27 +22,237 @@
 
 #![allow(clippy::len_without_is_empty)]
 
-use std::{cmp::Ordering, ffi::CString, ops::Range, os::fd::OwnedFd};
+use std::{cmp::Ordering, ops::Range};
 
-use nix::{
-    errno::Errno,
-    sys::{memfd, mman::ProtFlags},
-};
+#[cfg(target_os = "linux")]
+pub use linux::MmappedMemory;
+#[cfg(target_os = "macos")]
+pub use macos::MmappedMemory;
+use nix::errno::Errno;
 
 use crate::memory::{Address, MemorySize, Width};
 
-pub struct MmappedMemory {
-    pub fd: OwnedFd,
-    pub map: memmap2::MmapMut,
-    pub read_only: bool,
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::{ffi::CString, ops::Deref, os::fd::OwnedFd};
+
+    use nix::{
+        errno::Errno,
+        sys::{memfd, mman::ProtFlags},
+    };
+
+    use crate::memory::{Address, MemorySize};
+
+    pub struct MmappedMemory {
+        pub fd: OwnedFd,
+        pub map: memmap2::MmapMut,
+        pub read_only: bool,
+    }
+
+    impl std::fmt::Debug for MmappedMemory {
+        fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fmt.debug_struct("MmappedMemory")
+                .field("fd", &self.fd)
+                .field("read_only", &self.read_only)
+                .finish_non_exhaustive()
+        }
+    }
+
+    impl PartialEq for MmappedMemory {
+        fn eq(&self, other: &Self) -> bool {
+            use std::os::fd::AsRawFd;
+
+            self.fd.as_raw_fd() == other.fd.as_raw_fd()
+        }
+    }
+
+    impl Eq for MmappedMemory {}
+
+    impl MmappedMemory {
+        pub fn new_region(
+            name: &str,
+            size: MemorySize,
+            phys_offset: Address,
+        ) -> Result<super::MemoryRegion, Errno> {
+            let name = CString::new(name).unwrap();
+            let fd = memfd::memfd_create(&name, memfd::MemFdCreateFlag::MFD_CLOEXEC)?;
+            nix::unistd::ftruncate(&fd, size.get().try_into().unwrap())?;
+            // SAFETY: `fd` is a valid file descriptor.
+            let mut map = unsafe { memmap2::MmapOptions::new().map_mut(&fd).unwrap() };
+            // SAFETY: `map`'s pointer is a valid memory address pointer of size `size`.
+            unsafe {
+                nix::sys::mman::mprotect(
+                    std::ptr::NonNull::new(map.as_mut_ptr().cast::<core::ffi::c_void>()).unwrap(),
+                    size.get().try_into().unwrap(),
+                    ProtFlags::PROT_READ | ProtFlags::PROT_WRITE | ProtFlags::PROT_EXEC,
+                )?;
+            }
+            #[cfg(target_os = "linux")]
+            {
+                // Don't include VM memory in dumped core files.
+                _ = map.advise(memmap2::Advice::DontDump);
+            }
+            #[cfg(target_os = "macos")]
+            {
+                extern "C" {
+                    fn pthread_jit_write_protect_np(_: bool);
+                }
+                unsafe { pthread_jit_write_protect_np(false) };
+            }
+            let u_size: usize = size.get().try_into().map_err(|_| Errno::ERANGE)?;
+            debug_assert_eq!(map.len(), u_size);
+            Ok(super::MemoryRegion {
+                phys_offset,
+                size,
+                backing: super::MemoryBacking::Mmap(Self {
+                    fd,
+                    map,
+                    read_only: false,
+                }),
+            })
+        }
+
+        #[inline]
+        // False positive; memmap2::MapMut::as_ptr() is not const.
+        #[allow(clippy::missing_const_for_fn)]
+        pub fn as_ptr(&self) -> *const u8 {
+            self.map.as_ptr().cast()
+        }
+
+        #[inline]
+        // False positive; memmap2::MapMut::as_mut_ptr() is not const.
+        #[allow(clippy::missing_const_for_fn)]
+        pub fn as_mut_ptr(&mut self) -> *mut u8 {
+            self.map.as_mut_ptr()
+        }
+    }
+
+    impl Deref for MmappedMemory {
+        type Target = [u8];
+
+        #[inline]
+        fn deref(&self) -> &[u8] {
+            self.map.deref()
+        }
+    }
+
+    impl AsRef<[u8]> for MmappedMemory {
+        #[inline]
+        fn as_ref(&self) -> &[u8] {
+            self.deref()
+        }
+    }
 }
 
-impl std::fmt::Debug for MmappedMemory {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        fmt.debug_struct("MmappedMemory")
-            .field("fd", &self.fd)
-            .field("read_only", &self.read_only)
-            .finish_non_exhaustive()
+#[cfg(target_os = "macos")]
+mod macos {
+    use std::{ffi::c_void, ops::Deref, ptr::NonNull};
+
+    use nix::{errno::Errno, sys::mman::ProtFlags};
+
+    use crate::memory::{Address, MemorySize};
+
+    pub struct MmappedMemory {
+        map: NonNull<c_void>,
+        pub size: usize,
+        pub read_only: bool,
+    }
+
+    impl Drop for MmappedMemory {
+        fn drop(&mut self) {
+            // SAFETY: `self.map` is a valid mmapped ptr of this size.
+            _ = unsafe { nix::sys::mman::munmap(self.map, self.size) };
+        }
+    }
+
+    impl std::fmt::Debug for MmappedMemory {
+        fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fmt.debug_struct("MmappedMemory")
+                .field("ptr", &self.map)
+                .field("size", &self.size)
+                .field("read_only", &self.read_only)
+                .finish_non_exhaustive()
+        }
+    }
+
+    impl PartialEq for MmappedMemory {
+        fn eq(&self, other: &Self) -> bool {
+            self.map.as_ptr() == other.map.as_ptr()
+        }
+    }
+
+    impl Eq for MmappedMemory {}
+
+    impl MmappedMemory {
+        pub fn new_region(
+            _name: &str,
+            size: MemorySize,
+            phys_offset: Address,
+        ) -> Result<super::MemoryRegion, Errno> {
+            //unsafe { pthread_jit_write_protect_np(false.into()) };
+            {
+                extern "C" {
+                    fn pthread_jit_write_protect_np(_: bool);
+                }
+                // SAFETY: this is safe to call.
+                unsafe { pthread_jit_write_protect_np(false) };
+            }
+            let size_u: std::num::NonZero<usize> = size.0.try_into().unwrap();
+            // SAFETY: This is safe to call.
+            let map = unsafe {
+                nix::sys::mman::mmap_anonymous(
+                    None,
+                    size_u,
+                    ProtFlags::PROT_READ | ProtFlags::PROT_WRITE | ProtFlags::PROT_EXEC,
+                    nix::sys::mman::MapFlags::MAP_PRIVATE | nix::sys::mman::MapFlags::MAP_JIT,
+                )
+                .unwrap()
+            };
+            Ok(super::MemoryRegion {
+                phys_offset,
+                size,
+                backing: super::MemoryBacking::Mmap(Self {
+                    size: size_u.into(),
+                    map,
+                    read_only: false,
+                }),
+            })
+        }
+
+        #[inline]
+        pub const fn as_ptr(&self) -> *const u8 {
+            self.map.as_ptr().cast()
+        }
+
+        #[inline]
+        pub fn as_mut_ptr(&mut self) -> *mut u8 {
+            self.map.as_ptr().cast()
+        }
+    }
+
+    impl std::ops::Deref for MmappedMemory {
+        type Target = [u8];
+
+        #[inline]
+        fn deref(&self) -> &[u8] {
+            // SAFETY: `self.map` is an mmapped region of this size.
+            unsafe { std::slice::from_raw_parts(self.map.as_ptr().cast(), self.size) }
+        }
+    }
+
+    impl std::ops::DerefMut for MmappedMemory {
+        #[inline]
+        fn deref_mut(&mut self) -> &mut [u8] {
+            // SAFETY: `self.map` is an mmapped region of this size.
+            unsafe { std::slice::from_raw_parts_mut(self.map.as_ptr().cast(), self.size) }
+        }
+    }
+
+    impl AsRef<[u8]> for MmappedMemory {
+        #[inline]
+        fn as_ref(&self) -> &[u8] {
+            self.deref()
+        }
     }
 }
 
@@ -77,16 +287,6 @@ impl PartialEq for MemoryBacking {
 }
 
 impl Eq for MemoryBacking {}
-
-impl PartialEq for MmappedMemory {
-    fn eq(&self, other: &Self) -> bool {
-        use std::os::fd::AsRawFd;
-
-        self.fd.as_raw_fd() == other.fd.as_raw_fd()
-    }
-}
-
-impl Eq for MmappedMemory {}
 
 pub struct MemoryRegion {
     /// Offset from start of physical address space.
@@ -144,35 +344,7 @@ impl MemoryRegion {
         if size.get().checked_add(phys_offset.0).is_none() {
             return Err(Errno::E2BIG);
         }
-        let name = CString::new(name).unwrap();
-        let fd = memfd::memfd_create(&name, memfd::MemFdCreateFlag::MFD_CLOEXEC)?;
-        nix::unistd::ftruncate(&fd, size.get().try_into().unwrap())?;
-        // SAFETY: `fd` is a valid file descriptor.
-        let mut map = unsafe { memmap2::MmapOptions::new().map_mut(&fd).unwrap() };
-        // SAFETY: `map`'s pointer is a valid memory address pointer of size `size`.
-        unsafe {
-            nix::sys::mman::mprotect(
-                std::ptr::NonNull::new(map.as_mut_ptr().cast::<core::ffi::c_void>()).unwrap(),
-                size.get().try_into().unwrap(),
-                ProtFlags::PROT_READ | ProtFlags::PROT_WRITE | ProtFlags::PROT_EXEC,
-            )?;
-        }
-        #[cfg(target_os = "linux")]
-        {
-            // Don't include VM memory in dumped core files.
-            _ = map.advise(memmap2::Advice::DontDump);
-        }
-        let u_size: usize = size.get().try_into().map_err(|_| Errno::ERANGE)?;
-        debug_assert_eq!(map.len(), u_size);
-        Ok(Self {
-            phys_offset,
-            size,
-            backing: MemoryBacking::Mmap(MmappedMemory {
-                fd,
-                map,
-                read_only: false,
-            }),
-        })
+        MmappedMemory::new_region(name, size, phys_offset)
     }
 
     pub fn new_io(
@@ -275,7 +447,7 @@ pub mod ops {
                     Address(address_inside_region)
                 );
                 match mem_region.backing {
-                    MemoryBacking::Mmap(MmappedMemory { ref mut map, .. }) => {
+                    MemoryBacking::Mmap(ref mut map @ MmappedMemory { .. }) => {
                         let destination =
                         // SAFETY: when resolving the guest address to a memory region, we
                         // essentially performed a bounds check so we know this offset is valid.
@@ -313,7 +485,7 @@ pub mod ops {
                     Address(address_inside_region)
                 );
                 match mem_region.backing {
-                    MemoryBacking::Mmap(MmappedMemory { ref map, .. }) => {
+                    MemoryBacking::Mmap(ref map @ MmappedMemory {  .. }) => {
                         let destination =
                         // SAFETY: when resolving the guest address to a memory region, we
                         // essentially performed a bounds check so we know this offset is valid.

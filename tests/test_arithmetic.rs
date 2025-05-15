@@ -61,7 +61,7 @@ fn test_sdiv() {
     let phys_offset = mem.phys_offset.0 as usize;
     let mem = mem.as_mmap().unwrap();
     assert_eq!(
-        mem.map.as_ref()[stack_post as usize - phys_offset + 0x18 - 0x10],
+        mem.as_ref()[stack_post as usize - phys_offset + 0x18 - 0x10],
         11
     );
 }
