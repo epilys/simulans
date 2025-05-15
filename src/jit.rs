@@ -1474,6 +1474,49 @@ impl BlockTranslator<'_> {
                     _ => panic!(),
                 }
             }
+            Op::LDRSW => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let width = self.operand_width(&instruction.operands()[0]);
+                let source_address = match instruction.operands()[1] {
+                    bad64::Operand::MemExt {
+                        regs: [ref address, ref offset],
+                        shift,
+                        arrspec: None,
+                    } => {
+                        let address = self.reg_to_value(address);
+                        let offset = self.reg_to_value(offset);
+                        let offset = match shift {
+                            None => offset,
+                            Some(bad64::Shift::LSL(ref lsl)) => {
+                                let lsl = self.builder.ins().iconst(I64, i64::from(*lsl));
+                                self.builder.ins().ishl(offset, lsl)
+                            }
+                            other => unimplemented!("unimplemented shift {other:?}"),
+                        };
+                        self.builder.ins().uadd_overflow_trap(
+                            address,
+                            offset,
+                            TrapCode::IntegerOverflow,
+                        )
+                    }
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.generate_read(source_address, width);
+                match width {
+                    Width::_64 => self.builder.def_var(target, value),
+                    Width::_8 | Width::_32 | Width::_16 => {
+                        let value = self.builder.ins().sextend(I64, value);
+                        self.builder.def_var(target, value)
+                    }
+                    _ => panic!(),
+                }
+            }
             // Moves
             Op::MOV => {
                 let target = match instruction.operands()[0] {
@@ -2572,7 +2615,6 @@ impl BlockTranslator<'_> {
             Op::LDRAB => todo!(),
             Op::LDRSB => todo!(),
             Op::LDRSH => todo!(),
-            Op::LDRSW => todo!(),
             Op::LDSET => todo!(),
             Op::LDSETA => todo!(),
             Op::LDSETAB => todo!(),
