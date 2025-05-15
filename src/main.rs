@@ -122,7 +122,7 @@ fn run_app(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(path) = args.gdb_stub_path.as_ref() {
         machine.load_code(&input, args.entry_point_address())?;
-        let gdb_stub = simulans::gdb::GdbStub::new(machine, args.entry_point_address(), 24);
+        let gdb_stub = simulans::gdb::GdbStub::new(machine, args.entry_point_address());
         simulans::gdb::main_loop(gdb_stub, path);
     } else {
         main_loop(&mut machine, args.entry_point_address(), &input)?;

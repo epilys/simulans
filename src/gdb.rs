@@ -38,27 +38,18 @@ use crate::memory::Address;
 pub struct GdbStub {
     machine: Pin<Box<crate::machine::Armv8AMachine>>,
     jit_ctx: Pin<Box<crate::jit::JitContext>>,
-    entry_func: crate::jit::Entry,
-    hw_breakpoints: Vec<Address>,
 }
 
 impl GdbStub {
     pub fn new(
         mut machine: Pin<Box<crate::machine::Armv8AMachine>>,
         start_address: crate::memory::Address,
-        hw_breakpoints: usize,
     ) -> Self {
         let jit_ctx = crate::jit::JitContext::new();
         if machine.pc == 0 {
             machine.pc = start_address.0;
         }
-        let entry_func = machine.lookup_entry_func;
-        Self {
-            machine,
-            jit_ctx,
-            entry_func,
-            hw_breakpoints: Vec::with_capacity(hw_breakpoints),
-        }
+        Self { machine, jit_ctx }
     }
 }
 
@@ -400,7 +391,6 @@ impl SingleRegisterAccess<()> for GdbStub {
 impl SingleThreadResume for GdbStub {
     #[inline(always)]
     fn resume(&mut self, _signal: Option<Signal>) -> Result<(), Self::Error> {
-        self.jit_ctx.single_step = true;
         Ok(())
     }
 
@@ -438,16 +428,17 @@ impl SwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        // If the HW breakpoints reach the limit, no more can be added.
-        if self.hw_breakpoints.len() >= self.hw_breakpoints.capacity() {
-            error!(
-                "Not allowed to set more than {} HW breakpoints",
-                self.hw_breakpoints.capacity()
-            );
-            return Ok(false);
+        log::trace!(
+            "Adding software breakpoint (kind = {:?}) to 0x{:x}",
+            _kind,
+            addr
+        );
+        if addr.rem_euclid(4) != 0 {
+            return Err(TargetError::Errno(nix::errno::Errno::EINVAL as u8));
         }
 
-        self.hw_breakpoints.push(Address(addr));
+        self.machine.hw_breakpoints.insert(Address(addr));
+        self.machine.entry_blocks.invalidate(addr);
 
         Ok(true)
     }
@@ -458,10 +449,15 @@ impl SwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        match self.hw_breakpoints.iter().position(|&b| b.0 == addr) {
-            None => return Ok(false),
-            Some(pos) => self.hw_breakpoints.remove(pos),
-        };
+        log::trace!(
+            "Removing software breakpoint (kind = {:?}) to 0x{:x}",
+            _kind,
+            addr
+        );
+        if !self.machine.hw_breakpoints.remove(&Address(addr)) {
+            return Ok(false);
+        }
+        self.machine.entry_blocks.invalidate(addr);
         Ok(true)
     }
 }
@@ -473,16 +469,16 @@ impl HwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        // If the HW breakpoints reach the limit, no more can be added.
-        if self.hw_breakpoints.len() >= self.hw_breakpoints.capacity() {
-            error!(
-                "Not allowed to set more than {} HW breakpoints",
-                self.hw_breakpoints.capacity()
-            );
-            return Ok(false);
+        log::trace!(
+            "Adding hardware breakpoint (kind = {:?}) to 0x{:x}",
+            _kind,
+            addr
+        );
+        if addr.rem_euclid(4) != 0 {
+            return Err(TargetError::Errno(nix::errno::Errno::EINVAL as u8));
         }
-
-        self.hw_breakpoints.push(Address(addr));
+        self.machine.hw_breakpoints.insert(Address(addr));
+        self.machine.entry_blocks.invalidate(addr);
 
         Ok(true)
     }
@@ -493,10 +489,15 @@ impl HwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        match self.hw_breakpoints.iter().position(|&b| b.0 == addr) {
-            None => return Ok(false),
-            Some(pos) => self.hw_breakpoints.remove(pos),
-        };
+        log::trace!(
+            "Removing hardware breakpoint (kind = {:?}) to 0x{:x}",
+            _kind,
+            addr
+        );
+        if !self.machine.hw_breakpoints.remove(&Address(addr)) {
+            return Ok(false);
+        }
+        self.machine.entry_blocks.invalidate(addr);
         Ok(true)
     }
 }
@@ -575,16 +576,25 @@ impl run_blocking::BlockingEventLoop for GdbEventLoop {
                     .map_err(run_blocking::WaitForStopReasonError::Connection)?;
                 return Ok(run_blocking::Event::IncomingData(byte));
             }
-            let func = target.entry_func;
-            target.entry_func = (func.0)(&mut target.jit_ctx, &mut target.machine);
+            let entry = crate::jit::lookup_entry(&mut target.jit_ctx, &mut target.machine);
+            (entry.0)(&mut target.jit_ctx, &mut target.machine);
             if target.jit_ctx.single_step {
+                target.jit_ctx.single_step = false;
                 return Ok(run_blocking::Event::TargetStopped(
                     SingleThreadStopReason::DoneStep,
                 ));
             }
-            //         } else {
-            //             SingleThreadStopReason::HwBreak(Tid::new(tid as
-            // usize).unwrap())         };
+            if target
+                .machine
+                .hw_breakpoints
+                .contains(&Address(target.machine.pc))
+            {
+                let pc = target.machine.pc;
+                target.machine.entry_blocks.invalidate(pc);
+                return Ok(run_blocking::Event::TargetStopped(
+                    SingleThreadStopReason::HwBreak(()),
+                ));
+            }
         }
         Ok(run_blocking::Event::TargetStopped(
             SingleThreadStopReason::Exited(0),

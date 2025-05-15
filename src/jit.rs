@@ -432,6 +432,13 @@ impl JitContext {
                             last_pc = insn.address();
                             log::trace!("{:#?}", insn);
                             log::trace!("0x{:x}: {}", insn.address(), insn);
+                            if !machine.hw_breakpoints.is_empty()
+                                && machine.hw_breakpoints.contains(&Address(insn.address()))
+                            {
+                                next_pc =
+                                    Some(trans.builder.ins().iconst(I64, insn.address() as i64));
+                                break;
+                            }
                             if let ControlFlow::Break(jump_pc) = trans.translate_instruction(&insn)
                             {
                                 prev_pc = insn.address();
