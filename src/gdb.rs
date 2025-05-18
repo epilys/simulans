@@ -27,6 +27,7 @@ use gdbstub::{
                 SwBreakpointOps,
             },
             memory_map::{MemoryMap as MemoryMapXML, MemoryMapOps},
+            monitor_cmd::{ConsoleOutput, MonitorCmd, MonitorCmdOps},
         },
         Target, TargetError, TargetResult,
     },
@@ -64,6 +65,11 @@ impl Target for GdbStub {
 
     #[inline(always)]
     fn support_breakpoints(&mut self) -> Option<BreakpointsOps<Self>> {
+        Some(self)
+    }
+
+    #[inline(always)]
+    fn support_monitor_cmd(&mut self) -> Option<MonitorCmdOps<Self>> {
         Some(self)
     }
 
@@ -418,6 +424,82 @@ impl Breakpoints for GdbStub {
     #[inline(always)]
     fn support_hw_breakpoint(&mut self) -> Option<HwBreakpointOps<Self>> {
         Some(self)
+    }
+}
+
+impl MonitorCmd for GdbStub {
+    #[inline(always)]
+    fn handle_monitor_cmd(&mut self, cmd: &[u8], mut out: ConsoleOutput<'_>) -> Result<(), String> {
+        let s = match std::str::from_utf8(cmd) {
+            Ok(s) => s,
+            Err(err) => {
+                gdbstub::outputln!(&mut out, "Expected UTF8 command input. Error was: {err}");
+                return Ok(());
+            }
+        };
+        let words = s.split_whitespace().collect::<Vec<&str>>();
+        if words.is_empty() {
+            gdbstub::outputln!(
+                &mut out,
+                "Available monitor commands: {{log,pc,state,registers}}"
+            );
+            return Ok(());
+        }
+
+        match words[0] {
+            "log" => match words.get(1) {
+                None => {
+                    gdbstub::outputln!(
+                        &mut out,
+                        "Log level is {:?}. Available levels: {{trace,debug,error,warn,info,off}}",
+                        log::max_level()
+                    )
+                }
+                Some(trace) if trace.eq_ignore_ascii_case("trace") => {
+                    log::set_max_level(log::LevelFilter::Trace);
+                }
+                Some(debug) if debug.eq_ignore_ascii_case("debug") => {
+                    log::set_max_level(log::LevelFilter::Debug);
+                }
+                Some(error) if error.eq_ignore_ascii_case("error") => {
+                    log::set_max_level(log::LevelFilter::Error);
+                }
+                Some(info) if info.eq_ignore_ascii_case("info") => {
+                    log::set_max_level(log::LevelFilter::Info);
+                }
+                Some(warn) if warn.eq_ignore_ascii_case("warn") => {
+                    log::set_max_level(log::LevelFilter::Warn);
+                }
+                Some(off) if off.eq_ignore_ascii_case("off") => {
+                    log::set_max_level(log::LevelFilter::Off);
+                }
+                Some(other) => {
+                    gdbstub::outputln!(
+                        &mut out,
+                        "Invalid log level {other:?}: valid log level values: \
+                         {{trace,debug,error,warn,info,off}}"
+                    );
+                }
+            },
+            "pc" => {
+                gdbstub::outputln!(&mut out, "Pc = 0x{:x}", self.machine.pc);
+                gdbstub::outputln!(&mut out, "Prev Pc = 0x{:x}", self.machine.prev_pc);
+            }
+            "state" => {
+                gdbstub::outputln!(&mut out, "{:?}", self.machine.cpu_state);
+            }
+            "registers" => {
+                gdbstub::outputln!(&mut out, "{:?}", self.machine.cpu_state.registers);
+            }
+            other => {
+                gdbstub::outputln!(
+                    &mut out,
+                    "Unexpected command {other:?}: available commands: {{log,pc,state,registers}}"
+                );
+            }
+        }
+
+        Ok(())
     }
 }
 
