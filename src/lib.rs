@@ -43,6 +43,7 @@
 //!
 //! - `[tag:TODO]: General TODO items.`
 //! - `[tag:FIXME]: General FIXME items.`
+//! - `[tag:needs_unit_test]: Needs a corresponding unit test.`
 //! - `[tag:dubious_implementation]: Code that is most definitely not
 //!   implemented correctly.`
 //! - `[tag:verify_implementation]: Code that we should look back at with fresh
@@ -53,6 +54,9 @@
 //! - `[tag:memory_ordering]: Code that implements memory ordering.`
 //! - `[tag:atomics]: Code that implements exclusive memory access.`
 //! - `[tag:can_trap]: Code that can trap.`
+//! - `[tag:FEAT_CSSC]: Common Short Sequence Compression.` Neither Capstone nor
+//!   Binja seem to be able to decode this feature's instructions.
+//! - `[tag:have_sve]:` <https://developer.arm.com/documentation/ddi0596/2020-12/Shared-Pseudocode/AArch64-Functions?lang=en#aarch64.functions.sve.HaveSVE>.
 //!
 //! ### Peripheral (device model) tags
 //!

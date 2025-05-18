@@ -86,6 +86,7 @@ fn compile_assembly(
     let elf_output_path = tmp_dir.path().join("out.elf");
 
     let as_output = std::process::Command::new(ASSEMBLER)
+        .arg("-march=armv8.9-a")
         .arg(input_path)
         .arg("-o")
         .arg(&o_output_path)

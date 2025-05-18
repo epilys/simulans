@@ -578,20 +578,20 @@ impl BlockTranslator<'_> {
         x: Value,
         y: Value,
         orig_y: Value,
-        carry_in: bool,
+        carry_in: Value,
     ) -> (Value, [Value; 4]) {
         let (mut unsigned_sum, mut overflow_1) = self.builder.ins().uadd_overflow(x, y);
-        if carry_in {
-            let one = self.builder.ins().iconst(I64, 1);
-            let (carry_add, carry_overflow) = self.builder.ins().uadd_overflow(unsigned_sum, one);
+        {
+            let (carry_add, carry_overflow) =
+                self.builder.ins().uadd_overflow(unsigned_sum, carry_in);
             unsigned_sum = carry_add;
             overflow_1 = self.builder.ins().bor(overflow_1, carry_overflow);
             _ = overflow_1;
         }
         let (mut signed_sum, mut overflow_2) = self.builder.ins().sadd_overflow(x, y);
-        if carry_in {
-            let one = self.builder.ins().iconst(I64, 1);
-            let (carry_add, carry_overflow) = self.builder.ins().sadd_overflow(signed_sum, one);
+        {
+            let (carry_add, carry_overflow) =
+                self.builder.ins().sadd_overflow(signed_sum, carry_in);
             signed_sum = carry_add;
             overflow_2 = self.builder.ins().bor(overflow_2, carry_overflow);
         }
@@ -811,6 +811,7 @@ impl BlockTranslator<'_> {
                     Imm::Unsigned(imm) => {
                         let imm_value =
                             self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap());
+                        // [ref:verify_implementation]: should wrap instead of trap on overflow?
                         let value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
@@ -830,6 +831,7 @@ impl BlockTranslator<'_> {
                     }
                     Imm::Signed(imm) => {
                         let imm_value = self.builder.ins().iconst(I64, *imm);
+                        // [ref:verify_implementation]: should wrap instead of trap on overflow?
                         let value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
@@ -847,6 +849,7 @@ impl BlockTranslator<'_> {
                     Imm::Unsigned(imm) => {
                         let imm_value =
                             self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap());
+                        // [ref:verify_implementation]: should wrap instead of trap on overflow?
                         let post_value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
@@ -864,6 +867,7 @@ impl BlockTranslator<'_> {
                     }
                     Imm::Signed(imm) => {
                         let imm_value = self.builder.ins().iconst(I64, *imm);
+                        // [ref:verify_implementation]: should wrap instead of trap on overflow?
                         let post_value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
@@ -914,6 +918,7 @@ impl BlockTranslator<'_> {
                     Imm::Unsigned(imm) => {
                         let imm_value =
                             self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap());
+                        // [ref:verify_implementation]: should wrap instead of trap on overflow?
                         let value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
@@ -959,6 +964,7 @@ impl BlockTranslator<'_> {
                     }
                     other => unimplemented!("unimplemented shift {other:?}"),
                 };
+                // [ref:verify_implementation]: should wrap instead of trap on overflow?
                 self.builder
                     .ins()
                     .uadd_overflow_trap(address, offset, TrapCode::IntegerOverflow)
@@ -1309,6 +1315,98 @@ impl BlockTranslator<'_> {
                 (result, [n, z, empty, empty])
             }};
         }
+        macro_rules! condition_holds {
+            ($cond:expr) => {{
+                let result = self.condition_holds($cond);
+                self.builder.ins().uextend(I64, result)
+            }};
+            (invert $cond:expr) => {{
+                let result = self.condition_holds($cond);
+                let result = self.builder.ins().icmp_imm(IntCC::Equal, result, 0);
+                self.builder.ins().uextend(I64, result)
+            }};
+        }
+        macro_rules! cs {
+            (inc Rd = $Rd:expr, Rn = $Rn:expr, Rm = $Rm:expr, cond = $cond:expr) => {{
+                let cond = $cond;
+                let true_block = self.builder.create_block();
+                let false_block = self.builder.create_block();
+                let merge_block = self.builder.create_block();
+
+                self.builder.append_block_param(merge_block, I64);
+                self.builder
+                    .ins()
+                    .brif(cond, true_block, &[], false_block, &[]);
+                self.builder.switch_to_block(true_block);
+                self.builder.seal_block(true_block);
+                self.builder.ins().jump(merge_block, &[$Rn]);
+
+                self.builder.switch_to_block(false_block);
+                self.builder.seal_block(false_block);
+                let incremented_value = self.builder.ins().iadd_imm($Rm, 1);
+                self.builder.ins().jump(merge_block, &[incremented_value]);
+
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
+
+                let phi = self.builder.block_params(merge_block)[0];
+                self.builder.def_var($Rd, phi);
+                phi
+            }};
+            (inv Rd = $Rd:expr, Rn = $Rn:expr, Rm = $Rm:expr, cond = $cond:expr) => {{
+                let cond = $cond;
+                let true_block = self.builder.create_block();
+                let false_block = self.builder.create_block();
+                let merge_block = self.builder.create_block();
+
+                self.builder.append_block_param(merge_block, I64);
+                self.builder
+                    .ins()
+                    .brif(cond, true_block, &[], false_block, &[]);
+                self.builder.switch_to_block(true_block);
+                self.builder.seal_block(true_block);
+                self.builder.ins().jump(merge_block, &[$Rn]);
+
+                self.builder.switch_to_block(false_block);
+                self.builder.seal_block(false_block);
+                let inverted_value = self.builder.ins().bnot($Rm);
+                self.builder.ins().jump(merge_block, &[inverted_value]);
+
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
+
+                let phi = self.builder.block_params(merge_block)[0];
+                self.builder.def_var($Rd, phi);
+                phi
+            }};
+            (neg Rd = $Rd:expr, Rn = $Rn:expr, Rm = $Rm:expr, cond = $cond:expr) => {{
+                let cond = $cond;
+                let true_block = self.builder.create_block();
+                let false_block = self.builder.create_block();
+                let merge_block = self.builder.create_block();
+
+                self.builder.append_block_param(merge_block, I64);
+                self.builder
+                    .ins()
+                    .brif(cond, true_block, &[], false_block, &[]);
+                self.builder.switch_to_block(true_block);
+                self.builder.seal_block(true_block);
+                self.builder.ins().jump(merge_block, &[$Rn]);
+
+                self.builder.switch_to_block(false_block);
+                self.builder.seal_block(false_block);
+                let neg_value = self.builder.ins().bnot($Rm);
+                let neg_value = self.builder.ins().iadd_imm(neg_value, 1);
+                self.builder.ins().jump(merge_block, &[neg_value]);
+
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
+
+                let phi = self.builder.block_params(merge_block)[0];
+                self.builder.def_var($Rd, phi);
+                phi
+            }};
+        }
         match op {
             Op::NOP => {}
             // Special registers
@@ -1614,6 +1712,7 @@ impl BlockTranslator<'_> {
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
+                // [ref:verify_implementation]: should wrap instead of trap on overflow?
                 let value = self
                     .builder
                     .ins()
@@ -1644,7 +1743,8 @@ impl BlockTranslator<'_> {
                 let operand1 = self.translate_operand(&instruction.operands()[1]);
                 let operand2 = self.translate_operand(&instruction.operands()[2]);
                 let negoperand2 = self.builder.ins().bnot(operand2);
-                let (result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, true);
+                let one = self.builder.ins().iconst(I64, 1);
+                let (result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, one);
                 self.builder.def_var(target, result);
                 self.update_nzcv(nzcv);
             }
@@ -1972,8 +2072,42 @@ impl BlockTranslator<'_> {
                 let value = self.builder.ins().ushr(a, b);
                 self.builder.def_var(target, value);
             }
-            Op::ABS => todo!(),
-            Op::ADC => todo!(),
+            Op::ABS => {
+                // Absolute value
+                // [ref:FEAT_CSSC]
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().iabs(value);
+                self.builder.def_var(target, value);
+            }
+            Op::ADC => {
+                // Add with carry
+                // This instruction adds two register values and the Carry flag value, and
+                // writes the result to the destination register.
+
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let operand1 = self.translate_operand(&instruction.operands()[1]);
+                let operand2 = self.translate_operand(&instruction.operands()[2]);
+                let negoperand2 = self.builder.ins().bnot(operand2);
+                let carry_in = self.condition_holds(bad64::Condition::CS);
+                let (result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, carry_in);
+                self.builder.def_var(target, result);
+                self.update_nzcv(nzcv);
+            }
             Op::ADCLB => todo!(),
             Op::ADCLT => todo!(),
             Op::ADCS => todo!(),
@@ -2154,7 +2288,8 @@ impl BlockTranslator<'_> {
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
                 let operand2 = self.translate_operand(&instruction.operands()[1]);
                 let negoperand2 = self.builder.ins().bnot(operand2);
-                let (_result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, true);
+                let one = self.builder.ins().iconst(I64, 1);
+                let (_result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, one);
                 // discard result, only update NZCV flags.
                 self.update_nzcv(nzcv);
                 self.builder.ins().jump(merge_block, &[]);
@@ -2174,14 +2309,13 @@ impl BlockTranslator<'_> {
             Op::CDOT => todo!(),
             Op::CFINV => todo!(),
             Op::CFP => todo!(),
-            Op::CINC => todo!(),
-            Op::CINV => todo!(),
             Op::CLASTA => todo!(),
             Op::CLASTB => todo!(),
             Op::CLREX => {
                 // [ref:atomics]: We don't model exclusive access (yet).
             }
             Op::CLS => {
+                // Count leading sign bits.
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -2195,6 +2329,7 @@ impl BlockTranslator<'_> {
                 self.builder.def_var(target, value);
             }
             Op::CLZ => {
+                // Count leading zeros.
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -2219,7 +2354,8 @@ impl BlockTranslator<'_> {
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
                 let operand2 = self.translate_operand(&instruction.operands()[1]);
                 let negoperand2 = self.builder.ins().bnot(operand2);
-                let (_result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, true);
+                let one = self.builder.ins().iconst(I64, 1);
+                let (_result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, one);
                 // discard result, only update NZCV flags.
                 self.update_nzcv(nzcv);
             }
@@ -2235,14 +2371,23 @@ impl BlockTranslator<'_> {
             Op::CMPNE => todo!(),
             Op::CMPP => todo!(),
             Op::CMTST => todo!(),
-            Op::CNEG => todo!(),
             Op::CNOT => todo!(),
-            Op::CNT => todo!(),
-            Op::CNTB => todo!(),
-            Op::CNTD => todo!(),
-            Op::CNTH => todo!(),
-            Op::CNTP => todo!(),
-            Op::CNTW => todo!(),
+            Op::CNT => {
+                // Count bits
+                // This instruction counts the number of binary one bits in the value of the
+                // source register, and writes the result to the destination
+                // register. [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let popcnt = self.builder.ins().popcnt(value);
+                self.builder.def_var(target, popcnt);
+            }
             Op::COMPACT => todo!(),
             Op::CPP => todo!(),
             Op::CPY => todo!(),
@@ -2254,7 +2399,9 @@ impl BlockTranslator<'_> {
             Op::CRC32H => todo!(),
             Op::CRC32W => todo!(),
             Op::CRC32X => todo!(),
-            Op::CSDB => todo!(),
+            Op::CSDB => {
+                // Consumption of speculative data barrier
+            }
             Op::CSEL => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
@@ -2293,11 +2440,168 @@ impl BlockTranslator<'_> {
                 let phi = self.builder.block_params(merge_block)[0];
                 self.builder.def_var(target, phi);
             }
-            Op::CSET => todo!(),
-            Op::CSETM => todo!(),
-            Op::CSINC => todo!(),
-            Op::CSINV => todo!(),
-            Op::CSNEG => todo!(),
+            Op::CSET => {
+                // Conditional set: an alias of CSINC.
+                // This instruction sets the destination register to 1 if the condition is TRUE,
+                // and otherwise sets it to 0.
+
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let zero = self.reg_to_value(&bad64::Reg::XZR);
+                let cond = match instruction.operands()[1] {
+                    bad64::Operand::Cond(cond) => cond,
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                cs! { inc Rd = target, Rn = zero, Rm = zero, cond = condition_holds!(invert cond)  };
+            }
+            Op::CSINC => {
+                // Conditional select increment
+
+                // This instruction returns, in the destination register, the value of the first
+                // source register if the condition is TRUE, and otherwise
+                // returns the value of the second source register incremented
+                // by 1.
+
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let true_value = self.translate_operand(&instruction.operands()[1]);
+                let false_value = self.translate_operand(&instruction.operands()[2]);
+                let cond = match instruction.operands()[3] {
+                    bad64::Operand::Cond(cond) => cond,
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                cs! { inc Rd = target, Rn = true_value, Rm = false_value, cond = condition_holds!(cond)  };
+            }
+            Op::CINC => {
+                // Conditional increment: an alias of CSINC.
+                // This instruction returns, in the destination register, the value of the
+                // source register incremented by 1 if the condition is TRUE,
+                // and otherwise returns the value of the source register.
+
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let cond = match instruction.operands()[2] {
+                    bad64::Operand::Cond(cond) => cond,
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                cs! { inc Rd = target, Rn = value, Rm = value, cond = condition_holds!(invert cond)  };
+            }
+            Op::CSINV => {
+                // Conditional select invert
+
+                // This instruction returns, in the destination register, the value of the first
+                // source register if the condition is TRUE, and otherwise
+                // returns the bitwise inversion value of the second source
+                // register.
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let true_value = self.translate_operand(&instruction.operands()[1]);
+                let false_value = self.translate_operand(&instruction.operands()[2]);
+                let cond = match instruction.operands()[3] {
+                    bad64::Operand::Cond(cond) => cond,
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                cs! { inv Rd = target, Rn = true_value, Rm = false_value, cond = condition_holds!(cond) };
+            }
+            Op::CINV => {
+                // Conditional invert: an alias of CSINV.
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let cond = match instruction.operands()[2] {
+                    bad64::Operand::Cond(cond) => cond,
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                cs! { inv Rd = target, Rn = value, Rm = value, cond = condition_holds!(invert cond) };
+            }
+            Op::CSETM => {
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let zero = self.reg_to_value(&bad64::Reg::XZR);
+                let cond = match instruction.operands()[1] {
+                    bad64::Operand::Cond(cond) => cond,
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                cs! { inv Rd = target, Rn = zero, Rm = zero, cond = condition_holds!(invert cond) };
+            }
+            Op::CSNEG => {
+                // Conditional select negation
+                // This instruction returns, in the destination register, the value of the first
+                // source register if the condition is TRUE, and otherwise
+                // returns the negated value of the second source register.
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let true_value = self.translate_operand(&instruction.operands()[1]);
+                let false_value = self.translate_operand(&instruction.operands()[2]);
+                let cond = match instruction.operands()[3] {
+                    bad64::Operand::Cond(cond) => cond,
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                cs! { neg Rd = target, Rn = true_value, Rm = false_value, cond = condition_holds!(cond) };
+            }
+            Op::CNEG => {
+                // Conditional negate
+                // This instruction returns, in the destination register, the negated value of
+                // the source register if the condition is TRUE, and otherwise
+                // returns the value of the source register. This is an alias of
+                // CSNEG. [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let cond = match instruction.operands()[2] {
+                    bad64::Operand::Cond(cond) => cond,
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                cs! { neg Rd = target, Rn = value, Rm = value, cond = condition_holds!(invert cond) };
+            }
             Op::CTERMEQ => todo!(),
             Op::CTERMNE => todo!(),
             Op::DC => todo!(),
@@ -3452,10 +3756,25 @@ impl BlockTranslator<'_> {
             Op::XPACLRI => todo!(),
             Op::XTN => todo!(),
             Op::XTN2 => todo!(),
-            Op::YIELD => todo!(),
+            Op::YIELD => {
+                // Hint instruction, ignore.
+            }
             Op::ZERO => todo!(),
-            Op::ZIP1 => todo!(),
-            Op::ZIP2 => todo!(),
+            Op::ZIP1 | Op::ZIP2 => {
+                // [ref:have_sve]:
+                // <https://developer.arm.com/documentation/ddi0596/2020-12/SVE-Instructions/ZIP1--ZIP2--predicates---Interleave-elements-from-two-half-predicates->
+                todo!()
+            }
+            Op::CNTB | Op::CNTD | Op::CNTH | Op::CNTW => {
+                // [ref:have_sve]:
+                // <https://developer.arm.com/documentation/ddi0596/2020-12/SVE-Instructions/CNTB--CNTD--CNTH--CNTW--Set-scalar-to-multiple-of-predicate-constraint-element-count->
+                todo!()
+            }
+            Op::CNTP => {
+                // [ref:have_sve]:
+                // <https://developer.arm.com/documentation/ddi0596/2020-12/SVE-Instructions/CNTP--Set-scalar-to-count-of-true-predicate-elements->
+                todo!()
+            }
         }
         ControlFlow::Continue(())
     }
