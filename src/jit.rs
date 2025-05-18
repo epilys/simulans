@@ -1295,6 +1295,20 @@ impl BlockTranslator<'_> {
                 self.branch_if_non_zero(instruction, result, label_value);
             }};
         }
+        macro_rules! ands {
+            ($a:expr, $b:expr) => {{
+                let result = self.builder.ins().band($a, $b);
+                let n = self
+                    .builder
+                    .ins()
+                    .icmp_imm(IntCC::SignedLessThan, result, 0);
+                let n = self.builder.ins().uextend(I64, n);
+                let z = self.builder.ins().icmp_imm(IntCC::Equal, result, 0);
+                let z = self.builder.ins().uextend(I64, z);
+                let empty = self.builder.ins().iconst(I64, 0);
+                (result, [n, z, empty, empty])
+            }};
+        }
         match op {
             Op::NOP => {}
             // Special registers
@@ -1979,7 +1993,23 @@ impl BlockTranslator<'_> {
             Op::AESE => todo!(),
             Op::AESIMC => todo!(),
             Op::AESMC => todo!(),
-            Op::ANDS => todo!(),
+            Op::ANDS => {
+                // Bitwise AND
+                // This instruction performs a bitwise AND of two values and
+                // updates condition flags.
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                };
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let (result, nzcv) = ands!(a, b);
+                self.builder.def_var(target, result);
+                self.update_nzcv(nzcv);
+            }
             Op::ANDV => todo!(),
             Op::ASR => todo!(),
             Op::ASRD => todo!(),
@@ -3246,7 +3276,13 @@ impl BlockTranslator<'_> {
             Op::TRN1 => todo!(),
             Op::TRN2 => todo!(),
             Op::TSB => todo!(),
-            Op::TST => todo!(),
+            Op::TST => {
+                // Test bits, setting the condition flags and discarding the result
+                let a = self.translate_operand(&instruction.operands()[0]);
+                let b = self.translate_operand(&instruction.operands()[1]);
+                let (_result, nzcv) = ands!(a, b);
+                self.update_nzcv(nzcv);
+            }
             Op::TSTART => todo!(),
             Op::TTEST => todo!(),
             Op::UABA => todo!(),
