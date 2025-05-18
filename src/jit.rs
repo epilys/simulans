@@ -944,6 +944,25 @@ impl BlockTranslator<'_> {
                 let var = *self.sysreg_to_var(reg);
                 self.builder.use_var(var)
             }
+            Operand::MemExt {
+                regs: [ref address, ref offset],
+                shift,
+                arrspec: None,
+            } => {
+                let address = self.reg_to_value(address);
+                let offset = self.reg_to_value(offset);
+                let offset = match shift {
+                    None => offset,
+                    Some(bad64::Shift::LSL(ref lsl)) => {
+                        let lsl = self.builder.ins().iconst(I64, i64::from(*lsl));
+                        self.builder.ins().ishl(offset, lsl)
+                    }
+                    other => unimplemented!("unimplemented shift {other:?}"),
+                };
+                self.builder
+                    .ins()
+                    .uadd_overflow_trap(address, offset, TrapCode::IntegerOverflow)
+            }
             other => unimplemented!("unexpected rhs in translate_operand: {:?}", other),
         }
     }
