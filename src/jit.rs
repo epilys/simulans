@@ -3874,7 +3874,6 @@ impl BlockTranslator<'_> {
         self.builder.ins().return_(&[resolved_entry]);
     }
 
-    #[must_use]
     fn unconditional_jump_epilogue(
         &mut self,
         source_instruction: &bad64::Instruction,
