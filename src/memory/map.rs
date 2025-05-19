@@ -174,7 +174,7 @@ impl MemoryMap {
 
     #[inline]
     #[allow(clippy::len_without_is_empty)]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.regions.len()
     }
 
