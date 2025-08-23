@@ -117,7 +117,16 @@ fn run_app(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let mut machine = machine::Armv8AMachine::new(memory);
     disas(&input, args.entry_point_address().0)?;
     if args.generate_fdt {
-        machine.generate_fdt(args.entry_point_address())?;
+        let fdt = machine.generate_fdt(args.entry_point_address())?;
+        if let Some(ref dump_dtb) = args.dump_dtb {
+            std::fs::write(dump_dtb, &fdt.bytes).map_err(|err| {
+                format!(
+                    "Could not write fdt blob of {} bytes to {}: {err}",
+                    fdt.bytes.len(),
+                    dump_dtb.display()
+                )
+            })?;
+        }
     }
 
     if let Some(path) = args.gdb_stub_path.as_ref() {

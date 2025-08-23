@@ -132,6 +132,10 @@ pub struct Args {
     #[arg(short, long, default_value_t = true)]
     pub generate_fdt: bool,
 
+    /// Dump generated device tree blob to file.
+    #[arg(long)]
+    pub dump_dtb: Option<PathBuf>,
+
     /// Start a GDB stub instead at given Unix domain socket path.
     #[arg(long)]
     pub gdb_stub_path: Option<PathBuf>,

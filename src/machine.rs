@@ -82,10 +82,24 @@ impl Armv8AMachine {
             lookup_entry_func: Entry(lookup_entry),
             hw_breakpoints: BTreeSet::new(),
             halted: 0,
+            in_breakpoint: false,
         })
     }
 
-    pub fn generate_fdt(&mut self, entry_point: Address) -> Result<(), Box<dyn std::error::Error>> {
+    /// Generates a flattened device tree
+    ///
+    /// This function will:
+    ///
+    /// 1. Generate a flattened device tree blob
+    /// 2. Map it to the guest memory
+    /// 3. Write a bootloader code at address `0x4` that passes a pointer to the
+    ///    fdt at register `x0` and jumps to `entry_point`.
+    ///
+    /// Returns the generated fdt on success.
+    pub fn generate_fdt(
+        &mut self,
+        entry_point: Address,
+    ) -> Result<crate::fdt::Fdt, Box<dyn std::error::Error>> {
         let dram = self.memory.iter().next().unwrap();
         let fdt = crate::fdt::FdtBuilder::new(dram, self.memory.max_size())?
             .num_vcpus(NonZero::new(1).unwrap())
@@ -101,7 +115,7 @@ impl Armv8AMachine {
         bootloader.write_to_memory(Address(0x4), self)?;
         self.pc = 0x4;
 
-        Ok(())
+        Ok(fdt)
     }
 
     /// Load code to physical memory address.
