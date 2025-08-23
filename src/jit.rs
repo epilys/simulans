@@ -3540,7 +3540,18 @@ impl BlockTranslator<'_> {
             Op::STUMINL => todo!(),
             Op::STUMINLB => todo!(),
             Op::STUMINLH => todo!(),
-            Op::STUR => todo!(),
+            Op::STUR => {
+                let value = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => self.reg_to_value(reg),
+                    other => unexpected_operand!(other),
+                };
+                let target = self.translate_operand(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[0]);
+                self.generate_write(target, value, width);
+            }
             Op::STURB => todo!(),
             Op::STURH => todo!(),
             Op::STXP => todo!(),
