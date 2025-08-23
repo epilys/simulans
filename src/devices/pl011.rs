@@ -432,7 +432,7 @@ impl crate::memory::DeviceMemoryOps for PL011MemoryOps {
                         // self.char_backend.accept_input();
                     }
                     if remainder != 0 {
-                        assert_eq!(width, Width::_32);
+                        assert!(matches!(width, Width::_32 | Width::_16), "{width:?}");
                     }
                     result
                 };

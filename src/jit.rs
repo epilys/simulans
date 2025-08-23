@@ -1632,7 +1632,7 @@ impl BlockTranslator<'_> {
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
-                let value = self.generate_read(source_address, width);
+                let value = self.generate_read(source_address, Width::_16);
                 match width {
                     Width::_64 => self.builder.def_var(target, value),
                     Width::_32 | Width::_16 => {
