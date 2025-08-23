@@ -797,7 +797,7 @@ impl BlockTranslator<'_> {
                     Shift::ROR(ror) => self.builder.ins().rotr_imm(value, i64::from(*ror)),
                     Shift::UXTW(uxtw) => {
                         // [ref:verify_implementation]
-                        let value = self.builder.ins().band_imm(value, u32::MAX as i64);
+                        let value = self.builder.ins().band_imm(value, i64::from(u32::MAX));
                         if *uxtw == 0 {
                             value
                         } else {
@@ -821,7 +821,7 @@ impl BlockTranslator<'_> {
                     }
                     Shift::UXTH(uxth) => {
                         // [ref:verify_implementation]
-                        let value = self.builder.ins().band_imm(value, u16::MAX as i64);
+                        let value = self.builder.ins().band_imm(value, i64::from(u16::MAX));
                         if *uxth == 0 {
                             value
                         } else {
@@ -830,7 +830,7 @@ impl BlockTranslator<'_> {
                     }
                     Shift::UXTB(uxtb) => {
                         // [ref:verify_implementation]
-                        let value = self.builder.ins().band_imm(value, u8::MAX as i64);
+                        let value = self.builder.ins().band_imm(value, i64::from(u8::MAX));
                         if *uxtb == 0 {
                             value
                         } else {
@@ -3271,7 +3271,7 @@ impl BlockTranslator<'_> {
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
-                let a = self.builder.ins().band_imm(value, u32::MAX as i64);
+                let a = self.builder.ins().band_imm(value, i64::from(u32::MAX));
                 let a = self.builder.ins().ireduce(I32, a);
                 let a = self.builder.ins().bswap(a);
                 let a = self.builder.ins().uextend(I64, a);
@@ -3557,7 +3557,7 @@ impl BlockTranslator<'_> {
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
-                let value = self.builder.ins().band_imm(value, u8::MAX as i64);
+                let value = self.builder.ins().band_imm(value, i64::from(u8::MAX));
                 let target = self.translate_operand(&instruction.operands()[2]);
                 // let width = self.operand_width(&instruction.operands()[2]);
                 // assert_eq!(width, Width::_8); ?
