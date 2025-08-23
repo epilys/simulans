@@ -86,6 +86,8 @@ impl FdtBuilder {
 
         // [ref:TODO][ref:interrupts]: add gic support
         // fdt.property_u32("interrupt-parent", phandle_gic)?;
+        fdt.property_null("dma-coherent")?;
+        fdt.property_string("model", "linux,dummy-virt")?;
         fdt.property_string("compatible", "linux,dummy-virt")?;
         fdt.property_u32("#address-cells", 0x2)?;
         fdt.property_u32("#size-cells", 0x2)?;
@@ -101,8 +103,8 @@ impl FdtBuilder {
             let mem_reg_prop = [self.phys_mem_start.0, self.mem_size.get()];
 
             let memory_node = fdt.begin_node("memory")?;
-            fdt.property_string("device_type", "memory")?;
             fdt.property_array_u64("reg", &mem_reg_prop)?;
+            fdt.property_string("device_type", "memory")?;
             fdt.end_node(memory_node)?;
         }
         {
