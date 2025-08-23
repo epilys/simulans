@@ -47,8 +47,9 @@ pub extern "C" fn address_lookup(machine: &mut Armv8AMachine, address: u64) -> R
     );
     let Some(mem_region) = machine.memory.find_region(Address(address)) else {
         panic!(
-            "Could not look up address {} in physical memory map.",
-            address
+            "Could not look up address {} in physical memory map. pc was: 0x{:x}",
+            Address(address),
+            machine.pc
         );
     };
     let address_inside_region = address - mem_region.phys_offset.0;
