@@ -3817,7 +3817,20 @@ impl BlockTranslator<'_> {
             Op::UMOPS => todo!(),
             Op::UMOV => todo!(),
             Op::UMSUBL => todo!(),
-            Op::UMULH => todo!(),
+            Op::UMULH => {
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => unexpected_operand!(other),
+                };
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let value = self.builder.ins().umulhi(a, b);
+                self.builder.def_var(target, value);
+            }
             Op::UMULL => todo!(),
             Op::UMULL2 => todo!(),
             Op::UMULLB => todo!(),
