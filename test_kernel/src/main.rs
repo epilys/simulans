@@ -41,10 +41,15 @@ extern "C" fn main(x0: u64, _x1: u64, _x2: u64, _x3: u64) {
     let mut uart = unsafe { Uart::new(UART_BASE_ADDRESS) };
     uart.init(PL011_CLK_IN_HZ, PL011_BAUD_RATE);
     write!(&mut uart, "Hello world!\n").unwrap();
+    let s = alloc::string::String::from(" aaaa ");
+    assert_eq!(&s, " aaaa ");
+    // write!(&mut uart, "Hello world{}!\n", s).unwrap();
 
     // Safe because the pointer is a valid pointer to unaliased memory.
     match unsafe { Fdt::from_ptr(x0 as *const u8) } {
         Ok(fdt) => {
+            write!(&mut uart, "Parsed fdt!\n").unwrap();
+            //write!(&mut uart, "{} nodes!\n", fdt.all_nodes().count()).unwrap();
             for node in fdt.all_nodes() {
                 // Dump information about the node for debugging.
                 write!(
