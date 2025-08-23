@@ -3669,7 +3669,12 @@ impl BlockTranslator<'_> {
                 let width = self.operand_width(&instruction.operands()[0]);
                 self.generate_write(target, value, width);
             }
-            Op::STURB => todo!(),
+            Op::STURB => {
+                // [ref:needs_unit_test]
+                let value = self.translate_operand(&instruction.operands()[0]);
+                let target = self.translate_operand(&instruction.operands()[1]);
+                self.generate_write(target, value, Width::_8);
+            }
             Op::STURH => todo!(),
             Op::STXP => todo!(),
             Op::STXR => {
