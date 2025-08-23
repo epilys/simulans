@@ -13,7 +13,7 @@ To run the test unikernel with qemu + tcg, see the `qemu-tcg` make target. When 
 
 ```shell
 $ make qemu-tcg
-cargo build --target aarch64-unknown-none --release --config 'build.rustflags="--cfg platform=\"qemu\""'
+cargo build --target aarch64-unknown-none --release --config 'build.rustflags="--cfg'
    Compiling test-kernel v0.1.0 (/simulans/test_kernel)
     Finished `release` profile [optimized] target(s) in 0.20s
 aarch64-linux-gnu-objcopy -O binary target/aarch64-unknown-none/release/test_kernel target/aarch64-unknown-none/release/test_kernel.bin

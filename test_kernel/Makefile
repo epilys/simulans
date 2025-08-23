@@ -20,10 +20,10 @@ env:
 	rustup target add $(target)
 
 build:
-	cargo build $(BUILD_ARGS) --config 'build.rustflags="--cfg platform=\"qemu\""'
+	cargo build $(BUILD_ARGS)
 
 check:
-	cargo check $(BUILD_ARGS) --config 'build.rustflags="--cfg platform=\"qemu\""'
+	cargo check $(BUILD_ARGS)
 
 $(kernel_bin): build
 	$(objcopy) -O binary $(kernel) $(kernel_bin)
