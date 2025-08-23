@@ -2303,7 +2303,15 @@ impl BlockTranslator<'_> {
             Op::BFXIL => todo!(),
             Op::BGRP => todo!(),
             Op::BIC => todo!(),
-            Op::BICS => todo!(),
+            Op::BICS => {
+                let destination = get_destination_register!();
+                let a = self.translate_operand(&instruction.operands()[0]);
+                let b = self.translate_operand(&instruction.operands()[1]);
+                let negb = self.builder.ins().bnot(b);
+                let (result, nzcv) = ands!(a, negb);
+                self.update_nzcv(nzcv);
+                self.builder.def_var(destination, result);
+            }
             Op::BIF => todo!(),
             Op::BIT => todo!(),
             Op::BL => {
