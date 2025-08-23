@@ -1655,7 +1655,7 @@ impl BlockTranslator<'_> {
                             bad64::Imm::Signed(imm) => self.builder.ins().iconst(I64, *imm),
                         };
                         match shift {
-                            None => (const_value, !u64::from(u32::MAX)),
+                            None => (const_value, !0xffff),
                             Some(bad64::Shift::LSL(lsl)) => {
                                 let const_value =
                                     self.builder.ins().ishl_imm(const_value, i64::from(*lsl));
@@ -1673,7 +1673,7 @@ impl BlockTranslator<'_> {
                             bad64::Imm::Signed(imm) => self.builder.ins().iconst(I64, *imm),
                         };
                         match shift {
-                            None => (const_value, !u64::MAX),
+                            None => (const_value, !0xffff),
                             Some(bad64::Shift::LSL(lsl)) => {
                                 let const_value =
                                     self.builder.ins().ishl_imm(const_value, i64::from(*lsl));

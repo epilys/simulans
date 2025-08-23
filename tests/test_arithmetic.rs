@@ -114,6 +114,34 @@ fn test_mov() {
 }
 
 #[test]
+fn test_mov2() {
+    _ = env_logger::builder().is_test(true).try_init();
+
+    // ```asm
+    // movz    x1, #0x0, lsl #48
+    // movk    x1, #0x0, lsl #32
+    // movk    x1, #0x8080, lsl #16
+    // movk    x1, #0x3519
+    // ```
+
+    const TEST_INPUT: &[u8] = b"\x01\x00\xe0\xd2\x01\x00\xc0\xf2\x01\x10\xb0\xf2\x21\xa3\x86\xf2";
+
+    _ = simulans::disas(TEST_INPUT, 0);
+    // Capstone output:
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    let memory = MemoryMap::builder(MEMORY_SIZE)
+        .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
+        .unwrap()
+        .build();
+    let mut machine = machine::Armv8AMachine::new(memory);
+
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+    assert_hex_eq!(machine.cpu_state.registers.x1, 0x80803519);
+}
+
+#[test]
 fn test_bitfields() {
     _ = env_logger::builder().is_test(true).try_init();
 
