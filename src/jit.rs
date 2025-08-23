@@ -2742,7 +2742,26 @@ impl BlockTranslator<'_> {
             Op::FMMLA => todo!(),
             Op::FMOPA => todo!(),
             Op::FMOPS => todo!(),
-            Op::FMOV => todo!(),
+            Op::FMOV => {
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => unexpected_operand!(other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[0]);
+                match width {
+                    Width::_64 => self.builder.def_var(target, value),
+                    Width::_8 | Width::_32 | Width::_16 => {
+                        let value = self.builder.ins().uextend(I64, value);
+                        self.builder.def_var(target, value)
+                    }
+                    Width::_128 => todo!(),
+                }
+            }
             Op::FMSB => todo!(),
             Op::FMSUB => todo!(),
             Op::FMUL => todo!(),
