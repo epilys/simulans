@@ -82,7 +82,6 @@ impl Armv8AMachine {
             lookup_entry_func: Entry(lookup_entry),
             hw_breakpoints: BTreeSet::new(),
             halted: 0,
-            in_breakpoint: false,
         })
     }
 

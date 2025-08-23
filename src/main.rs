@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let args = Args::parse()?;
     match args.verbose {
-        0 => log::set_max_level(log::LevelFilter::Off),
+        0 => log::set_max_level(log::LevelFilter::Error),
         1 => log::set_max_level(log::LevelFilter::Info),
         2 => log::set_max_level(log::LevelFilter::Debug),
         _ => log::set_max_level(log::LevelFilter::Trace),
