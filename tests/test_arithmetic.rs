@@ -186,6 +186,6 @@ fn test_bitfields() {
 
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
     assert_hex_eq!(machine.cpu_state.registers.x3, (0x55555555 & 0b111) << 5);
-    assert_hex_eq!(machine.cpu_state.registers.x4, (0x55555555 & 0b11111) << 0);
+    assert_hex_eq!(machine.cpu_state.registers.x4, 0x55555555 & 0b11111);
     assert_hex_eq!(machine.cpu_state.registers.x5, (0x55555555 & 0b1) << 63);
 }
