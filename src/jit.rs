@@ -1282,7 +1282,10 @@ impl BlockTranslator<'_> {
                 let result = self.builder.ins().uextend(I64, result);
                 let label = match instruction.operands()[0] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
-                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                    other => panic!(
+                        "unexpected branch address in {op:?}: {:?}. Instruction: {instruction:?}",
+                        other
+                    ),
                 };
                 let label_value = self.builder.ins().iconst(I64, label as i64);
                 self.branch_if_non_zero(instruction, result, label_value);
@@ -1401,11 +1404,14 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!(
-                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
-                        other
-                    ),
+                    other => unexpected_operand!(other),
                 }
+            }};
+        }
+        macro_rules! unexpected_operand {
+            ($other:expr) => {{
+                let other = $other;
+                panic!("unexpected lhs in {op:?}: {other:?}. Instruction: {instruction:?}")
             }};
         }
         match op {
@@ -1415,7 +1421,7 @@ impl BlockTranslator<'_> {
                 // [ref:can_trap]
                 let target = match instruction.operands()[0] {
                     bad64::Operand::SysReg(ref sysreg) => *self.sysreg_to_var(sysreg),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 self.builder.def_var(target, value);
@@ -1428,7 +1434,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let sys_reg_value = self.translate_operand(&instruction.operands()[1]);
                 self.builder.def_var(target, sys_reg_value);
@@ -1441,7 +1447,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 self.builder.def_var(target, value);
@@ -1453,7 +1459,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 self.builder.def_var(target, value);
@@ -1465,7 +1471,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => self.reg_to_value(reg),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -1477,7 +1483,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => self.reg_to_value(reg),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let target = self.translate_operand(&instruction.operands()[1]);
                 self.generate_write(target, value, Width::_16);
@@ -1489,7 +1495,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => self.reg_to_value(reg),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let target = self.translate_operand(&instruction.operands()[1]);
                 self.generate_write(target, value, Width::_8);
@@ -1510,7 +1516,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
@@ -1531,14 +1537,14 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let target2 = match instruction.operands()[1] {
                     bad64::Operand::Reg {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
 
                 let source_address = self.translate_operand(&instruction.operands()[2]);
@@ -1572,7 +1578,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
@@ -1592,7 +1598,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
@@ -1612,7 +1618,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
@@ -1633,7 +1639,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 self.builder.def_var(target, value);
@@ -1644,7 +1650,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let (imm_value, shift_mask): (Value, u64) = match &instruction.operands()[1] {
                     bad64::Operand::Imm32 { imm, shift } => {
@@ -1662,7 +1668,9 @@ impl BlockTranslator<'_> {
                                 let shift_mask = !(u64::from(u32::MAX) << lsl);
                                 (const_value, shift_mask)
                             }
-                            other => unimplemented!("unimplemented shift {other:?}"),
+                            other => unimplemented!(
+                                "unimplemented shift {other:?}. Instruction: {instruction:?}"
+                            ),
                         }
                     }
                     bad64::Operand::Imm64 { imm, shift } => {
@@ -1680,7 +1688,9 @@ impl BlockTranslator<'_> {
                                 let shift_mask = !(u64::MAX << lsl);
                                 (const_value, shift_mask)
                             }
-                            other => unimplemented!("unimplemented shift {other:?}"),
+                            other => unimplemented!(
+                                "unimplemented shift {other:?}. Instruction: {instruction:?}"
+                            ),
                         }
                     }
                     other => panic!("other: {:?}", other),
@@ -1697,7 +1707,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let imm_value = self.translate_operand(&instruction.operands()[1]);
                 self.builder.def_var(target, imm_value);
@@ -1709,7 +1719,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
@@ -1726,7 +1736,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in load: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
@@ -1739,7 +1749,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in load: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let operand1 = self.translate_operand(&instruction.operands()[1]);
                 let operand2 = self.translate_operand(&instruction.operands()[2]);
@@ -1755,7 +1765,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in load: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
@@ -1782,7 +1792,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in load: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let dividend = self.translate_operand(&instruction.operands()[1]);
                 let divisor = self.translate_operand(&instruction.operands()[2]);
@@ -1834,7 +1844,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in load: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let dividend = self.translate_operand(&instruction.operands()[1]);
                 let divisor = self.translate_operand(&instruction.operands()[2]);
@@ -1888,7 +1898,7 @@ impl BlockTranslator<'_> {
                 // BranchTo(PC64 + offset, BranchType_DIR, branch_conditional);
                 let label = match instruction.operands()[0] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
-                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let next_pc = self.builder.ins().iconst(I64, label as i64);
                 return self.unconditional_jump_epilogue(instruction, next_pc);
@@ -1911,7 +1921,7 @@ impl BlockTranslator<'_> {
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
                 let label = match instruction.operands()[1] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
-                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let is_zero_value =
                     self.builder
@@ -1925,7 +1935,7 @@ impl BlockTranslator<'_> {
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
                 let label = match instruction.operands()[1] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
-                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let is_not_zero_value =
                     self.builder
@@ -1971,7 +1981,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let dst_value = self.translate_operand(&instruction.operands()[0]);
                 let src_value = self.translate_operand(&instruction.operands()[1]);
@@ -1980,14 +1990,14 @@ impl BlockTranslator<'_> {
                         imm: bad64::Imm::Unsigned(lsb),
                         shift: None,
                     } => lsb.try_into().unwrap(),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let wmask = match instruction.operands()[3] {
                     bad64::Operand::Imm32 {
                         imm: bad64::Imm::Unsigned(wmask),
                         shift: None,
                     } => self.builder.ins().iconst(I64, 2_i64.pow(wmask as u32) - 1),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let bits_to_copy = self.builder.ins().band(wmask, src_value);
                 let bits_mask = self.builder.ins().rotl_imm(bits_to_copy, lsb);
@@ -2006,7 +2016,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
@@ -2022,7 +2032,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
@@ -2036,7 +2046,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
@@ -2052,7 +2062,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
@@ -2066,7 +2076,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
@@ -2082,7 +2092,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().iabs(value);
@@ -2099,7 +2109,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let operand1 = self.translate_operand(&instruction.operands()[1]);
                 let operand2 = self.translate_operand(&instruction.operands()[2]);
@@ -2125,10 +2135,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!(
-                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
-                        other
-                    ),
+                    other => unexpected_operand!(other),
                 };
                 let operand1 = self.translate_operand(&instruction.operands()[1]);
                 let operand2 = self.translate_operand(&instruction.operands()[2]);
@@ -2153,7 +2160,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
@@ -2213,7 +2220,7 @@ impl BlockTranslator<'_> {
                 self.builder.def_var(link_register, link_pc);
                 let label = match instruction.operands()[0] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
-                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let label_value = self.builder.ins().iconst(I64, label as i64);
                 return self.unconditional_jump_epilogue(instruction, label_value);
@@ -2290,7 +2297,10 @@ impl BlockTranslator<'_> {
                 // Conditional compare; set NZCV to immediate value if condition doesn't hold.
                 let cnd = match instruction.operands()[3] {
                     bad64::Operand::Cond(cnd) => cnd,
-                    other => panic!("expected condition argument in {op:?}: {:?}", other),
+                    other => panic!(
+                        "expected condition argument in {op:?}: {:?}. Instruction: {instruction:?}",
+                        other
+                    ),
                 };
                 let result = self.condition_holds(cnd);
                 let condition_holds_block = self.builder.create_block();
@@ -2338,7 +2348,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 // [ref:verify_implementation]
@@ -2352,7 +2362,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().clz(value);
@@ -2399,7 +2409,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let popcnt = self.builder.ins().popcnt(value);
@@ -2425,13 +2435,13 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let true_value = self.translate_operand(&instruction.operands()[1]);
                 let false_value = self.translate_operand(&instruction.operands()[2]);
                 let cond = match instruction.operands()[3] {
                     bad64::Operand::Cond(cond) => cond,
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let result = self.condition_holds(cond);
                 let result = self.builder.ins().uextend(I64, result);
@@ -2468,12 +2478,12 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let zero = self.reg_to_value(&bad64::Reg::XZR);
                 let cond = match instruction.operands()[1] {
                     bad64::Operand::Cond(cond) => cond,
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 cs! { inc Rd = target, Rn = zero, Rm = zero, cond = condition_holds!(invert cond)  };
             }
@@ -2491,13 +2501,13 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let true_value = self.translate_operand(&instruction.operands()[1]);
                 let false_value = self.translate_operand(&instruction.operands()[2]);
                 let cond = match instruction.operands()[3] {
                     bad64::Operand::Cond(cond) => cond,
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 cs! { inc Rd = target, Rn = true_value, Rm = false_value, cond = condition_holds!(cond)  };
             }
@@ -2513,12 +2523,12 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let cond = match instruction.operands()[2] {
                     bad64::Operand::Cond(cond) => cond,
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 cs! { inc Rd = target, Rn = value, Rm = value, cond = condition_holds!(invert cond)  };
             }
@@ -2535,13 +2545,13 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let true_value = self.translate_operand(&instruction.operands()[1]);
                 let false_value = self.translate_operand(&instruction.operands()[2]);
                 let cond = match instruction.operands()[3] {
                     bad64::Operand::Cond(cond) => cond,
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 cs! { inv Rd = target, Rn = true_value, Rm = false_value, cond = condition_holds!(cond) };
             }
@@ -2553,12 +2563,12 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let cond = match instruction.operands()[2] {
                     bad64::Operand::Cond(cond) => cond,
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 cs! { inv Rd = target, Rn = value, Rm = value, cond = condition_holds!(invert cond) };
             }
@@ -2569,12 +2579,12 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let zero = self.reg_to_value(&bad64::Reg::XZR);
                 let cond = match instruction.operands()[1] {
                     bad64::Operand::Cond(cond) => cond,
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 cs! { inv Rd = target, Rn = zero, Rm = zero, cond = condition_holds!(invert cond) };
             }
@@ -2589,13 +2599,13 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let true_value = self.translate_operand(&instruction.operands()[1]);
                 let false_value = self.translate_operand(&instruction.operands()[2]);
                 let cond = match instruction.operands()[3] {
                     bad64::Operand::Cond(cond) => cond,
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 cs! { neg Rd = target, Rn = true_value, Rm = false_value, cond = condition_holds!(cond) };
             }
@@ -2610,12 +2620,12 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let cond = match instruction.operands()[2] {
                     bad64::Operand::Cond(cond) => cond,
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 cs! { neg Rd = target, Rn = value, Rm = value, cond = condition_holds!(invert cond) };
             }
@@ -2870,7 +2880,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
@@ -2891,7 +2901,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
@@ -3064,7 +3074,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().ineg(value);
@@ -3129,7 +3139,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().bitrev(value);
@@ -3146,7 +3156,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().bswap(value);
@@ -3469,7 +3479,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let target = self.translate_operand(&instruction.operands()[2]);
@@ -3490,7 +3500,7 @@ impl BlockTranslator<'_> {
                         ref reg,
                         arrspec: None,
                     } => *self.reg_to_var(reg, true),
-                    other => panic!("unexpected lhs in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let target = self.translate_operand(&instruction.operands()[2]);
@@ -3549,13 +3559,13 @@ impl BlockTranslator<'_> {
                         imm: bad64::Imm::Unsigned(imm),
                         shift: _,
                     } => imm,
-                    other => panic!("unexpected bit field in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let bit_mask = self.builder.ins().iconst(I64, 1 << bit_field);
                 let result = self.builder.ins().band(value, bit_mask);
                 let label = match instruction.operands()[2] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
-                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let is_not_zero_value =
                     self.builder
@@ -3573,13 +3583,13 @@ impl BlockTranslator<'_> {
                         imm: bad64::Imm::Unsigned(imm),
                         shift: _,
                     } => imm,
-                    other => panic!("unexpected bit field in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let bit_mask = self.builder.ins().iconst(I64, 1 << bit_field);
                 let result = self.builder.ins().band(value, bit_mask);
                 let label = match instruction.operands()[2] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
-                    other => panic!("unexpected branch address in {op:?}: {:?}", other),
+                    other => unexpected_operand!(other),
                 };
                 let is_zero_value =
                     self.builder
@@ -3636,10 +3646,7 @@ impl BlockTranslator<'_> {
                         imm: bad64::Imm::Unsigned(lsb),
                         shift: None,
                     } => lsb.try_into().unwrap(),
-                    other => panic!(
-                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
-                        other
-                    ),
+                    other => unexpected_operand!(other),
                 };
                 let masked = match instruction.operands()[3] {
                     bad64::Operand::Imm32 {
@@ -3649,10 +3656,7 @@ impl BlockTranslator<'_> {
                         .builder
                         .ins()
                         .band_imm(source, 2_i64.pow(wmask as u32) - 1),
-                    other => panic!(
-                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
-                        other
-                    ),
+                    other => unexpected_operand!(other),
                 };
                 let result = self.builder.ins().ishl_imm(masked, lsb);
                 self.builder.def_var(destination, result);
@@ -3666,10 +3670,7 @@ impl BlockTranslator<'_> {
                         imm: bad64::Imm::Unsigned(lsb),
                         shift: None,
                     } => lsb.try_into().unwrap(),
-                    other => panic!(
-                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
-                        other
-                    ),
+                    other => unexpected_operand!(other),
                 };
                 let result = match instruction.operands()[3] {
                     bad64::Operand::Imm32 {
@@ -3679,10 +3680,7 @@ impl BlockTranslator<'_> {
                         .builder
                         .ins()
                         .band_imm(source, (2_i64.pow(wmask as u32) - 1) << lsb),
-                    other => panic!(
-                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
-                        other
-                    ),
+                    other => unexpected_operand!(other),
                 };
                 self.builder.def_var(destination, result);
             }
