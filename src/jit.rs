@@ -1642,7 +1642,7 @@ impl BlockTranslator<'_> {
                     _ => panic!(),
                 }
             }
-            Op::LDURB | Op::LDUR | Op::LDRB => {
+            Op::LDUR => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -1655,12 +1655,25 @@ impl BlockTranslator<'_> {
                 let value = self.generate_read(source_address, width);
                 match width {
                     Width::_64 => self.builder.def_var(target, value),
-                    Width::_8 | Width::_32 | Width::_16 => {
+                    Width::_32 | Width::_16 => {
                         let value = self.builder.ins().uextend(I64, value);
                         self.builder.def_var(target, value)
                     }
                     _ => panic!(),
                 }
+            }
+            Op::LDURB | Op::LDRB => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => unexpected_operand!(other),
+                };
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read(source_address, Width::_8);
+                let value = self.builder.ins().uextend(I64, value);
+                self.builder.def_var(target, value)
             }
             Op::LDRSW => {
                 let target = match instruction.operands()[0] {
