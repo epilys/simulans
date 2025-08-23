@@ -3477,7 +3477,30 @@ impl BlockTranslator<'_> {
             Op::STLURH => todo!(),
             Op::STLXP => todo!(),
             Op::STLXR => todo!(),
-            Op::STLXRB => todo!(),
+            Op::STLXRB => {
+                // [ref:atomics]: We don't model exclusive access (yet).
+                // [ref:needs_unit_test]
+                let status_target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => unexpected_operand!(other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().band_imm(value, u8::MAX as i64);
+                let target = self.translate_operand(&instruction.operands()[2]);
+                // let width = self.operand_width(&instruction.operands()[2]);
+                // assert_eq!(width, Width::_8); ?
+                self.generate_write(target, value, Width::_8);
+                // > [..] Is the 32-bit name of the general-purpose register into which the status
+                // > result of the store exclusive is written, encoded in the "Rs" field. The
+                // > value returned is:
+                // > - 0 If the operation updates memory.
+                // > - 1 If the operation fails to update memory.
+                let zero = self.builder.ins().iconst(I64, 0);
+                self.builder.def_var(status_target, zero);
+            }
             Op::STLXRH => todo!(),
             Op::STNP => todo!(),
             Op::STNT1B => todo!(),
