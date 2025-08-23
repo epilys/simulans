@@ -39,7 +39,7 @@ pub struct ResolvedAddress<'a> {
     pub address_inside_region: u64,
 }
 
-pub extern "C" fn address_lookup(machine: &mut Armv8AMachine, address: u64) -> ResolvedAddress {
+pub extern "C" fn address_lookup(machine: &mut Armv8AMachine, address: u64) -> ResolvedAddress<'_> {
     log::trace!(
         "address lookup from pc 0x{:x} for address 0x{:x}",
         machine.pc,
