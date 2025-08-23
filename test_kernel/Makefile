@@ -1,4 +1,4 @@
-target := aarch64-unknown-none
+target := aarch64-unknown-none-softfloat
 mode := release
 kernel := target/$(target)/$(mode)/test_kernel
 kernel_bin := target/$(target)/$(mode)/test_kernel.bin
