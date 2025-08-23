@@ -15,10 +15,10 @@ bilge = "0.2.0"
 bitflags = "2.6.0"
 capstone = "0.13.0"
 clap = { version = "4.5.31", features = ["derive"] }
-cranelift = "0.97.1"
-cranelift-jit = "0.97.1"
-cranelift-module = "0.97.1"
-cranelift-native = "0.97.1"
+cranelift = "0.120.0"
+cranelift-module = "0.120.0"
+cranelift-native = "0.120.0"
+cranelift-jit = "0.120.0"
 env_logger = { version = "0.11.6", default-features = false }
 gdbstub = { version = "0.7.1", optional = true }
 gdbstub_arch = { version = "0.3.0", optional = true }

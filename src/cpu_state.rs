@@ -334,9 +334,7 @@ impl ExecutionState {
     ) {
         use bad64::{Reg, SysReg};
 
-        let memflags = MemFlags::trusted()
-            .with_endianness(codegen::ir::Endianness::Little)
-            .with_vmctx();
+        let memflags = MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
         macro_rules! reg_field {
             ($($field:ident$([$index:expr])? => $bad_reg:expr),*$(,)?) => {{
                 $(
@@ -467,9 +465,7 @@ impl ExecutionState {
     ) {
         use bad64::{Reg, SysReg};
 
-        let memflags = MemFlags::trusted()
-            .with_endianness(codegen::ir::Endianness::Little)
-            .with_vmctx();
+        let memflags = MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
         macro_rules! reg_field {
             ($($field:ident$([$index:expr])? => $bad_reg:expr),*$(,)?) => {{
                 $(
