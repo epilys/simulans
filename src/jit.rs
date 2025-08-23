@@ -1545,7 +1545,10 @@ impl BlockTranslator<'_> {
                 let data2 = self.translate_operand(&instruction.operands()[1]);
                 let target = self.translate_operand(&instruction.operands()[2]);
                 self.generate_write(target, data1, width);
-                let target = self.builder.ins().iadd_imm(target, i64::from(width as i32));
+                let target = self
+                    .builder
+                    .ins()
+                    .iadd_imm(target, i64::from(width as i32) / 8);
                 self.generate_write(target, data2, width);
             }
             Op::LDAR | Op::LDR => {
@@ -1600,7 +1603,7 @@ impl BlockTranslator<'_> {
                 let source_address = self
                     .builder
                     .ins()
-                    .iadd_imm(source_address, i64::from(width as i32));
+                    .iadd_imm(source_address, i64::from(width as i32) / 8);
                 let value = self.generate_read(source_address, width);
                 match width {
                     Width::_64 => self.builder.def_var(target2, value),
