@@ -3189,8 +3189,31 @@ impl BlockTranslator<'_> {
                 }
             }
             Op::REV16 => todo!(),
-            Op::REV32 => todo!(),
-            Op::REV64 => todo!(),
+            Op::REV32 => {
+                // [ref:verify_implementation]
+                // [ref:needs_unit_test]
+                // Reverse bytes in 32-bit words reverses the byte order in each 32-bit word of
+                // a register.
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => unexpected_operand!(other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let a = self.builder.ins().band_imm(value, u32::MAX as i64);
+                let a = self.builder.ins().ireduce(I32, a);
+                let a = self.builder.ins().bswap(a);
+                let a = self.builder.ins().uextend(I64, a);
+                let b = self.builder.ins().ushr_imm(value, 32);
+                let b = self.builder.ins().ireduce(I32, b);
+                let b = self.builder.ins().bswap(b);
+                let b = self.builder.ins().uextend(I64, b);
+                let b = self.builder.ins().ishl_imm(b, 32);
+                let result = self.builder.ins().band(a, b);
+                self.builder.def_var(target, result);
+            }
             Op::REVB => todo!(),
             Op::REVD => todo!(),
             Op::REVH => todo!(),
