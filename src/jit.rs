@@ -24,7 +24,10 @@
 
 use std::{ops::ControlFlow, pin::Pin};
 
-use codegen::ir::types::{I128, I16, I32, I64, I8};
+use codegen::ir::{
+    instructions::BlockArg,
+    types::{I128, I16, I32, I64, I8},
+};
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
@@ -195,23 +198,16 @@ impl JitContext {
     pub fn new() -> Pin<Box<Self>> {
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
-        // PIC is required for `hotswapping`, i.e. re-defining functions with the same
-        // name (We use PC for the name.
-        if cfg!(target_arch = "x86_64") {
-            flag_builder.set("is_pic", "true").unwrap();
-        }
-        let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
-            panic!("host machine is not supported: {}", msg);
-        });
-        let isa = isa_builder
-            .finish(settings::Flags::new(flag_builder))
-            .unwrap();
-        let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
-        if cfg!(target_arch = "x86_64") {
-            builder.hotswap(true);
-        }
 
-        let module = JITModule::new(builder);
+        let module = JITModule::new(JITBuilder::with_isa(
+            cranelift_native::builder()
+                .unwrap_or_else(|msg| {
+                    panic!("host machine is not supported: {}", msg);
+                })
+                .finish(settings::Flags::new(flag_builder))
+                .unwrap(),
+            cranelift_module::default_libcall_names(),
+        ));
         Box::pin(Self {
             builder_context: FunctionBuilderContext::new(),
             ctx: module.make_context(),
@@ -229,24 +225,20 @@ impl JitContext {
         program_counter: u64,
     ) -> Result<(std::ops::RangeInclusive<u64>, Entry), Box<dyn std::error::Error>> {
         log::trace!("jit compile called for pc = 0x{:x}", program_counter);
-        if let Some(func_id) = self.func_ids.remove(&program_counter) {
-            if cfg!(target_arch = "x86_64") {
-                self.module.prepare_for_function_redefine(func_id)?;
-            } else {
-                // Cranelift doesn't support PIC on non-x86-64 host archs, so just re-allocate
-                // the JIT builder context.
-                let Self {
-                    builder_context,
-                    ctx,
-                    func_ids,
-                    module,
-                    ..
-                } = *Pin::into_inner(Self::new());
-                self.builder_context = builder_context;
-                self.ctx = ctx;
-                self.func_ids = func_ids;
-                self.module = module;
-            }
+        if let Some(_func_id) = self.func_ids.remove(&program_counter) {
+            // Cranelift doesn't support hotswapping anymore, so just re-allocate
+            // the JIT builder context.
+            let Self {
+                builder_context,
+                ctx,
+                func_ids,
+                module,
+                ..
+            } = *Pin::into_inner(Self::new());
+            self.builder_context = builder_context;
+            self.ctx = ctx;
+            self.func_ids = func_ids;
+            self.module = module;
         }
         let mut sig = self.module.make_signature();
         sig.params
@@ -312,7 +304,6 @@ impl JitContext {
         program_counter: u64,
     ) -> Result<u64, Box<dyn std::error::Error>> {
         let machine_addr = std::ptr::addr_of!(*machine);
-        let self_addr = std::ptr::addr_of!(*self);
 
         let Armv8AMachine {
             ref mut memory,
@@ -374,14 +365,10 @@ impl JitContext {
         // Declare variables for each register.
         // Emit code to load register values into variables.
         cpu_state.load_cpu_state(&mut builder, &mut registers, &mut sys_registers);
-        let jit_ctx_ptr = builder
-            .ins()
-            .iconst(self.module.target_config().pointer_type(), self_addr as i64);
         let machine_ptr = builder.ins().iconst(
             self.module.target_config().pointer_type(),
             machine_addr as i64,
         );
-        let entry_lookup_sigref = builder.import_signature(builder.func.signature.clone());
         let address_lookup_sigref = {
             let mut sig = self.module.make_signature();
             sig.params
@@ -398,11 +385,9 @@ impl JitContext {
             pointer_type: self.module.target_config().pointer_type(),
             memops_table,
             cpu_state,
-            jit_ctx_ptr,
             machine_ptr,
             registers_print_func,
             registers_sigref,
-            entry_lookup_sigref,
             address_lookup_sigref,
             builder,
             registers,
@@ -471,12 +456,10 @@ impl JitContext {
 struct BlockTranslator<'a> {
     builder: FunctionBuilder<'a>,
     cpu_state: &'a mut ExecutionState,
-    jit_ctx_ptr: Value,
     machine_ptr: Value,
     pointer_type: Type,
     registers_print_func: Value,
     registers_sigref: codegen::ir::SigRef,
-    entry_lookup_sigref: codegen::ir::SigRef,
     memops_table: MemOpsTable,
     address_lookup_sigref: codegen::ir::SigRef,
     registers: IndexMap<bad64::Reg, Variable>,
@@ -852,7 +835,7 @@ impl BlockTranslator<'_> {
                         let value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
-                            TrapCode::IntegerOverflow,
+                            TrapCode::INTEGER_OVERFLOW,
                         );
                         let reg_var = *self.reg_to_var(reg, true);
                         self.builder.def_var(reg_var, value);
@@ -872,7 +855,7 @@ impl BlockTranslator<'_> {
                         let value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
-                            TrapCode::IntegerOverflow,
+                            TrapCode::INTEGER_OVERFLOW,
                         );
                         let reg_var = *self.reg_to_var(reg, true);
                         self.builder.def_var(reg_var, value);
@@ -890,7 +873,7 @@ impl BlockTranslator<'_> {
                         let post_value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
-                            TrapCode::IntegerOverflow,
+                            TrapCode::INTEGER_OVERFLOW,
                         );
                         let reg_var = *self.reg_to_var(reg, true);
                         self.builder.def_var(reg_var, post_value);
@@ -908,7 +891,7 @@ impl BlockTranslator<'_> {
                         let post_value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
-                            TrapCode::IntegerOverflow,
+                            TrapCode::INTEGER_OVERFLOW,
                         );
                         let reg_var = *self.reg_to_var(reg, true);
                         self.builder.def_var(reg_var, post_value);
@@ -959,7 +942,7 @@ impl BlockTranslator<'_> {
                         let value = self.builder.ins().uadd_overflow_trap(
                             reg_val,
                             imm_value,
-                            TrapCode::IntegerOverflow,
+                            TrapCode::INTEGER_OVERFLOW,
                         );
                         value
                     }
@@ -1004,7 +987,7 @@ impl BlockTranslator<'_> {
                 // [ref:verify_implementation]: should wrap instead of trap on overflow?
                 self.builder
                     .ins()
-                    .uadd_overflow_trap(address, offset, TrapCode::IntegerOverflow)
+                    .uadd_overflow_trap(address, offset, TrapCode::INTEGER_OVERFLOW)
             }
             other => unimplemented!("unexpected rhs in translate_operand: {:?}", other),
         }
@@ -1317,7 +1300,7 @@ impl BlockTranslator<'_> {
                 .ins()
                 .iconst(I64, i64::try_from(instruction.address()).unwrap());
             self.builder.ins().store(
-                MemFlags::trusted().with_vmctx(),
+                MemFlags::trusted(),
                 pc_value,
                 self.machine_ptr,
                 std::mem::offset_of!(Armv8AMachine, pc) as i32,
@@ -1379,12 +1362,14 @@ impl BlockTranslator<'_> {
                     .brif(cond, true_block, &[], false_block, &[]);
                 self.builder.switch_to_block(true_block);
                 self.builder.seal_block(true_block);
-                self.builder.ins().jump(merge_block, &[$Rn]);
+                self.builder.ins().jump(merge_block, &[BlockArg::from($Rn)]);
 
                 self.builder.switch_to_block(false_block);
                 self.builder.seal_block(false_block);
                 let incremented_value = self.builder.ins().iadd_imm($Rm, 1);
-                self.builder.ins().jump(merge_block, &[incremented_value]);
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::from(incremented_value)]);
 
                 self.builder.switch_to_block(merge_block);
                 self.builder.seal_block(merge_block);
@@ -1405,12 +1390,14 @@ impl BlockTranslator<'_> {
                     .brif(cond, true_block, &[], false_block, &[]);
                 self.builder.switch_to_block(true_block);
                 self.builder.seal_block(true_block);
-                self.builder.ins().jump(merge_block, &[$Rn]);
+                self.builder.ins().jump(merge_block, &[BlockArg::from($Rn)]);
 
                 self.builder.switch_to_block(false_block);
                 self.builder.seal_block(false_block);
                 let inverted_value = self.builder.ins().bnot($Rm);
-                self.builder.ins().jump(merge_block, &[inverted_value]);
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::from(inverted_value)]);
 
                 self.builder.switch_to_block(merge_block);
                 self.builder.seal_block(merge_block);
@@ -1431,13 +1418,15 @@ impl BlockTranslator<'_> {
                     .brif(cond, true_block, &[], false_block, &[]);
                 self.builder.switch_to_block(true_block);
                 self.builder.seal_block(true_block);
-                self.builder.ins().jump(merge_block, &[$Rn]);
+                self.builder.ins().jump(merge_block, &[BlockArg::from($Rn)]);
 
                 self.builder.switch_to_block(false_block);
                 self.builder.seal_block(false_block);
                 let neg_value = self.builder.ins().bnot($Rm);
                 let neg_value = self.builder.ins().iadd_imm(neg_value, 1);
-                self.builder.ins().jump(merge_block, &[neg_value]);
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::from(neg_value)]);
 
                 self.builder.switch_to_block(merge_block);
                 self.builder.seal_block(merge_block);
@@ -1786,11 +1775,7 @@ impl BlockTranslator<'_> {
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
-                // [ref:verify_implementation]: should wrap instead of trap on overflow?
-                let value = self
-                    .builder
-                    .ins()
-                    .uadd_overflow_trap(a, b, TrapCode::IntegerOverflow);
+                let (value, _overflow) = self.builder.ins().uadd_overflow(a, b);
                 self.builder.def_var(target, value);
             }
             Op::SUB => {
@@ -1881,13 +1866,17 @@ impl BlockTranslator<'_> {
                 self.builder.seal_block(zero_block);
                 // Jump to the merge block, passing it the block return value.
                 let zero = self.reg_to_value(&bad64::Reg::XZR);
-                self.builder.ins().jump(merge_block, &[zero]);
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::from(zero)]);
 
                 self.builder.switch_to_block(else_block);
                 self.builder.seal_block(else_block);
                 let else_return = self.builder.ins().sdiv(dividend, divisor);
                 // Jump to the merge block, passing it the block return value.
-                self.builder.ins().jump(merge_block, &[else_return]);
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::from(else_return)]);
 
                 // Switch to the merge block for subsequent statements.
                 self.builder.switch_to_block(merge_block);
@@ -1933,13 +1922,17 @@ impl BlockTranslator<'_> {
                 self.builder.seal_block(zero_block);
                 // Jump to the merge block, passing it the block return value.
                 let zero = self.reg_to_value(&bad64::Reg::XZR);
-                self.builder.ins().jump(merge_block, &[zero]);
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::from(zero)]);
 
                 self.builder.switch_to_block(else_block);
                 self.builder.seal_block(else_block);
                 let else_return = self.builder.ins().udiv(dividend, divisor);
                 // Jump to the merge block, passing it the block return value.
-                self.builder.ins().jump(merge_block, &[else_return]);
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::from(else_return)]);
 
                 // Switch to the merge block for subsequent statements.
                 self.builder.switch_to_block(merge_block);
@@ -2518,11 +2511,15 @@ impl BlockTranslator<'_> {
                     .brif(result, true_block, &[], false_block, &[]);
                 self.builder.switch_to_block(true_block);
                 self.builder.seal_block(true_block);
-                self.builder.ins().jump(merge_block, &[true_value]);
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::from(true_value)]);
 
                 self.builder.switch_to_block(false_block);
                 self.builder.seal_block(false_block);
-                self.builder.ins().jump(merge_block, &[false_value]);
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::from(false_value)]);
 
                 self.builder.switch_to_block(merge_block);
                 self.builder.seal_block(merge_block);
@@ -4036,14 +4033,14 @@ impl BlockTranslator<'_> {
             if cfg!(feature = "accurate-pc") {
                 let prev_pc = self.builder.ins().iconst(I64, prev_pc as i64);
                 self.builder.ins().store(
-                    MemFlags::trusted().with_vmctx(),
+                    MemFlags::trusted(),
                     prev_pc,
                     self.machine_ptr,
                     std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
                 );
             }
             self.builder.ins().store(
-                MemFlags::trusted().with_vmctx(),
+                MemFlags::trusted(),
                 next_pc_value,
                 self.machine_ptr,
                 std::mem::offset_of!(Armv8AMachine, pc) as i32,
@@ -4053,7 +4050,7 @@ impl BlockTranslator<'_> {
             //
             // let translate_func = self.builder.ins().load(
             //     self.pointer_type,
-            //     MemFlags::trusted().with_vmctx(),
+            //     MemFlags::trusted(),
             //     self.machine_ptr,
             //     std::mem::offset_of!(Armv8AMachine, lookup_entry_func) as i32,
             // );
@@ -4070,13 +4067,7 @@ impl BlockTranslator<'_> {
                 .builder
                 .ins()
                 .iconst(I64, lookup_entry as usize as u64 as i64);
-            let call = self.builder.ins().call_indirect(
-                self.entry_lookup_sigref,
-                translate_func,
-                &[self.jit_ctx_ptr, self.machine_ptr],
-            );
-            let resolved_entry = self.builder.inst_results(call)[0];
-            self.builder.ins().return_(&[resolved_entry]);
+            self.builder.ins().return_(&[translate_func]);
         }
     }
 
@@ -4095,24 +4086,18 @@ impl BlockTranslator<'_> {
         }
         let true_value = self.builder.ins().iconst(I8, 1);
         self.builder.ins().store(
-            MemFlags::trusted().with_vmctx(),
+            MemFlags::trusted(),
             true_value,
             self.machine_ptr,
             std::mem::offset_of!(Armv8AMachine, halted) as i32,
         );
         let translate_func = self.builder.ins().load(
             self.pointer_type,
-            MemFlags::trusted().with_vmctx(),
+            MemFlags::trusted(),
             self.machine_ptr,
             std::mem::offset_of!(Armv8AMachine, lookup_entry_func) as i32,
         );
-        let call = self.builder.ins().call_indirect(
-            self.entry_lookup_sigref,
-            translate_func,
-            &[self.jit_ctx_ptr, self.machine_ptr],
-        );
-        let resolved_entry = self.builder.inst_results(call)[0];
-        self.builder.ins().return_(&[resolved_entry]);
+        self.builder.ins().return_(&[translate_func]);
     }
 
     fn unconditional_jump_epilogue(
@@ -4127,14 +4112,14 @@ impl BlockTranslator<'_> {
                 .ins()
                 .iconst(I64, source_instruction.address() as i64);
             self.builder.ins().store(
-                MemFlags::trusted().with_vmctx(),
+                MemFlags::trusted(),
                 pc,
                 self.machine_ptr,
                 std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
             );
         }
         self.builder.ins().store(
-            MemFlags::trusted().with_vmctx(),
+            MemFlags::trusted(),
             dest_label,
             self.machine_ptr,
             std::mem::offset_of!(Armv8AMachine, pc) as i32,
