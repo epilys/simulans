@@ -3163,7 +3163,8 @@ impl BlockTranslator<'_> {
             Op::RDVL => todo!(),
             Op::RETAA => todo!(),
             Op::RETAB => todo!(),
-            Op::REV => {
+            Op::REV | Op::REV64 => {
+                // [ref:needs_unit_test]
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
@@ -3172,8 +3173,20 @@ impl BlockTranslator<'_> {
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
-                let value = self.builder.ins().bswap(value);
-                self.builder.def_var(target, value);
+                let width = self.operand_width(&instruction.operands()[1]);
+                match width {
+                    Width::_64 => {
+                        let value = self.builder.ins().bswap(value);
+                        self.builder.def_var(target, value);
+                    }
+                    Width::_32 => {
+                        let value = self.builder.ins().ireduce(I32, value);
+                        let value = self.builder.ins().bswap(value);
+                        let value = self.builder.ins().uextend(I64, value);
+                        self.builder.def_var(target, value);
+                    }
+                    _ => unreachable!(),
+                }
             }
             Op::REV16 => todo!(),
             Op::REV32 => todo!(),
