@@ -1848,6 +1848,17 @@ impl BlockTranslator<'_> {
                 let value = self.builder.ins().imul(a, b);
                 self.builder.def_var(target, value);
             }
+            Op::MSUB => {
+                // [ref:needs_unit_test]
+                // Multiply-subtract
+                let destination = get_destination_register!();
+                let n = self.translate_operand(&instruction.operands()[1]);
+                let m = self.translate_operand(&instruction.operands()[2]);
+                let a = self.translate_operand(&instruction.operands()[3]);
+                let b = self.builder.ins().imul(n, m);
+                let (value, _ignore_overflow) = self.builder.ins().usub_overflow(a, b);
+                self.builder.def_var(destination, value);
+            }
             Op::SDIV => {
                 // [ref:verify_implementation]
 
@@ -3161,7 +3172,6 @@ impl BlockTranslator<'_> {
             Op::MOVPRFX => todo!(),
             Op::MOVS => todo!(),
             Op::MSB => todo!(),
-            Op::MSUB => todo!(),
             Op::MVN => {
                 // FEAT_AdvSIMD
                 // [ref:needs_unit_test]
