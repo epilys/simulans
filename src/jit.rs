@@ -1407,6 +1407,20 @@ impl BlockTranslator<'_> {
                 phi
             }};
         }
+        macro_rules! get_destination_register {
+            () => {{
+                match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!(
+                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
+                        other
+                    ),
+                }
+            }};
+        }
         match op {
             Op::NOP => {}
             // Special registers
@@ -3611,9 +3625,64 @@ impl BlockTranslator<'_> {
             Op::UADDW2 => todo!(),
             Op::UADDWB => todo!(),
             Op::UADDWT => todo!(),
-            Op::UBFIZ => todo!(),
+            Op::UBFIZ => {
+                let destination = get_destination_register!();
+                let source = self.translate_operand(&instruction.operands()[1]);
+                let lsb: i64 = match instruction.operands()[2] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(lsb),
+                        shift: None,
+                    } => lsb.try_into().unwrap(),
+                    other => panic!(
+                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
+                        other
+                    ),
+                };
+                let masked = match instruction.operands()[3] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(wmask),
+                        shift: None,
+                    } => self
+                        .builder
+                        .ins()
+                        .band_imm(source, 2_i64.pow(wmask as u32) - 1),
+                    other => panic!(
+                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
+                        other
+                    ),
+                };
+                let result = self.builder.ins().ishl_imm(masked, lsb);
+                self.builder.def_var(destination, result);
+            }
             Op::UBFM => todo!(),
-            Op::UBFX => todo!(),
+            Op::UBFX => {
+                let destination = get_destination_register!();
+                let source = self.translate_operand(&instruction.operands()[1]);
+                let lsb: i64 = match instruction.operands()[2] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(lsb),
+                        shift: None,
+                    } => lsb.try_into().unwrap(),
+                    other => panic!(
+                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
+                        other
+                    ),
+                };
+                let result = match instruction.operands()[3] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(wmask),
+                        shift: None,
+                    } => self
+                        .builder
+                        .ins()
+                        .band_imm(source, (2_i64.pow(wmask as u32) - 1) << lsb),
+                    other => panic!(
+                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
+                        other
+                    ),
+                };
+                self.builder.def_var(destination, result);
+            }
             Op::UCLAMP => todo!(),
             Op::UCVTF => todo!(),
             Op::UDF => {
