@@ -51,6 +51,7 @@ qemu-tcg: $(kernel_bin)
 		-vga none \
 		-nographic \
 		-serial mon:stdio \
-		-d guest_errors -D qemu.log
+		-d in_asm,int,guest_errors,invalid_mem \
+		-D qemu.log
 
 all: $(kernel_bin)
