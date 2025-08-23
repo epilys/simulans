@@ -3063,7 +3063,20 @@ impl BlockTranslator<'_> {
             Op::MOVS => todo!(),
             Op::MSB => todo!(),
             Op::MSUB => todo!(),
-            Op::MVN => todo!(),
+            Op::MVN => {
+                // FEAT_AdvSIMD
+                // [ref:needs_unit_test]
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => unexpected_operand!(other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().bnot(value);
+                self.builder.def_var(target, value);
+            }
             Op::MVNI => todo!(),
             Op::NAND => todo!(),
             Op::NANDS => todo!(),
