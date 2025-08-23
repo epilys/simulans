@@ -516,3 +516,64 @@ fn test_cmp_b_cnd() {
         }
     }
 }
+
+#[test]
+/// ```asm
+/// // load a 64-bit immediate using MOV
+/// .macro movq Xn, imm
+///   movz    \Xn,  \imm & 0xFFFF
+///   movk    \Xn, (\imm >> 16) & 0xFFFF, lsl 16
+///   movk    \Xn, (\imm >> 32) & 0xFFFF, lsl 32
+///   movk    \Xn, (\imm >> 48) & 0xFFFF, lsl 48
+/// .endm
+///
+/// movq x1, 0x40095020
+/// movq x2, 0x1000000
+/// adds x0, x1, x2
+/// cset w8, cs
+/// ```
+fn test_adds() {
+    _ = env_logger::builder().is_test(true).try_init();
+
+    const TEST_INPUT: &[u8] = b"\x01\x04\x8a\xd2\x21\x01\xa8\xf2\x01\x00\xc0\xf2\x01\x00\xe0\xf2\x02\x00\x80\xd2\x02\x20\xa0\xf2\x02\x00\xc0\xf2\x02\x00\xe0\xf2\x20\x00\x02\xab\xe8\x37\x9f\x1a";
+
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+
+    _ = simulans::disas(TEST_INPUT, 0);
+    let entry_point = Address(0);
+    {
+        let memory = MemoryMap::builder(MEMORY_SIZE)
+            .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
+            .unwrap()
+            .build();
+        let mut machine = machine::Armv8AMachine::new(memory);
+
+        main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+
+        macro_rules! reg {
+            ($reg:ident) => {
+                machine.cpu_state.registers.$reg
+            };
+        }
+
+        // Initial, constant values:
+        assert_hex_eq!(reg!(x1), 0x40095020);
+        assert_hex_eq!(reg!(x2), 0x1000000);
+
+        {
+            let mut nzcv = NZCV::from(0x0);
+            nzcv.set_z(false);
+            nzcv.set_c(false);
+            nzcv.set_n(false);
+            nzcv.set_v(false);
+
+            assert_eq!(nzcv, reg!(nzcv));
+            assert_hex_eq!(reg!(nzcv).into(), nzcv.into());
+        }
+
+        {
+            assert_hex_eq!(reg!(x8), 0x0);
+        }
+    }
+}

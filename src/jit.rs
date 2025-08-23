@@ -2119,7 +2119,24 @@ impl BlockTranslator<'_> {
             Op::ADDHNT => todo!(),
             Op::ADDP => todo!(),
             Op::ADDPL => todo!(),
-            Op::ADDS => todo!(),
+            Op::ADDS => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => panic!(
+                        "unexpected lhs in {op:?}: {:?}. Instruction: {instruction:?}",
+                        other
+                    ),
+                };
+                let operand1 = self.translate_operand(&instruction.operands()[1]);
+                let operand2 = self.translate_operand(&instruction.operands()[2]);
+                let zero = self.builder.ins().iconst(I8, 0);
+                let (result, nzcv) = self.add_with_carry(operand1, operand2, operand2, zero);
+                self.builder.def_var(target, result);
+                self.update_nzcv(nzcv);
+            }
             Op::ADDV => todo!(),
             Op::ADDVA => todo!(),
             Op::ADDVL => todo!(),
