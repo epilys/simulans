@@ -577,38 +577,25 @@ impl BlockTranslator<'_> {
         &mut self,
         x: Value,
         y: Value,
-        orig_y: Value,
+        _orig_y: Value,
         carry_in: Value,
     ) -> (Value, [Value; 4]) {
-        let (mut unsigned_sum, mut overflow_1) = self.builder.ins().uadd_overflow(x, y);
+        let carry_in = self.builder.ins().uextend(I64, carry_in);
+        let (signed_sum, mut overflow) = self.builder.ins().sadd_overflow(x, y);
         {
-            let (carry_add, carry_overflow) =
-                self.builder.ins().uadd_overflow(unsigned_sum, carry_in);
-            unsigned_sum = carry_add;
-            overflow_1 = self.builder.ins().bor(overflow_1, carry_overflow);
-            _ = overflow_1;
+            let (_, carry_overflow) = self.builder.ins().sadd_overflow(signed_sum, carry_in);
+            overflow = self.builder.ins().bor(overflow, carry_overflow);
         }
-        let (mut signed_sum, mut overflow_2) = self.builder.ins().sadd_overflow(x, y);
-        {
-            let (carry_add, carry_overflow) =
-                self.builder.ins().sadd_overflow(signed_sum, carry_in);
-            signed_sum = carry_add;
-            overflow_2 = self.builder.ins().bor(overflow_2, carry_overflow);
-        }
-        let result = self
-            .builder
-            .ins()
-            .band_imm(unsigned_sum, (u64::MAX & !(1 << 63)) as i64);
+        let (result, overflow_2) = self.builder.ins().uadd_overflow(x, y);
+        let (result, mut carry_out) = self.builder.ins().uadd_overflow(result, carry_in);
+        carry_out = self.builder.ins().bor(overflow_2, carry_out);
         let n = self
             .builder
             .ins()
-            .icmp_imm(IntCC::SignedLessThan, signed_sum, 0);
-        let z = self.builder.ins().icmp(IntCC::Equal, x, orig_y);
-        let c = self
-            .builder
-            .ins()
-            .icmp(IntCC::UnsignedGreaterThanOrEqual, x, orig_y);
-        let v = self.builder.ins().icmp_imm(IntCC::NotEqual, overflow_2, 0);
+            .icmp_imm(IntCC::SignedLessThan, result, 0);
+        let z = self.builder.ins().icmp_imm(IntCC::Equal, result, 0);
+        let c = self.builder.ins().icmp_imm(IntCC::NotEqual, carry_out, 0);
+        let v = self.builder.ins().icmp_imm(IntCC::NotEqual, overflow, 0);
         let n = self.builder.ins().uextend(I64, n);
         let z = self.builder.ins().uextend(I64, z);
         let c = self.builder.ins().uextend(I64, c);
@@ -1757,7 +1744,7 @@ impl BlockTranslator<'_> {
                 let operand1 = self.translate_operand(&instruction.operands()[1]);
                 let operand2 = self.translate_operand(&instruction.operands()[2]);
                 let negoperand2 = self.builder.ins().bnot(operand2);
-                let one = self.builder.ins().iconst(I64, 1);
+                let one = self.builder.ins().iconst(I8, 1);
                 let (result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, one);
                 self.builder.def_var(target, result);
                 self.update_nzcv(nzcv);
@@ -2116,9 +2103,8 @@ impl BlockTranslator<'_> {
                 };
                 let operand1 = self.translate_operand(&instruction.operands()[1]);
                 let operand2 = self.translate_operand(&instruction.operands()[2]);
-                let negoperand2 = self.builder.ins().bnot(operand2);
                 let carry_in = self.condition_holds(bad64::Condition::CS);
-                let (result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, carry_in);
+                let (result, nzcv) = self.add_with_carry(operand1, operand2, operand2, carry_in);
                 self.builder.def_var(target, result);
                 self.update_nzcv(nzcv);
             }
@@ -2302,7 +2288,7 @@ impl BlockTranslator<'_> {
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
                 let operand2 = self.translate_operand(&instruction.operands()[1]);
                 let negoperand2 = self.builder.ins().bnot(operand2);
-                let one = self.builder.ins().iconst(I64, 1);
+                let one = self.builder.ins().iconst(I8, 1);
                 let (_result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, one);
                 // discard result, only update NZCV flags.
                 self.update_nzcv(nzcv);
@@ -2368,7 +2354,7 @@ impl BlockTranslator<'_> {
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
                 let operand2 = self.translate_operand(&instruction.operands()[1]);
                 let negoperand2 = self.builder.ins().bnot(operand2);
-                let one = self.builder.ins().iconst(I64, 1);
+                let one = self.builder.ins().iconst(I8, 1);
                 let (_result, nzcv) = self.add_with_carry(operand1, negoperand2, operand2, one);
                 // discard result, only update NZCV flags.
                 self.update_nzcv(nzcv);
