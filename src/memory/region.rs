@@ -136,6 +136,13 @@ mod linux {
         }
     }
 
+    impl std::ops::DerefMut for MmappedMemory {
+        #[inline]
+        fn deref_mut(&mut self) -> &mut [u8] {
+            self.map.deref_mut()
+        }
+    }
+
     impl AsRef<[u8]> for MmappedMemory {
         #[inline]
         fn as_ref(&self) -> &[u8] {
@@ -256,7 +263,7 @@ mod macos {
     }
 }
 
-pub trait DeviceMemoryOps: std::fmt::Debug {
+pub trait DeviceMemoryOps: std::fmt::Debug + Send + Sync {
     fn id(&self) -> u64;
     fn read(&self, address_inside_region: u64, width: Width) -> u64;
     fn write(&self, address_inside_region: u64, value: u64, width: Width);

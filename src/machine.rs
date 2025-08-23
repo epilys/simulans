@@ -70,6 +70,7 @@ pub struct Armv8AMachine {
     pub lookup_entry_func: Entry,
     pub hw_breakpoints: BTreeSet<Address>,
     pub halted: u8,
+    pub in_breakpoint: bool,
 }
 
 impl Armv8AMachine {
@@ -83,6 +84,7 @@ impl Armv8AMachine {
             lookup_entry_func: Entry(lookup_entry),
             hw_breakpoints: BTreeSet::new(),
             halted: 0,
+            in_breakpoint: false,
         })
     }
 
