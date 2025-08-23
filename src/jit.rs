@@ -784,13 +784,63 @@ impl BlockTranslator<'_> {
                 ref reg,
                 arrspec: None,
             } => self.reg_to_value(reg),
-            Operand::ShiftReg {
-                ref reg,
-                shift: bad64::Shift::LSL(lsl),
-            } => {
+            Operand::ShiftReg { ref reg, shift } => {
+                use bad64::Shift;
+
                 let value = self.reg_to_value(reg);
-                let lsl = self.builder.ins().iconst(I64, i64::from(*lsl));
-                self.builder.ins().ishl(value, lsl)
+                match shift {
+                    Shift::LSL(lsl) => self.builder.ins().ishl_imm(value, i64::from(*lsl)),
+                    Shift::LSR(lsr) => self.builder.ins().ushr_imm(value, i64::from(*lsr)),
+                    Shift::ASR(_asr) => {
+                        todo!()
+                    }
+                    Shift::ROR(ror) => self.builder.ins().rotr_imm(value, i64::from(*ror)),
+                    Shift::UXTW(uxtw) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().band_imm(value, u32::MAX as i64);
+                        if *uxtw == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*uxtw))
+                        }
+                    }
+                    Shift::SXTW(_sxtw) => {
+                        todo!()
+                    }
+                    Shift::SXTX(_sxtx) => {
+                        todo!()
+                    }
+                    Shift::UXTX(_uxtx) => {
+                        todo!()
+                    }
+                    Shift::SXTB(_sxtb) => {
+                        todo!()
+                    }
+                    Shift::SXTH(_sxth) => {
+                        todo!()
+                    }
+                    Shift::UXTH(uxth) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().band_imm(value, u16::MAX as i64);
+                        if *uxth == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*uxth))
+                        }
+                    }
+                    Shift::UXTB(uxtb) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().band_imm(value, u8::MAX as i64);
+                        if *uxtb == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*uxtb))
+                        }
+                    }
+                    Shift::MSL(_msl) => {
+                        todo!()
+                    }
+                }
             }
             Operand::MemPreIdx { ref reg, imm } => {
                 let reg_val = self.reg_to_value(reg);
