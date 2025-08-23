@@ -729,19 +729,19 @@ mod registers {
         /// or not.
         pub busy: bool,
         /// RXFE Receive FIFO empty. The meaning of this bit depends on the
-        /// state of the FEN bit in the UARTLCR_H register. If the FIFO
+        /// state of the FEN bit in the `UARTLCR_H` register. If the FIFO
         /// is disabled, this bit is set when the receive holding
         /// register is empty. If the FIFO is enabled, the RXFE bit is
         /// set when the receive FIFO is empty.
         pub receive_fifo_empty: bool,
         /// TXFF Transmit FIFO full. The meaning of this bit depends on the
-        /// state of the FEN bit in the UARTLCR_H register. If the FIFO
+        /// state of the FEN bit in the `UARTLCR_H` register. If the FIFO
         /// is disabled, this bit is set when the transmit holding
         /// register is full. If the FIFO is enabled, the TXFF bit is
         /// set when the transmit FIFO is full.
         pub transmit_fifo_full: bool,
         /// RXFF Receive FIFO full. The meaning of this bit depends on the state
-        /// of the FEN bit in the UARTLCR_H register. If the FIFO is
+        /// of the FEN bit in the `UARTLCR_H` register. If the FIFO is
         /// disabled, this bit is set when the receive holding register
         /// is full. If the FIFO is enabled, the RXFF bit is set when
         /// the receive FIFO is full.
@@ -907,21 +907,22 @@ mod registers {
         /// transmission and reception occurs for either UART signals or SIR
         /// signals depending on the setting of the SIREN bit.
         pub enable_uart: bool,
-        /// `SIREN` `SIR` enable: 0 = IrDA SIR ENDEC is disabled. `nSIROUT`
+        /// `SIREN` `SIR` enable: 0 = `IrDA` SIR ENDEC is disabled. `nSIROUT`
         /// remains LOW (no light pulse generated), and signal transitions on
-        /// SIRIN have no effect. 1 = IrDA SIR ENDEC is enabled. Data is
+        /// SIRIN have no effect. 1 = `IrDA` SIR ENDEC is enabled. Data is
         /// transmitted and received on nSIROUT and SIRIN. UARTTXD remains HIGH,
         /// in the marking state. Signal transitions on UARTRXD or modem status
         /// inputs have no effect. This bit has no effect if the UARTEN bit
         /// disables the UART.
         pub enable_sir: bool,
-        /// `SIRLP` SIR low-power IrDA mode. This bit selects the IrDA encoding
-        /// mode. If this bit is cleared to 0, low-level bits are transmitted as
-        /// an active high pulse with a width of 3/ 16th of the bit period. If
-        /// this bit is set to 1, low-level bits are transmitted with a pulse
-        /// width that is 3 times the period of the IrLPBaud16 input signal,
-        /// regardless of the selected bit rate. Setting this bit uses less
-        /// power, but might reduce transmission distances.
+        /// `SIRLP` SIR low-power `IrDA` mode. This bit selects the `IrDA`
+        /// encoding mode. If this bit is cleared to 0, low-level bits
+        /// are transmitted as an active high pulse with a width of 3/
+        /// 16th of the bit period. If this bit is set to 1, low-level
+        /// bits are transmitted with a pulse width that is 3 times the
+        /// period of the `IrLPBaud16` input signal, regardless of the
+        /// selected bit rate. Setting this bit uses less power, but
+        /// might reduce transmission distances.
         pub sir_lowpower_irda_mode: u1,
         /// Reserved, do not modify, read as zero.
         _reserved_zero_no_modify: u4,
