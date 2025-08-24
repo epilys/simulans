@@ -2313,7 +2313,36 @@ impl BlockTranslator<'_> {
             Op::BFMMLA => todo!(),
             Op::BFMOPA => todo!(),
             Op::BFMOPS => todo!(),
-            Op::BFXIL => todo!(),
+            Op::BFXIL => {
+                // Bitfield Extract and Insert Low (alias of BFM)
+                // [ref:needs_unit_test]
+                // [ref:verify_implementation]: I wrote this quickly
+                let destination = get_destination_register!();
+                let dst_val = self.translate_operand(&instruction.operands()[0]);
+                let source = self.translate_operand(&instruction.operands()[1]);
+                let lsb: i64 = match instruction.operands()[2] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(lsb),
+                        shift: None,
+                    } => lsb.try_into().unwrap(),
+                    other => unexpected_operand!(other),
+                };
+                let source = self.builder.ins().rotr_imm(source, lsb);
+                let w: i64 = match instruction.operands()[3] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(w),
+                        shift: None,
+                    } => w.try_into().unwrap(),
+                    other => unexpected_operand!(other),
+                };
+                let source = self.builder.ins().band_imm(source, 2_i64.pow(w as u32) - 1);
+                let dst_val = self
+                    .builder
+                    .ins()
+                    .band_imm(dst_val, !(2_i64.pow(w as u32) - 1));
+                let result = self.builder.ins().bor(source, dst_val);
+                self.builder.def_var(destination, result);
+            }
             Op::BGRP => todo!(),
             Op::BIC => todo!(),
             Op::BICS => {
