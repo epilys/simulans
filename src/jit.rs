@@ -3220,7 +3220,11 @@ impl BlockTranslator<'_> {
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
-                let value = self.builder.ins().ineg(value);
+                let mut value = self.builder.ins().ineg(value);
+                let width = self.operand_width(&instruction.operands()[0]);
+                if width == Width::_32 {
+                    value = self.builder.ins().band_imm(value, i64::from(u32::MAX));
+                }
                 self.builder.def_var(target, value);
             }
             Op::NEGS => todo!(),
