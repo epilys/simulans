@@ -1667,6 +1667,19 @@ impl BlockTranslator<'_> {
                 let value = self.builder.ins().uextend(I64, value);
                 self.builder.def_var(target, value)
             }
+            Op::LDURH => {
+                let target = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: None,
+                    } => *self.reg_to_var(reg, true),
+                    other => unexpected_operand!(other),
+                };
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read(source_address, Width::_16);
+                let value = self.builder.ins().uextend(I64, value);
+                self.builder.def_var(target, value)
+            }
             Op::LDRSB => {
                 // Load register signed byte (register)
 
@@ -3165,7 +3178,6 @@ impl BlockTranslator<'_> {
             Op::LDUMINL => todo!(),
             Op::LDUMINLB => todo!(),
             Op::LDUMINLH => todo!(),
-            Op::LDURH => todo!(),
             Op::LDURSB => todo!(),
             Op::LDURSH => todo!(),
             Op::LDURSW => todo!(),
