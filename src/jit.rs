@@ -2304,9 +2304,10 @@ impl BlockTranslator<'_> {
             Op::BGRP => todo!(),
             Op::BIC => todo!(),
             Op::BICS => {
+                // [ref:needs_unit_test]
                 let destination = get_destination_register!();
-                let a = self.translate_operand(&instruction.operands()[0]);
-                let b = self.translate_operand(&instruction.operands()[1]);
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
                 let negb = self.builder.ins().bnot(b);
                 let (result, nzcv) = ands!(a, negb);
                 self.update_nzcv(nzcv);
