@@ -57,7 +57,7 @@ You can also view current register state and assembly by enabling the `asm` and 
 The code generation for emulated instructions happens in the [`jit`
 module](./src/jit.rs) in the `BlockTranslator::translate_instruction` function.
 
-So far unimplemented instrunctions have a `todo!()` stub which you can replace with the JIT generation logic.
+So far unimplemented instructions have a `todo!()` stub which you can replace with the JIT generation logic.
 
 ### Special register logic
 
@@ -83,7 +83,7 @@ You can print a disassembly of the current instruction with `x/i $pc` (`x` is to
 Note: If you want the `machine.pc` field to accurately reflect the emulated (not native) program counter, enable the `accurate-pc` Cargo feature.
 This adds an extra store operation of the instruction address to `machine.pc` before each emulated instruction.
 
-If you want to step-by-step execute instrunctions, it might be useful to print the current instruction on each `stepi`.
+If you want to step-by-step execute instructions, it might be useful to print the current instruction on each `stepi`.
 You can do this by defining a hook:
 
 ```text
