@@ -160,7 +160,7 @@ pub enum ArchMode {
 }
 
 #[bitsize(1)]
-#[derive(Default, FromBits, Debug)]
+#[derive(Copy, Clone, Default, FromBits, Debug)]
 /// Stack register selector, part of [`PSTATE`].
 pub enum SpSel {
     #[default]
