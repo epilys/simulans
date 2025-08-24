@@ -1680,7 +1680,7 @@ impl BlockTranslator<'_> {
                 let value = self.builder.ins().uextend(I64, value);
                 self.builder.def_var(target, value)
             }
-            Op::LDRSB => {
+            Op::LDURSB | Op::LDRSB => {
                 // Load register signed byte (register)
 
                 // This instruction calculates an address from a base register value and an
@@ -3178,7 +3178,6 @@ impl BlockTranslator<'_> {
             Op::LDUMINL => todo!(),
             Op::LDUMINLB => todo!(),
             Op::LDUMINLH => todo!(),
-            Op::LDURSB => todo!(),
             Op::LDURSH => todo!(),
             Op::LDURSW => todo!(),
             Op::LDXP => todo!(),
