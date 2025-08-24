@@ -279,10 +279,10 @@ impl GdbStubRunner {
         value: &[u8],
     ) -> TargetResult<(), GdbStub> {
         let start_address = Address(start_address);
-        info!("reading memory from {}", start_address);
+        info!("writing to {} in memory", start_address);
         let Some(mem_region) = self.machine.memory.find_region_mut(start_address) else {
             error!(
-                "Cannot read from address {} which is not covered by a RAM memory region.",
+                "Cannot write to address {} which is not covered by a RAM memory region.",
                 start_address
             );
             return Err(TargetError::NonFatal);
@@ -290,7 +290,7 @@ impl GdbStubRunner {
         let address_inside_region = start_address.0 - mem_region.phys_offset.0;
         let Some(mmapped_region) = mem_region.as_mmap_mut() else {
             error!(
-                "Cannot read from address {} which is mapped to device memory",
+                "Cannot write to address {} which is mapped to device memory",
                 start_address
             );
             return Err(TargetError::NonFatal);
