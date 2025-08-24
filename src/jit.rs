@@ -2480,7 +2480,15 @@ impl BlockTranslator<'_> {
             Op::CMLA => todo!(),
             Op::CMLE => todo!(),
             Op::CMLT => todo!(),
-            Op::CMN => todo!(),
+            Op::CMN => {
+                // Compare Negative (Alias of ADDS)
+                // [ref:needs_unit_test]
+                let operand1 = self.translate_operand(&instruction.operands()[0]);
+                let operand2 = self.translate_operand(&instruction.operands()[1]);
+                let zero = self.builder.ins().iconst(I8, 0);
+                let (_result, nzcv) = self.add_with_carry(operand1, operand2, operand2, zero);
+                self.update_nzcv(nzcv);
+            }
             Op::CMP => {
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
                 let operand2 = self.translate_operand(&instruction.operands()[1]);
