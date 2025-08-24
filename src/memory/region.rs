@@ -165,6 +165,9 @@ mod macos {
         pub read_only: bool,
     }
 
+    // SAFETY: no one else has access to `map` field
+    unsafe impl Send for MmappedMemory {}
+
     impl Drop for MmappedMemory {
         fn drop(&mut self) {
             // SAFETY: `self.map` is a valid mmapped ptr of this size.
@@ -196,7 +199,6 @@ mod macos {
             size: MemorySize,
             phys_offset: Address,
         ) -> Result<super::MemoryRegion, Errno> {
-            //unsafe { pthread_jit_write_protect_np(false.into()) };
             {
                 extern "C" {
                     fn pthread_jit_write_protect_np(_: bool);
@@ -227,11 +229,13 @@ mod macos {
         }
 
         #[inline]
-        pub const fn as_ptr(&self) -> *const u8 {
+        #[allow(clippy::missing_const_for_fn)]
+        pub fn as_ptr(&self) -> *const u8 {
             self.map.as_ptr().cast()
         }
 
         #[inline]
+        #[allow(clippy::missing_const_for_fn)]
         pub fn as_mut_ptr(&mut self) -> *mut u8 {
             self.map.as_ptr().cast()
         }
