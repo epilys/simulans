@@ -149,7 +149,7 @@ pub enum CurrentEL {
 }
 
 #[bitsize(1)]
-#[derive(Default, FromBits, Debug)]
+#[derive(Copy, Clone, Default, FromBits, Debug)]
 /// Architectural mode, part of [`PSTATE`].
 ///
 /// We only support `Aarch64` mode, but add an enum for it for completeness.
