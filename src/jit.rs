@@ -41,6 +41,11 @@ use crate::{
     memory::{Address, Width},
 };
 
+enum BlockExit {
+    Branch(Value),
+    Exception,
+}
+
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 /// An "entry" function for a block.
@@ -437,12 +442,12 @@ impl JitContext {
             } else if self.single_step {
                 // [ref:FIXME]: If single stepping and program_counter + 4, we will receive an unmapped PC
                 // for the next translation block.
-                next_pc = Some(
+                next_pc = Some(BlockExit::Branch(
                     trans
                         .builder
                         .ins()
                         .iconst(I64, (program_counter + 4) as i64),
-                );
+                ));
             } else {
                 for insn in decoded_iter {
                     match insn {
@@ -456,8 +461,9 @@ impl JitContext {
                             if !machine.hw_breakpoints.is_empty()
                                 && machine.hw_breakpoints.contains(&Address(insn.address()))
                             {
-                                next_pc =
-                                    Some(trans.builder.ins().iconst(I64, insn.address() as i64));
+                                next_pc = Some(BlockExit::Branch(
+                                    trans.builder.ins().iconst(I64, insn.address() as i64),
+                                ));
                                 break;
                             }
                             last_pc = insn.address();
@@ -475,11 +481,17 @@ impl JitContext {
                 }
             }
         }
-        if let Some(next_pc) = next_pc {
-            trans.emit_jump(prev_pc, next_pc);
-        } else {
-            // We are out of code, so halt the machine
-            trans.emit_halt();
+        match next_pc {
+            Some(BlockExit::Branch(next_pc)) => {
+                trans.emit_jump(prev_pc, next_pc);
+            }
+            Some(BlockExit::Exception) => {
+                // Do nothing
+            }
+            None => {
+                // We are out of code, so halt the machine
+                trans.emit_halt();
+            }
         }
         let BlockTranslator { builder, .. } = trans;
 
@@ -494,8 +506,8 @@ struct BlockTranslator<'a> {
     write_to_sysreg: bool,
     write_to_simd: bool,
     builder: FunctionBuilder<'a>,
-    cpu_state: &'a mut ExecutionState,
     module: &'a JITModule,
+    cpu_state: &'a mut ExecutionState,
     machine_ptr: Value,
     pointer_type: Type,
     registers_print_func: Value,
@@ -1328,7 +1340,7 @@ impl BlockTranslator<'_> {
     fn translate_instruction(
         &mut self,
         instruction: &bad64::Instruction,
-    ) -> ControlFlow<Option<Value>> {
+    ) -> ControlFlow<Option<BlockExit>> {
         use bad64::Op;
 
         if cfg!(feature = "accurate-pc") {
@@ -4096,26 +4108,23 @@ impl BlockTranslator<'_> {
             Op::UCLAMP => todo!(),
             Op::UCVTF => todo!(),
             Op::UDF => {
-                // [ref:can_trap]: always traps
-                // [ref:FIXME]: Trap:
-                // <https://developer.arm.com/documentation/ddi0602/2024-12/Shared-Pseudocode/aarch64-exceptions-traps?lang=en#aarch64.exceptions.traps.AArch64.Undefined>
-
-                // AArch64.Undefined()
-                //
-                //     route_to_el2 = PSTATE.EL == EL0 && EL2Enabled() && HCR_EL2.TGE == '1';
-                //     constant bits(64) preferred_exception_return = ThisInstrAddr(64);
-                //     vect_offset = 0x0;
-                //
-                //     except = ExceptionSyndrome(Exception_Uncategorized);
-                //
-                //     if UInt(PSTATE.EL) > UInt(EL1) then
-                //         AArch64.TakeException(PSTATE.EL, except, preferred_exception_return,
-                // vect_offset);     elsif route_to_el2 then
-                //         AArch64.TakeException(EL2, except, preferred_exception_return,
-                // vect_offset);     else
-                //         AArch64.TakeException(EL1, except, preferred_exception_return,
-                // vect_offset);
-                return ControlFlow::Break(None);
+                let sigref = {
+                    let mut sig = self.module.make_signature();
+                    sig.params.push(AbiParam::new(self.pointer_type));
+                    sig.params.push(AbiParam::new(self.pointer_type));
+                    self.builder.import_signature(sig)
+                };
+                let func = self.builder.ins().iconst(
+                    I64,
+                    crate::aarch64::aarch64_undefined as usize as u64 as i64,
+                );
+                let pc = self.builder.ins().iconst(I64, instruction.address() as i64);
+                return self.emit_indirect_noreturn(
+                    instruction.address(),
+                    sigref,
+                    func,
+                    &[self.machine_ptr, pc],
+                );
             }
             Op::UDIVR => todo!(),
             Op::UDOT => todo!(),
@@ -4385,7 +4394,7 @@ impl BlockTranslator<'_> {
         &mut self,
         source_instruction: &bad64::Instruction,
         dest_label: Value,
-    ) -> ControlFlow<Option<Value>> {
+    ) -> ControlFlow<Option<BlockExit>> {
         // [ref:can_trap]: Check `dest_label` alignment.
         if cfg!(feature = "accurate-pc") {
             let pc = self
@@ -4405,6 +4414,68 @@ impl BlockTranslator<'_> {
             self.machine_ptr,
             std::mem::offset_of!(Armv8AMachine, pc) as i32,
         );
-        ControlFlow::Break(Some(dest_label))
+        ControlFlow::Break(Some(BlockExit::Branch(dest_label)))
+    }
+
+    /// Save state and call a simulans function that stops execution
+    fn emit_indirect_noreturn(
+        &mut self,
+        pc: u64,
+        sig: codegen::ir::SigRef,
+        callee: codegen::ir::Value,
+        args: &[Value],
+    ) -> ControlFlow<Option<BlockExit>> {
+        _ = self.indirect_call(pc, sig, callee, args);
+        let translate_func = self
+            .builder
+            .ins()
+            .iconst(I64, lookup_entry as usize as u64 as i64);
+        self.builder.ins().return_(&[translate_func]);
+        ControlFlow::Break(Some(BlockExit::Exception))
+    }
+
+    /// Save state and call a helper function
+    fn indirect_call(
+        &mut self,
+        pc: u64,
+        sig: codegen::ir::SigRef,
+        callee: codegen::ir::Value,
+        args: &[Value],
+    ) -> &[Value] {
+        {
+            let Self {
+                write_to_sysreg,
+                write_to_simd,
+                ref mut cpu_state,
+                ref mut builder,
+                ref registers,
+                ref sys_registers,
+                ..
+            } = self;
+            cpu_state.save_cpu_state(
+                builder,
+                registers,
+                sys_registers,
+                *write_to_sysreg,
+                *write_to_simd,
+            );
+        }
+        let pc = self.builder.ins().iconst(I64, pc as i64);
+        if cfg!(feature = "accurate-pc") {
+            self.builder.ins().store(
+                MemFlags::trusted(),
+                pc,
+                self.machine_ptr,
+                std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
+            );
+        }
+        self.builder.ins().store(
+            MemFlags::trusted(),
+            pc,
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, pc) as i32,
+        );
+        let call = self.builder.ins().call_indirect(sig, callee, args);
+        self.builder.inst_results(call)
     }
 }

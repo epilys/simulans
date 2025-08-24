@@ -132,18 +132,19 @@ pub struct RegisterFile {
     ///
     /// Controls Secure state and trapping of exceptions to EL3
     pub scr_el3: u64,
-    // pub spsr_el1: SavedProgramStatusRegister,
-    // pub spsr_el2: SavedProgramStatusRegister,
+    pub spsr_el1: SavedProgramStatusRegister,
+    pub spsr_el2: SavedProgramStatusRegister,
     pub spsr_el3: SavedProgramStatusRegister,
     pub elr_el1: u64,
     pub elr_el2: u64,
     pub elr_el3: u64,
+    pub esr_el1: u64,
     pub nzcv: NZCV,
 }
 
 #[bitsize(2)]
-#[derive(Copy, Clone, Default, FromBits, Debug)]
-/// Current exception level, part of [`PSTATE`].
+#[derive(Copy, Clone, Default, FromBits, Debug, Eq, PartialEq)]
+/// Exception level
 pub enum ExceptionLevel {
     EL0 = 0b00,
     #[default]
@@ -271,6 +272,101 @@ pub struct PSTATE {
     pub _res0: u50,
 }
 
+/// Classes of exception.
+#[derive(Copy, Clone, Debug)]
+pub enum Exception {
+    /// Uncategorized or unknown reason
+    Uncategorized,
+    /// Trapped WFI or WFE instruction
+    WFxTrap,
+    // /// Trapped AArch32 MCR or MRC access, coproc=0b111
+    // CP15RTTrap,
+    // /// Trapped AArch32 MCRR or MRRC access, coproc=0b1111
+    // CP15RRTTrap,
+    // /// Trapped AArch32 MCR or MRC access, coproc=0b1110
+    // CP14RTTrap,
+    // /// Trapped AArch32 LDC or STC access, coproc=0b1110
+    // CP14DTTrap,
+    // // Trapped AArch32 MRRC access, coproc=0b1110
+    // CP14RRTTrap,
+    /// HCPTR-trapped access to SIMD or FP
+    //AdvSIMDFPAccessTrap,
+    /// Trapped access to SIMD or FP ID register
+    //FPIDTrap,
+    /// Trapped access to ST64BV, ST64BV0, ST64B and LD64B
+    //LDST64BTrap,
+    // Trapped BXJ instruction not supported in Armv8
+    /// Trapped invalid PAC use
+    //PACTrap,
+    /// Illegal Execution state
+    IllegalState,
+    /// Supervisor Call
+    SupervisorCall,
+    /// Hypervisor Call
+    HypervisorCall,
+    /// Monitor Call or Trapped SMC instruction
+    MonitorCall,
+    /// Trapped MRS or MSR System register access
+    SystemRegisterTrap,
+    /// Trapped invalid ERET use
+    ERetTrap,
+    /// Instruction Abort or Prefetch Abort
+    InstructionAbort,
+    /// PC alignment fault
+    PCAlignment,
+    /// Data Abort
+    DataAbort,
+    /// Data abort at EL1 reported as being from EL2
+    NV2DataAbort,
+    /// PAC Authentication failure
+    PACFail,
+    /// SP alignment fault
+    SPAlignment,
+    /// IEEE trapped FP exception
+    FPTrappedException,
+    /// `SError` interrupt
+    SError,
+    /// (Hardware) Breakpoint
+    Breakpoint,
+    /// Software Step
+    SoftwareStep,
+    /// Watchpoint
+    Watchpoint,
+    /// Watchpoint at EL1 reported as being from EL2
+    NV2Watchpoint,
+    /// Software Breakpoint Instruction
+    SoftwareBreakpoint,
+    // /// AArch32 Vector Catch
+    // VectorCatch,
+    /// IRQ interrupt
+    IRQ,
+    // // HCPTR trapped access to SVE
+    // SVEAccessTrap,
+    // // HCPTR trapped access to SME
+    // SMEAccessTrap,
+    // // Trapped TSTART access
+    // TSTARTAccessTrap,
+    // // Granule protection check
+    // GPC,
+    // // Branch Target Identification
+    // BranchTarget,
+    // // Exception from a CPY* or SET* instruction
+    // MemCpyMemSet,
+    // // GCS Exceptions
+    // GCSFail,
+    // // Profiling exception
+    // Profiling,
+    // // Trapped MRRS or MSRR System register or SYSP access
+    // SystemRegister128Trap,
+    /// FIQ interrupt
+    FIQ,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ExitRequest {
+    Exception(Exception),
+}
+
 #[repr(C)]
 #[derive(Default, Debug)]
 pub struct ExecutionState {
@@ -280,6 +376,7 @@ pub struct ExecutionState {
     pub vector_registers: [(u64, u64); 32],
     /// Process Element state.
     pub pstate: PSTATE,
+    pub exit_request: Option<ExitRequest>,
     /// Architectural features this CPU supports.
     pub arch_features: ArchFeatures,
 }
@@ -348,6 +445,8 @@ impl ExecutionState {
             elr_el1 => SysReg::ELR_EL1,
             elr_el2 => SysReg::ELR_EL2,
             elr_el3 => SysReg::ELR_EL3,
+            spsr_el1 => SysReg::SPSR_EL1,
+            esr_el1 => SysReg::ESR_EL1,
             nzcv => SysReg::NZCV,
         }
         reg_field! {
@@ -479,6 +578,8 @@ impl ExecutionState {
                 elr_el1 => SysReg::ELR_EL1,
                 elr_el2 => SysReg::ELR_EL2,
                 elr_el3 => SysReg::ELR_EL3,
+                spsr_el1 => SysReg::SPSR_EL1,
+                esr_el1 => SysReg::ESR_EL1,
                 nzcv => SysReg::NZCV,
             };
         }
@@ -541,6 +642,48 @@ impl ExecutionState {
                     offset + std::mem::size_of::<u64>() as i32,
                 );
             }
+        }
+    }
+
+    pub const fn EL2_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn have_el(&self, el: ExceptionLevel) -> bool {
+        matches!(el, ExceptionLevel::EL0 | ExceptionLevel::EL1)
+    }
+
+    pub fn vbar_elx(&self) -> u64 {
+        match self.pstate.EL() {
+            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.vbar_el1,
+            other => unimplemented!("other vbar for {other:?}"),
+        }
+    }
+
+    pub fn set_elr_elx(&mut self, val: u64) {
+        match self.pstate.EL() {
+            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.elr_el1 = val,
+            ExceptionLevel::EL2 => self.registers.elr_el2 = val,
+            ExceptionLevel::EL3 => self.registers.elr_el3 = val,
+        }
+    }
+
+    pub fn psr_from_PSTATE(&self) -> SavedProgramStatusRegister {
+        let mut spsr = SavedProgramStatusRegister::from(0);
+        spsr.set_NZCV(self.registers.nzcv.fields());
+        spsr.set_DAIF(self.pstate.DAIF());
+        spsr.set_SS(self.pstate.SS());
+        spsr.set_IL(self.pstate.IL());
+        spsr.set_nRW(ArchMode::_64);
+        spsr.set_M(Mode::EL1h);
+        spsr
+    }
+
+    pub fn set_spsr_elx(&mut self, val: SavedProgramStatusRegister) {
+        match self.pstate.EL() {
+            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.spsr_el1 = val,
+            ExceptionLevel::EL2 => self.registers.spsr_el2 = val,
+            ExceptionLevel::EL3 => self.registers.spsr_el3 = val,
         }
     }
 }

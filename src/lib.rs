@@ -112,6 +112,7 @@ core::compile_error!("Can only be compiled on targets with 64bit address support
 
 use std::sync::atomic::Ordering;
 
+pub mod aarch64;
 pub mod cpu_state;
 pub mod devices;
 pub mod fdt;
