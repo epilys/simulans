@@ -189,3 +189,37 @@ fn test_bitfields() {
     assert_hex_eq!(machine.cpu_state.registers.x4, 0x55555555 & 0b11111);
     assert_hex_eq!(machine.cpu_state.registers.x5, (0x55555555 & 0b1) << 63);
 }
+
+#[test]
+fn test_bitfields_2() {
+    _ = env_logger::builder().is_test(true).try_init();
+
+    // ```asm
+    // // load a 64-bit immediate using MOV
+    // .macro movq Xn, imm
+    //   movz    \Xn,  \imm & 0xFFFF
+    //   movk    \Xn, (\imm >> 16) & 0xFFFF, lsl 16
+    //   movk    \Xn, (\imm >> 32) & 0xFFFF, lsl 32
+    //   movk    \Xn, (\imm >> 48) & 0xFFFF, lsl 48
+    // .endm
+    //
+    // movq x0, 0x1c80
+    // ubfx	w2, w0, #2, #14
+    // ```
+
+    const TEST_INPUT: &[u8] =
+        b"\x00\x90\x83\xd2\x00\x00\xa0\xf2\x00\x00\xc0\xf2\x00\x00\xe0\xf2\x02\x3c\x02\x53";
+
+    // _ = simulans::disas(TEST_INPUT, 0);
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    let memory = MemoryMap::builder(MEMORY_SIZE)
+        .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
+        .unwrap()
+        .build();
+    let mut machine = machine::Armv8AMachine::new(memory);
+
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+    assert_hex_eq!(machine.cpu_state.registers.x2, 0x720);
+}
