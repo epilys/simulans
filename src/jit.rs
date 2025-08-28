@@ -406,6 +406,8 @@ impl JitContext {
                 prev_pc = first.address();
                 next_pc = jump_pc;
             } else if self.single_step {
+                // [ref:FIXME]: If single stepping and program_counter + 4, we will receive an unmapped PC
+                // for the next translation block.
                 next_pc = Some(
                     trans
                         .builder
