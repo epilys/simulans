@@ -400,6 +400,8 @@ impl JitContext {
         if let Some(first) = decoded_iter.next() {
             let first = first.map_err(|err| format!("Error decoding instruction: {}", err))?;
             last_pc = first.address();
+            log::trace!("{:#?}", first);
+            log::trace!("0x{:x}: {}", first.address(), first);
             if let ControlFlow::Break(jump_pc) = trans.translate_instruction(&first) {
                 prev_pc = first.address();
                 next_pc = jump_pc;
