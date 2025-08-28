@@ -101,10 +101,9 @@ impl FdtBuilder {
 
         {
             let mem_reg_prop = [self.phys_mem_start.0, self.mem_size.get()];
-
-            let memory_node = fdt.begin_node("memory")?;
-            fdt.property_array_u64("reg", &mem_reg_prop)?;
+            let memory_node = fdt.begin_node(&format!("memory@{}", self.phys_mem_start.0))?;
             fdt.property_string("device_type", "memory")?;
+            fdt.property_array_u64("reg", &mem_reg_prop)?;
             fdt.end_node(memory_node)?;
         }
         {
