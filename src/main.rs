@@ -74,14 +74,14 @@ mod cli;
 use cli::Args;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
     let args = Args::parse()?;
-    match args.verbose {
-        0 => log::set_max_level(log::LevelFilter::Error),
-        1 => log::set_max_level(log::LevelFilter::Info),
-        2 => log::set_max_level(log::LevelFilter::Debug),
-        _ => log::set_max_level(log::LevelFilter::Trace),
-    }
+    let log_level = match args.verbose {
+        0 => log::LevelFilter::Error,
+        1 => log::LevelFilter::Info,
+        2 => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Trace,
+    };
+    env_logger::Builder::new().filter_level(log_level).init();
     run_app(args)?;
     Ok(())
 }
