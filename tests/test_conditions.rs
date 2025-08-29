@@ -205,7 +205,7 @@ fn test_conditional_execution() {
     // _ = simulans::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     {
-        let memory = MemoryMap::builder(MEMORY_SIZE)
+        let memory = MemoryMap::builder()
             .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
             .unwrap()
             .build();
@@ -345,7 +345,7 @@ fn test_cmp_nzcv() {
     // _ = simulans::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     {
-        let memory = MemoryMap::builder(MEMORY_SIZE)
+        let memory = MemoryMap::builder()
             .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
             .unwrap()
             .build();
@@ -477,7 +477,7 @@ fn test_cmp_b_cnd() {
     _ = simulans::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     {
-        let memory = MemoryMap::builder(MEMORY_SIZE)
+        let memory = MemoryMap::builder()
             .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
             .unwrap()
             .build();
@@ -543,7 +543,7 @@ fn test_adds() {
     _ = simulans::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     {
-        let memory = MemoryMap::builder(MEMORY_SIZE)
+        let memory = MemoryMap::builder()
             .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
             .unwrap()
             .build();

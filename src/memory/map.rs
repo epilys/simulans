@@ -57,9 +57,11 @@ impl std::error::Error for MemoryMapError {}
 
 impl MemoryMapBuilder {
     #[inline]
-    pub fn new(max_size: MemorySize) -> Self {
+    pub fn new() -> Self {
+        const MAX_SIZE: MemorySize =
+            MemorySize(std::num::NonZero::new(MemorySize::MiB.get() * 1024 * 512).unwrap());
         Self {
-            max_size,
+            max_size: MAX_SIZE,
             entries: BTreeMap::default(),
             interval_tree: IntervalTree::default(),
         }
@@ -118,6 +120,12 @@ impl MemoryMapBuilder {
     }
 }
 
+impl Default for MemoryMapBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A flattened memory map of the guest.
 ///
 /// # Example
@@ -125,20 +133,11 @@ impl MemoryMapBuilder {
 /// ```rust
 /// use simulans::memory::*;
 ///
-/// let overflows_err = MemoryMap::builder(MemorySize(0x100.try_into().unwrap()))
-///     .with_region(MemoryRegion::new("rom", MemorySize(MemorySize::KiB), Address(0x0)).unwrap())
-///     .unwrap_err();
-/// let region = match overflows_err {
-///     MemoryMapError::Overflows { region, .. } => region,
-///     other => panic!("Expected overflow error, got: {:?}", other),
-/// };
-/// let map = MemoryMap::builder(MemorySize((MemorySize::KiB.get() * 2).try_into().unwrap()))
-///     .with_region(region)
-///     .unwrap()
-///     .build();
+/// let region = MemoryRegion::new("rom", MemorySize(MemorySize::KiB), Address(0x0)).unwrap();
+/// let map = MemoryMap::builder().with_region(region).unwrap().build();
 /// assert_eq!(
 ///     map.max_size().0.get(),
-///     MemorySize::KiB.get() * 2,
+///     MemorySize::MiB.get() * 1024 * 512,
 ///     "max size"
 /// );
 /// assert_eq!(map.len(), 1, "region count");
@@ -163,8 +162,8 @@ pub struct MemoryMap {
 
 impl MemoryMap {
     #[inline]
-    pub fn builder(max_size: MemorySize) -> MemoryMapBuilder {
-        MemoryMapBuilder::new(max_size)
+    pub fn builder() -> MemoryMapBuilder {
+        MemoryMapBuilder::new()
     }
 
     #[inline]

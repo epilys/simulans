@@ -22,7 +22,7 @@
 
 #![allow(clippy::len_without_is_empty)]
 
-use std::{cmp::Ordering, ops::Range};
+use std::{cmp::Ordering, ops::Range, path::PathBuf};
 
 #[cfg(target_os = "linux")]
 pub use linux::MmappedMemory;
@@ -34,7 +34,7 @@ use crate::memory::{Address, MemorySize, Width};
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::{ffi::CString, ops::Deref, os::fd::OwnedFd};
+    use std::{ffi::CString, ops::Deref, os::fd::OwnedFd, path::PathBuf};
 
     use nix::{
         errno::Errno,
@@ -44,16 +44,20 @@ mod linux {
     use crate::memory::{Address, MemorySize};
 
     pub struct MmappedMemory {
+        pub name: String,
         pub fd: OwnedFd,
         pub map: memmap2::MmapMut,
         pub read_only: bool,
+        pub fs_path: Option<PathBuf>,
     }
 
     impl std::fmt::Debug for MmappedMemory {
         fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
             fmt.debug_struct("MmappedMemory")
+                .field("name", &self.name)
                 .field("fd", &self.fd)
                 .field("read_only", &self.read_only)
+                .field("fs_path", &self.fs_path)
                 .finish_non_exhaustive()
         }
     }
@@ -69,13 +73,13 @@ mod linux {
     impl Eq for MmappedMemory {}
 
     impl MmappedMemory {
-        pub fn new_region(
+        fn new_from_fd(
             name: &str,
+            fd: OwnedFd,
+            fs_path: Option<PathBuf>,
             size: MemorySize,
             phys_offset: Address,
         ) -> Result<super::MemoryRegion, Errno> {
-            let name = CString::new(name).unwrap();
-            let fd = memfd::memfd_create(&name, memfd::MemFdCreateFlag::MFD_CLOEXEC)?;
             nix::unistd::ftruncate(&fd, size.get().try_into().unwrap())?;
             // SAFETY: `fd` is a valid file descriptor.
             let mut map = unsafe { memmap2::MmapOptions::new().map_mut(&fd).unwrap() };
@@ -87,29 +91,55 @@ mod linux {
                     ProtFlags::PROT_READ | ProtFlags::PROT_WRITE | ProtFlags::PROT_EXEC,
                 )?;
             }
-            #[cfg(target_os = "linux")]
-            {
-                // Don't include VM memory in dumped core files.
-                _ = map.advise(memmap2::Advice::DontDump);
-            }
-            #[cfg(target_os = "macos")]
-            {
-                extern "C" {
-                    fn pthread_jit_write_protect_np(_: bool);
-                }
-                unsafe { pthread_jit_write_protect_np(false) };
-            }
+            // Don't include VM memory in dumped core files.
+            _ = map.advise(memmap2::Advice::DontDump);
             let u_size: usize = size.get().try_into().map_err(|_| Errno::ERANGE)?;
             debug_assert_eq!(map.len(), u_size);
             Ok(super::MemoryRegion {
                 phys_offset,
                 size,
                 backing: super::MemoryBacking::Mmap(Self {
+                    name: name.to_string(),
                     fd,
                     map,
+                    fs_path,
                     read_only: false,
                 }),
             })
+        }
+
+        pub fn new_region(
+            name: &str,
+            size: MemorySize,
+            phys_offset: Address,
+        ) -> Result<super::MemoryRegion, Errno> {
+            let fd = memfd::memfd_create(
+                &CString::new(name).unwrap(),
+                memfd::MemFdCreateFlag::MFD_CLOEXEC,
+            )?;
+            Self::new_from_fd(name, fd, None, size, phys_offset)
+        }
+
+        pub fn new_file_region(
+            name: &str,
+            path: PathBuf,
+            size: MemorySize,
+            phys_offset: Address,
+        ) -> Result<super::MemoryRegion, Errno> {
+            let file = match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(f) => f,
+                Err(err) => {
+                    log::error!("Could not open {}: {err}", path.display());
+                    return Err(Errno::EINVAL);
+                }
+            };
+            let fd = file.into();
+            Self::new_from_fd(name, fd, Some(path), size, phys_offset)
         }
 
         #[inline]
@@ -353,9 +383,22 @@ impl MemoryRegion {
     /// Returns a memory region backed by an `mmap(2)` created area.
     pub fn new(name: &str, size: MemorySize, phys_offset: Address) -> Result<Self, Errno> {
         if size.get().checked_add(phys_offset.0).is_none() {
+            log::error!("Size {size} cannot fit to offset {phys_offset}, it overflows.");
             return Err(Errno::E2BIG);
         }
         MmappedMemory::new_region(name, size, phys_offset)
+    }
+
+    pub fn new_file(
+        name: &str,
+        path: PathBuf,
+        size: MemorySize,
+        phys_offset: Address,
+    ) -> Result<Self, Errno> {
+        if size.get().checked_add(phys_offset.0).is_none() {
+            return Err(Errno::E2BIG);
+        }
+        MmappedMemory::new_file_region(name, path, size, phys_offset)
     }
 
     pub fn new_io(
