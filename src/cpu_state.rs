@@ -462,6 +462,8 @@ impl ExecutionState {
         builder: &mut FunctionBuilder,
         registers: &IndexMap<bad64::Reg, Variable>,
         sys_registers: &IndexMap<bad64::SysReg, Variable>,
+        write_to_sysreg: bool,
+        write_to_simd: bool,
     ) {
         use bad64::{Reg, SysReg};
 
@@ -489,32 +491,34 @@ impl ExecutionState {
             }};
         }
 
-        reg_field! { sys
-            ttbr0_el1 => SysReg::TTBR0_EL1,
-            vttbr_el2 => SysReg::VTTBR_EL2,
-            mair_el1 => SysReg::MAIR_EL1,
-            // id_aa64mmfr0_el1 => SysReg::ID_AA64MMFR0_EL1,
-            sp_el0 => SysReg::SP_EL0,
-            sp_el1 => SysReg::SP_EL1,
-            sp_el2 => SysReg::SP_EL2,
-            // sp_el3 => SysReg::SP_EL3,
-            // [ref:FIXME]: bad64 doesn't have an SP_EL3 variant.
-            tcr_el1 => SysReg::TCR_EL1,
-            sctlr_el1 => SysReg::SCTLR_EL1,
-            sctlr_el2 => SysReg::SCTLR_EL2,
-            sctlr_el3 => SysReg::SCTLR_EL3,
-            cpacr_el1 => SysReg::CPACR_EL1,
-            vbar_el1 => SysReg::VBAR_EL1,
-            hcr_el2 => SysReg::HCR_EL2,
-            scr_el3 => SysReg::SCR_EL3,
-            vpidr_el2 => SysReg::VPIDR_EL2,
-            vmpidr_el2 => SysReg::VMPIDR_EL2,
-            spsr_el3 =>  SysReg::SPSR_EL3,
-            elr_el1 => SysReg::ELR_EL1,
-            elr_el2 => SysReg::ELR_EL2,
-            elr_el3 => SysReg::ELR_EL3,
-            nzcv => SysReg::NZCV,
-        };
+        if write_to_sysreg {
+            reg_field! { sys
+                ttbr0_el1 => SysReg::TTBR0_EL1,
+                vttbr_el2 => SysReg::VTTBR_EL2,
+                mair_el1 => SysReg::MAIR_EL1,
+                // id_aa64mmfr0_el1 => SysReg::ID_AA64MMFR0_EL1,
+                sp_el0 => SysReg::SP_EL0,
+                sp_el1 => SysReg::SP_EL1,
+                sp_el2 => SysReg::SP_EL2,
+                // sp_el3 => SysReg::SP_EL3,
+                // [ref:FIXME]: bad64 doesn't have an SP_EL3 variant.
+                tcr_el1 => SysReg::TCR_EL1,
+                sctlr_el1 => SysReg::SCTLR_EL1,
+                sctlr_el2 => SysReg::SCTLR_EL2,
+                sctlr_el3 => SysReg::SCTLR_EL3,
+                cpacr_el1 => SysReg::CPACR_EL1,
+                vbar_el1 => SysReg::VBAR_EL1,
+                hcr_el2 => SysReg::HCR_EL2,
+                scr_el3 => SysReg::SCR_EL3,
+                vpidr_el2 => SysReg::VPIDR_EL2,
+                vmpidr_el2 => SysReg::VMPIDR_EL2,
+                spsr_el3 =>  SysReg::SPSR_EL3,
+                elr_el1 => SysReg::ELR_EL1,
+                elr_el2 => SysReg::ELR_EL2,
+                elr_el3 => SysReg::ELR_EL3,
+                nzcv => SysReg::NZCV,
+            };
+        }
         reg_field! {
             x0 => Reg::X0,
             x1 => Reg::X1,
@@ -549,29 +553,31 @@ impl ExecutionState {
             x30 => Reg::X30,
             sp => Reg::SP,
         }
-        let vector_addr = builder
-            .ins()
-            .iconst(I64, std::ptr::addr_of!(self.vector_registers) as i64);
-        for i in 0_u32..=31 {
-            let offset = i * std::mem::size_of::<(u64, u64)>() as u32;
-            let d_reg = bad64::Reg::from_u32(bad64::Reg::D0 as u32 + i).unwrap();
-            let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
-            assert!(registers.contains_key(&d_reg));
-            assert!(registers.contains_key(&v_reg));
-            let var = &registers[&d_reg];
-            let low_bits_value = builder.use_var(*var);
-            let offset = i32::try_from(offset).unwrap();
-            builder
+        if write_to_simd {
+            let vector_addr = builder
                 .ins()
-                .store(memflags, low_bits_value, vector_addr, offset);
-            let var = &registers[&v_reg];
-            let high_bits_value = builder.use_var(*var);
-            builder.ins().store(
-                memflags,
-                high_bits_value,
-                vector_addr,
-                offset + std::mem::size_of::<u64>() as i32,
-            );
+                .iconst(I64, std::ptr::addr_of!(self.vector_registers) as i64);
+            for i in 0_u32..=31 {
+                let offset = i * std::mem::size_of::<(u64, u64)>() as u32;
+                let d_reg = bad64::Reg::from_u32(bad64::Reg::D0 as u32 + i).unwrap();
+                let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
+                assert!(registers.contains_key(&d_reg));
+                assert!(registers.contains_key(&v_reg));
+                let var = &registers[&d_reg];
+                let low_bits_value = builder.use_var(*var);
+                let offset = i32::try_from(offset).unwrap();
+                builder
+                    .ins()
+                    .store(memflags, low_bits_value, vector_addr, offset);
+                let var = &registers[&v_reg];
+                let high_bits_value = builder.use_var(*var);
+                builder.ins().store(
+                    memflags,
+                    high_bits_value,
+                    vector_addr,
+                    offset + std::mem::size_of::<u64>() as i32,
+                );
+            }
         }
     }
 }
