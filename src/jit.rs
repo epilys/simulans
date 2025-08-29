@@ -382,6 +382,8 @@ impl JitContext {
             builder.import_signature(sig)
         };
         let mut trans = BlockTranslator {
+            write_to_sysreg: false,
+            write_to_simd: false,
             pointer_type: self.module.target_config().pointer_type(),
             memops_table,
             cpu_state,
@@ -458,6 +460,8 @@ impl JitContext {
 
 /// In-progress state of translating instructions into Cranelift IR.
 struct BlockTranslator<'a> {
+    write_to_sysreg: bool,
+    write_to_simd: bool,
     builder: FunctionBuilder<'a>,
     cpu_state: &'a mut ExecutionState,
     machine_ptr: Value,
@@ -591,7 +595,7 @@ impl BlockTranslator<'_> {
     fn condition_holds(&mut self, condition: bad64::Condition) -> Value {
         use bad64::Condition;
 
-        let var = *self.sysreg_to_var(&bad64::SysReg::NZCV);
+        let var = *self.sysreg_to_var(&bad64::SysReg::NZCV, false);
         let var = self.builder.use_var(var);
 
         macro_rules! cmp_pstate {
@@ -723,7 +727,7 @@ impl BlockTranslator<'_> {
 
     /// Update CPU state of NZCV flags.
     fn update_nzcv(&mut self, [n, z, c, v]: [Value; 4]) {
-        let var = *self.sysreg_to_var(&bad64::SysReg::NZCV);
+        let var = *self.sysreg_to_var(&bad64::SysReg::NZCV, true);
         let n = self.builder.ins().rotl_imm(n, 31);
         let z = self.builder.ins().rotl_imm(z, 30);
         let c = self.builder.ins().rotl_imm(c, 29);
@@ -963,7 +967,7 @@ impl BlockTranslator<'_> {
                 self.translate_o0_op1_CRn_CRm_op2(*o0, *o1, *cm, *cn, *o2)
             }
             Operand::SysReg(reg) => {
-                let var = *self.sysreg_to_var(reg);
+                let var = *self.sysreg_to_var(reg, false);
                 self.builder.use_var(var)
             }
             Operand::MemExt {
@@ -991,7 +995,8 @@ impl BlockTranslator<'_> {
     }
 
     #[inline]
-    fn sysreg_to_var(&self, reg: &bad64::SysReg) -> &Variable {
+    fn sysreg_to_var(&mut self, reg: &bad64::SysReg, write: bool) -> &Variable {
+        self.write_to_sysreg |= write;
         self.sys_registers.get(reg).unwrap_or_else(|| {
             unimplemented!("unimplemented sysreg {reg:?}");
         })
@@ -1000,6 +1005,8 @@ impl BlockTranslator<'_> {
     #[cold]
     fn simd_reg_to_var(&mut self, reg: &bad64::Reg, write: bool) -> &Variable {
         use bad64::Reg;
+
+        self.write_to_simd |= write;
 
         let reg_no = *reg as u32;
         if ((Reg::V0 as u32)..=(Reg::V31 as u32)).contains(&reg_no) {
@@ -1470,10 +1477,14 @@ impl BlockTranslator<'_> {
             Op::MSR => {
                 // [ref:can_trap]
                 let target = match instruction.operands()[0] {
-                    bad64::Operand::SysReg(ref sysreg) => *self.sysreg_to_var(sysreg),
+                    bad64::Operand::SysReg(ref sysreg) => *self.sysreg_to_var(sysreg, true),
                     other => unexpected_operand!(other),
                 };
-                let value = self.translate_operand(&instruction.operands()[1]);
+                let mut value = self.translate_operand(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[1]);
+                if !matches!(width, Width::_64) {
+                    value = self.builder.ins().uextend(I64, value);
+                }
                 self.builder.def_var(target, value);
             }
             Op::MRS => {
@@ -1483,7 +1494,7 @@ impl BlockTranslator<'_> {
                     bad64::Operand::Reg {
                         ref reg,
                         arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                    } => *self.reg_to_var(reg, false),
                     other => unexpected_operand!(other),
                 };
                 let sys_reg_value = self.translate_operand(&instruction.operands()[1]);
@@ -2553,7 +2564,7 @@ impl BlockTranslator<'_> {
                     if !matches!(new_nzcv_width, Width::_64) {
                         new_nzcv = self.builder.ins().uextend(I64, new_nzcv);
                     }
-                    let var = *self.sysreg_to_var(&bad64::SysReg::NZCV);
+                    let var = *self.sysreg_to_var(&bad64::SysReg::NZCV, true);
                     self.builder.def_var(var, new_nzcv)
                 }
                 self.builder.ins().jump(merge_block, &[]);
@@ -4233,13 +4244,21 @@ impl BlockTranslator<'_> {
         {
             {
                 let Self {
+                    write_to_sysreg,
+                    write_to_simd,
                     ref mut cpu_state,
                     ref mut builder,
                     ref registers,
                     ref sys_registers,
                     ..
                 } = self;
-                cpu_state.save_cpu_state(builder, registers, sys_registers);
+                cpu_state.save_cpu_state(
+                    builder,
+                    registers,
+                    sys_registers,
+                    *write_to_sysreg,
+                    *write_to_simd,
+                );
             }
             if cfg!(feature = "accurate-pc") {
                 let prev_pc = self.builder.ins().iconst(I64, prev_pc as i64);
@@ -4287,13 +4306,21 @@ impl BlockTranslator<'_> {
     fn emit_halt(&mut self) {
         {
             let Self {
+                write_to_sysreg,
+                write_to_simd,
                 ref mut cpu_state,
                 ref mut builder,
                 ref registers,
                 ref sys_registers,
                 ..
             } = self;
-            cpu_state.save_cpu_state(builder, registers, sys_registers);
+            cpu_state.save_cpu_state(
+                builder,
+                registers,
+                sys_registers,
+                *write_to_sysreg,
+                *write_to_simd,
+            );
         }
         let true_value = self.builder.ins().iconst(I8, 1);
         self.builder.ins().store(
