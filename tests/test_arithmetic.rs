@@ -42,7 +42,7 @@ fn test_sdiv() {
 
     const MEMORY_SIZE: MemorySize = MemorySize(NonZero::new((4 * SDIV.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder(MEMORY_SIZE)
+    let memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
         .unwrap()
         .build();
@@ -102,7 +102,7 @@ fn test_mov() {
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder(MEMORY_SIZE)
+    let memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
         .unwrap()
         .build();
@@ -131,7 +131,7 @@ fn test_mov2() {
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder(MEMORY_SIZE)
+    let memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
         .unwrap()
         .build();
@@ -178,7 +178,7 @@ fn test_bitfields() {
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder(MEMORY_SIZE)
+    let memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
         .unwrap()
         .build();
@@ -214,7 +214,7 @@ fn test_bitfields_2() {
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder(MEMORY_SIZE)
+    let memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
         .unwrap()
         .build();

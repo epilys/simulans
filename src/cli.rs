@@ -124,6 +124,11 @@ pub struct Args {
     #[arg(long, default_value_t = DEFAULT_MEMORY_SIZE, value_parser=memory_size)]
     memory: MemorySize,
 
+    /// Map RAM to file (must not already exist) instead of anonymous memory
+    /// mapping.
+    #[arg(long, default_value = None, value_name = "FILE")]
+    pub memory_backend: Option<PathBuf>,
+
     /// Path to binary file containing aarch64 instructions (NOT an ELF file!)
     #[arg(value_name = "BINARY")]
     pub binary: PathBuf,
@@ -145,14 +150,7 @@ impl Args {
     /// Parse command-line arguments from the process environment.
     pub fn parse() -> Result<Self, String> {
         let retval = <Self as clap::Parser>::parse();
-        if retval.dram_start_address.0 >= retval.memory.0.get() {
-            return Err(format!(
-                "Invalid arguments: Given DRAM start address {} is out of range for given memory \
-                 size {}.",
-                retval.dram_start_address, retval.memory
-            ));
-        }
-        if retval.entry_point_address.0 >= retval.memory.0.get() {
+        if retval.entry_point_address.0 >= (retval.dram_start_address.0 + retval.memory.0.get()) {
             return Err(format!(
                 "Invalid arguments: Given entry point address {} is out of range for given memory \
                  size {}.",
@@ -167,12 +165,6 @@ impl Args {
             ));
         }
         Ok(retval)
-    }
-
-    #[inline]
-    pub const fn dram_size(&self) -> MemorySize {
-        // Guaranteed to not underflow because of checks
-        MemorySize(NonZero::new(self.memory.get() - self.dram_start_address.0).unwrap())
     }
 
     /// Hexadecimal or decimal value of the address to load the binary in to.

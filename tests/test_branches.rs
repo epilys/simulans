@@ -112,7 +112,7 @@ fn test_simple_if() {
         MemorySize(NonZero::new((4 * FOOBAR_UNOPT.len()) as u64).unwrap());
     let entry_point = Address(0);
     {
-        let memory = MemoryMap::builder(MEMORY_SIZE)
+        let memory = MemoryMap::builder()
             .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
             .unwrap()
             .build();
@@ -125,7 +125,7 @@ fn test_simple_if() {
         assert_eq!(machine.cpu_state.registers.x0, 20);
     }
     {
-        let memory = MemoryMap::builder(MEMORY_SIZE)
+        let memory = MemoryMap::builder()
             .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
             .unwrap()
             .build();

@@ -86,13 +86,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_app(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let input = std::fs::read(&args.binary)?;
     // Create the machine instance, which holds the VM state.
 
-    let dram_size = args.dram_size();
-    let dram = MemoryRegion::new("ram", dram_size, args.dram_start_address())?;
-    let mut memory_map_builder = MemoryMap::builder(args.memory()).with_region(dram)?;
+    let dram_size = args.memory();
+    let dram = if let Some(mem_path) = args.memory_backend.take() {
+        MemoryRegion::new_file("ram", mem_path, dram_size, args.dram_start_address())?
+    } else {
+        MemoryRegion::new("ram", dram_size, args.dram_start_address())?
+    };
+    let mut memory_map_builder = MemoryMap::builder().with_region(dram)?;
     let pl011 = simulans::devices::pl011::PL011State::new(0);
     memory_map_builder.add_region(MemoryRegion::new_io(
         MemorySize::new(0x100).unwrap(),

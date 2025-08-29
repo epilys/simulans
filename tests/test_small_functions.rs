@@ -55,7 +55,7 @@ fn test_square() {
 
     const MEMORY_SIZE: MemorySize = MemorySize(NonZero::new((4 * SQUARED.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder(MEMORY_SIZE)
+    let memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
         .unwrap()
         .build();
@@ -85,7 +85,7 @@ fn test_load_stores() {
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * LOAD_STORES.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder(MEMORY_SIZE)
+    let memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
         .unwrap()
         .build();
@@ -130,7 +130,7 @@ fn test_load_stores_2() {
 
     const MEMORY_SIZE: MemorySize = MemorySize(NonZero::new((4 * STACK_ADD.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder(MEMORY_SIZE)
+    let memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
         .unwrap()
         .build();
@@ -188,7 +188,7 @@ fn test_exception_levels() {
 
     const MEMORY_SIZE: MemorySize = MemorySize(NonZero::new((4 * BOOT.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder(MEMORY_SIZE)
+    let memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
         .unwrap()
         .build();
@@ -212,15 +212,13 @@ fn test_uart_write_str() {
     const TEST_INPUT: &[u8] = b"\xde\x02\x00\x10\x02\x02\x00\xb4\x21\x02\x00\x10\x29\x00\x02\x8b\x2a\x14\x40\x38\x0b\x34\x40\x79\xeb\x00\x28\x37\x3f\x00\x09\xeb\x0a\x00\x00\x79\x00\x01\x00\x54\x2a\x14\x40\x38\x0b\x34\x40\x79\x6b\xff\x2f\x36\xdf\x3f\x03\xd5\x0b\x34\x40\x79\xcb\xff\x2f\x37\xf7\xff\xff\x17\xe0\x03\x1f\x2a\xc0\x03\x5f\xd6\x48\x65\x6c\x6c\x6f\x20\x77\x6f\x72\x6c\x64\x0a\x1f\x20\x03\xd5";
 
     const DRAM_MEMORY_SIZE: MemorySize = MemorySize(NonZero::new(TEST_INPUT.len() as u64).unwrap());
-    const MEMORY_SIZE: MemorySize =
-        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
 
     _ = simulans::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     let pl011_addr = Address(TEST_INPUT.len() as u64);
     {
         let pl011 = simulans::devices::pl011::PL011State::new(0);
-        let memory = MemoryMap::builder(MEMORY_SIZE)
+        let memory = MemoryMap::builder()
             .with_region(MemoryRegion::new("ram", DRAM_MEMORY_SIZE, entry_point).unwrap())
             .unwrap()
             .with_region(
