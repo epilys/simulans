@@ -140,7 +140,7 @@ pub struct RegisterFile {
 #[bitsize(2)]
 #[derive(Copy, Clone, Default, FromBits, Debug)]
 /// Current exception level, part of [`PSTATE`].
-pub enum CurrentEL {
+pub enum ExceptionLevel {
     EL0 = 0b00,
     #[default]
     EL1 = 0b01,
@@ -295,7 +295,7 @@ pub struct PSTATE {
     /// Illegal Execution state bit.
     pub IL: u64,
     /// (2) Exception level.
-    pub EL: CurrentEL,
+    pub EL: ExceptionLevel,
     /// Architectural mode.
     ///
     /// ```text
