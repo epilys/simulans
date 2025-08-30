@@ -168,21 +168,18 @@ pub enum SpSel {
     Current = 1,
 }
 
-#[bitsize(5)]
-#[derive(Default, FromBits, Debug)]
+#[bitsize(4)]
+#[derive(Copy, Clone, FromBits, Default, Debug)]
 /// Processing Element (PE) mode.
 pub enum Mode {
-    User = 0b10000,
-    FIQ = 0b10001,
-    IRQ = 0b10010,
-    Supervisor = 0b10011,
-    Monitor = 0b10110,
-    Abort = 0b10111,
-    Hyp = 0b11010,
-    #[fallback]
-    Undefined = 0b11011,
+    EL0 = 0b0000,
+    EL1t = 0b0100,
     #[default]
-    System = 0b11111,
+    EL1h = 0b0101,
+    EL1tNV = 0b1000,
+    EL1hNV = 0b1001,
+    #[fallback]
+    Undefined = 0b1011,
 }
 
 #[bitsize(64)]
@@ -211,54 +208,34 @@ pub struct NZCVFields {
 #[derive(Default, Copy, Clone, FromBits, DebugBits)]
 /// Saved status register (`SPSR_ELx`).
 pub struct SavedProgramStatusRegister {
-    pub _padding: u32,
-    /// Negative condition flag. (bit `[31]`)
-    pub n: bool,
-    /// Zero condition flag. (bit `[30]`)
-    pub z: bool,
-    /// Carry condition flag. (bit `[29]`)
-    pub c: bool,
-    /// Overflow condition flag. (bit `[28]`)
-    pub v: bool,
-    /// Overflow or saturation condition flag. (bit `[27]`)
-    pub q: bool,
-    /// If-then bits `[1:0]` part. (bits `[26:25]`)
-    pub it_a: u2,
-    /// Reserved zero. (bit `[24]`)
-    pub j: u1,
-    /// When `FEAT_SSBS` is implemented: Speculative Store Bypass,  otherwise
-    /// reserved zero. (bit `[23]`)
-    pub ssbs: u1,
-    /// When `FEAT_PAN` is implemented, Privileged Access Never, otherwise
-    /// reserved zero. (bit `[22]`)
-    pub pan: u1,
-    /// When `FEAT_DIT` is implemented: Data Independent Timing, otherwise
-    /// reserved zero . (bit `[21]`)
-    pub dit: u1,
-    /// Illegal Execution state. (bit `[20]`)
-    pub il: bool,
-    /// Greater than or Equal flags. (bits `[19:16]`)
-    pub ge: u4,
-    /// If-then bits `[7:2]` part. (bits `[7:2]`)
-    pub it_b: u6,
-    /// Big Endianness. (bit `[9]`)
-    pub e: bool,
-    /// `SError` exception mask. "Set to the value of `PSTATE.A` on taking an
-    /// exception to the current mode, and copied to `PSTATE.A` on executing an
-    /// exception return operation in the current mode". (bit `[8]`)
-    pub a: bool,
-    /// IRQ interrupt mask. (bit `[7]`)
-    pub i: bool,
-    /// FIQ interrupt mask. (bit `[6]`)
-    pub f: bool,
-    /// T32 Instruction set state. (bit `[5]`)
-    pub t: bool,
-    /// Mode. (bits `[4:0]`)
     pub m: Mode,
+    pub nRW: ArchMode,
+    pub f: bool,
+    pub i: bool,
+    pub a: bool,
+    pub d: bool,
+    pub _btype: u2,
+    pub _ssbs: u1,
+    pub _allint: u1,
+    pub __res: u6,
+    pub il: bool,
+    pub ss: bool,
+    pub _pan: u1,
+    pub _uao: u1,
+    pub _dit: u1,
+    pub _tco: u1,
+    pub __res0: u2,
+    pub nzcv: NZCVFields,
+    pub _pm: u1,
+    pub _ppend: u1,
+    pub _exlock: u1,
+    pub _pacm: u1,
+    pub _uinj: u1,
+    pub _padding: u28,
 }
 
-#[repr(C)]
-#[derive(Default, Debug)]
+#[bitsize(64)]
+#[derive(Default, DebugBits)]
 #[allow(non_snake_case)]
 /// `PSTATE` isn't an architectural register for `ARMv8-A`. Its bit fields are
 /// accessed through special-purpose registers.
@@ -274,42 +251,17 @@ pub struct SavedProgramStatusRegister {
 /// | `NZCV`                   | Holds the condition flags.                                                                      | `N, Z, C, V`    |
 /// | `SPSel`                  | At `EL1` or higher, this selects between the `SP` for the current Exception level and `SP_EL0`. | `SP`            |
 pub struct PSTATE {
-    // /// Negative condition flag.
-    // pub N: u64,
-    // /// Zero condition flag.
-    // pub Z: u64,
-    // /// Carry condition flag.
-    // pub C: u64,
-    // /// oVerflow condition flag.
-    // pub V: u64,
-    /// Debug mask bit.
-    pub D: u64,
-    /// `SError` mask bit.
-    pub A: u64,
-    /// IRQ mask bit.
-    pub I: u64,
-    /// FIQ mask bit.
-    pub F: u64,
-    /// Software Step bit.
-    pub SS: u64,
-    /// Illegal Execution state bit.
-    pub IL: u64,
-    /// (2) Exception level.
-    pub EL: ExceptionLevel,
-    /// Architectural mode.
-    ///
-    /// ```text
-    /// 0 = 64-bit
-    /// 1 = 32-bit
-    /// ```
-    pub nRW: ArchMode,
-    /// Stack pointer selector.
-    ///
-    /// ```text
-    /// 0 = SP_EL0
-    /// 1 = SP_ELn
-    /// ```
     pub SP: SpSel,
+    pub nRW: ArchMode,
+    pub EL: ExceptionLevel,
+    pub IL: bool,
+    pub SS: bool,
+    pub F: bool,
+    pub I: bool,
+    pub A: bool,
+    pub D: bool,
+    pub NZCV: NZCVFields,
+    pub _res0: u50,
 }
 
 #[repr(C)]
