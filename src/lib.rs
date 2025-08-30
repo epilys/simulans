@@ -110,6 +110,8 @@
 #[cfg(not(target_pointer_width = "64"))]
 core::compile_error!("Can only be compiled on targets with 64bit address support");
 
+use std::sync::atomic::Ordering;
+
 pub mod cpu_state;
 pub mod devices;
 pub mod fdt;
@@ -152,7 +154,7 @@ pub fn main_loop(
         machine.pc = start_address.0;
     }
     let mut func = machine.lookup_entry_func;
-    while machine.halted == 0 {
+    while machine.exit_request.load(Ordering::SeqCst) == 0 {
         func = (func.0)(&mut jit_ctx, machine);
     }
     Ok(())

@@ -392,6 +392,7 @@ impl JitContext {
             registers_sigref,
             address_lookup_sigref,
             builder,
+            module: &self.module,
             registers,
             sys_registers,
         };
@@ -464,6 +465,7 @@ struct BlockTranslator<'a> {
     write_to_simd: bool,
     builder: FunctionBuilder<'a>,
     cpu_state: &'a mut ExecutionState,
+    module: &'a JITModule,
     machine_ptr: Value,
     pointer_type: Type,
     registers_print_func: Value,
@@ -4301,8 +4303,8 @@ impl BlockTranslator<'_> {
         }
     }
 
-    /// Save state but also set `machine.halted` to `true` so that we stop the
-    /// emulation instead of fetching the next JIT block.
+    /// Save state but also set `machine.exit_request` to `true` so that we stop
+    /// the emulation instead of fetching the next JIT block.
     fn emit_halt(&mut self) {
         {
             let Self {
@@ -4323,12 +4325,23 @@ impl BlockTranslator<'_> {
             );
         }
         let true_value = self.builder.ins().iconst(I8, 1);
-        self.builder.ins().store(
-            MemFlags::trusted(),
-            true_value,
-            self.machine_ptr,
-            std::mem::offset_of!(Armv8AMachine, halted) as i32,
+        let sigref = {
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(self.pointer_type));
+            sig.params.push(AbiParam::new(I8));
+            self.builder.import_signature(sig)
+        };
+        let func = self.builder.ins().iconst(
+            I64,
+            crate::machine::helper_set_exit_request as usize as u64 as i64,
         );
+        {
+            let call =
+                self.builder
+                    .ins()
+                    .call_indirect(sigref, func, &[self.machine_ptr, true_value]);
+            _ = self.builder.inst_results(call);
+        }
         let translate_func = self.builder.ins().load(
             self.pointer_type,
             MemFlags::trusted(),
