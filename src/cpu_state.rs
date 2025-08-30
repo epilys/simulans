@@ -190,6 +190,13 @@ pub enum Mode {
 /// Condition flags pseudo-register
 pub struct NZCV {
     pub _padding2: u28,
+    pub fields: NZCVFields,
+    pub _padding: u32,
+}
+
+#[bitsize(4)]
+#[derive(Default, Copy, Clone, PartialEq, Eq, FromBits, DebugBits)]
+pub struct NZCVFields {
     /// Overflow condition flag. (bit `[28]`)
     pub v: bool,
     /// Carry condition flag. (bit `[29]`)
@@ -198,7 +205,6 @@ pub struct NZCV {
     pub z: bool,
     /// Negative condition flag. (bit `[31]`)
     pub n: bool,
-    pub _padding: u32,
 }
 
 #[bitsize(64)]
