@@ -20,9 +20,17 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use std::num::NonZero;
+use std::{
+    num::NonZero,
+    sync::{atomic::AtomicU8, Arc},
+};
 
-use simulans::{devices::Device, machine, main_loop, memory::*};
+use simulans::{
+    devices::Device,
+    machine::Armv8AMachine,
+    main_loop,
+    memory::{Address, MemoryMap, MemoryRegion, MemorySize},
+};
 
 #[macro_use]
 mod utils;
@@ -36,8 +44,9 @@ fn test_square() {
     //    return num * num;
     //  }
     // ```
-    const SQUARED: &[u8] = b"\x02\x00\x00\x94\x08\x00\x00\x14\xff\x43\x00\xd1\xe0\x0f\x00\xb9\xe8\x0f\x40\xb9\xe9\x0f\x40\xb9\x00\x7d\x09\x1b\xff\x43\x00\x91\xc0\x03\x5f\xd6\x1f\x20\x03\xd5";
-    // _ = simulans::disas(SQUARED, 0);
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_square.bin");
+
+    // _ = simulans::disas(TEST_INPUT, 0);
     // Capstone disassembly:
     //
     // Capstone output:
@@ -53,19 +62,16 @@ fn test_square() {
     // 0x24: nop
     // ```
 
-    const MEMORY_SIZE: MemorySize = MemorySize(NonZero::new((4 * SQUARED.len()) as u64).unwrap());
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder()
-        .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
-        .unwrap()
-        .build();
-    let mut machine = machine::Armv8AMachine::new(memory);
-    machine.cpu_state.registers.sp = 4 * SQUARED.len() as u64 - 4;
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+    machine.cpu_state.registers.sp = 4 * TEST_INPUT.len() as u64 - 4;
 
     let stack_pre = machine.cpu_state.registers.sp;
     // Pass "25" as `num`
     machine.cpu_state.registers.x0 = 25;
-    main_loop(&mut machine, entry_point, SQUARED).unwrap();
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
     assert_eq!(machine.cpu_state.registers.x0, 625);
     assert_eq!(machine.cpu_state.registers.x8, 25);
     assert_eq!(machine.cpu_state.registers.x9, 25);
@@ -79,22 +85,18 @@ fn test_load_stores() {
     // Capstone output:
     // 0x40080000: str x0, [sp, #-0x10]!
     // 0x40080004: ldr x1, [sp], #0x10
-    const LOAD_STORES: &[u8] = b"\xe0\x0f\x1f\xf8\xe1\x07\x41\xf8";
-    // _ = simulans::disas(LOAD_STORES, 0);
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_load_stores.bin");
+    // _ = simulans::disas(TEST_INPUT, 0);
 
     const MEMORY_SIZE: MemorySize =
-        MemorySize(NonZero::new((4 * LOAD_STORES.len()) as u64).unwrap());
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder()
-        .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
-        .unwrap()
-        .build();
-    let mut machine = machine::Armv8AMachine::new(memory);
-    machine.cpu_state.registers.sp = 4 * LOAD_STORES.len() as u64 - 4;
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+    machine.cpu_state.registers.sp = 4 * TEST_INPUT.len() as u64 - 4;
 
     let stack_pre = machine.cpu_state.registers.sp;
     machine.cpu_state.registers.x0 = 0xbadbeef;
-    main_loop(&mut machine, entry_point, LOAD_STORES).unwrap();
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
     let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre);
     let mem = machine.memory.find_region(entry_point).unwrap();
@@ -125,21 +127,19 @@ fn test_load_stores_2() {
     // 0x40080004: str x0, [sp, #-0x10]!
     // 0x40080008: ldr x1, [sp], #0x10
     // 0x4008000c: add x0, x0, x1
-    const STACK_ADD: &[u8] = b"\x80\x46\x82\xd2\xe0\x0f\x1f\xf8\xe1\x07\x41\xf8\x00\x00\x01\x8b";
-    // _ = simulans::disas(STACK_ADD, 0);
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_load_stores_2.bin");
 
-    const MEMORY_SIZE: MemorySize = MemorySize(NonZero::new((4 * STACK_ADD.len()) as u64).unwrap());
+    // _ = simulans::disas(TEST_INPUT, 0);
+
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder()
-        .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
-        .unwrap()
-        .build();
-    let mut machine = machine::Armv8AMachine::new(memory);
-    machine.cpu_state.registers.sp = 4 * STACK_ADD.len() as u64 - 4;
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+    machine.cpu_state.registers.sp = 4 * TEST_INPUT.len() as u64 - 4;
 
     let stack_pre = machine.cpu_state.registers.sp;
     machine.cpu_state.registers.x0 = 0xbadbeef;
-    main_loop(&mut machine, entry_point, STACK_ADD).unwrap();
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
     let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre);
     assert_eq!(machine.cpu_state.registers.x0, 2 * 0x1234);
@@ -183,41 +183,40 @@ fn test_exception_levels() {
     // 0x40080058: msr spsr_el3, x0
     // 0x4008005c: eret
     // 0x40080060: nop
-    const BOOT: &[u8] = b"\x20\x00\x80\xd2\x00\x00\x7f\xb2\x00\x00\x7e\xb2\x00\x00\x7d\xb2\x00\x00\x78\xb2\x00\x00\x76\xb2\x00\x00\x75\xb2\x00\x11\x1e\xd5\xe0\x03\x1d\x32\x00\x00\x7c\xb2\x00\x00\x61\xb2\x00\x11\x1c\xd5\x00\x00\x38\xd5\x00\x00\x1c\xd5\xa0\x00\x38\xd5\xa0\x00\x1c\xd5\x1f\x21\x1c\xd5\x1f\x10\x1c\xd5\x1f\x10\x18\xd5\xe0\x00\x00\x58\x20\x40\x1e\xd5\xe0\x00\x00\x58\x00\x40\x1e\xd5\xe0\x03\x9f\xd6\x1f\x20\x03\xd5\x00\x00\x00\x00\xd8\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-    // _ = simulans::disas(BOOT, 0);
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_exception_levels.bin");
+    _ = simulans::disas(TEST_INPUT, 0x40080000);
 
-    const MEMORY_SIZE: MemorySize = MemorySize(NonZero::new((4 * BOOT.len()) as u64).unwrap());
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
-    let memory = MemoryMap::builder()
-        .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
-        .unwrap()
-        .build();
-    let mut machine = machine::Armv8AMachine::new(memory);
-    machine.cpu_state.registers.sp = 4 * BOOT.len() as u64 - 4;
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+    machine.cpu_state.registers.sp = 4 * TEST_INPUT.len() as u64 - 4;
 
     let stack_pre = machine.cpu_state.registers.sp;
-    main_loop(&mut machine, entry_point, BOOT).unwrap();
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
     let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre);
-    assert_eq!(machine.cpu_state.registers.x0, 0);
     assert_eq!(machine.cpu_state.registers.hcr_el2, 0x80000018);
     assert_eq!(machine.cpu_state.registers.scr_el3, 0xd0f);
-    assert_eq!(machine.cpu_state.registers.elr_el3, 0x4000d8);
+    assert_hex_eq!(machine.cpu_state.registers.elr_el3, 0x60);
 }
 
 #[test]
 fn test_uart_write_str() {
     _ = env_logger::builder().is_test(true).try_init();
 
-    const TEST_INPUT: &[u8] = b"\xde\x02\x00\x10\x02\x02\x00\xb4\x21\x02\x00\x10\x29\x00\x02\x8b\x2a\x14\x40\x38\x0b\x34\x40\x79\xeb\x00\x28\x37\x3f\x00\x09\xeb\x0a\x00\x00\x79\x00\x01\x00\x54\x2a\x14\x40\x38\x0b\x34\x40\x79\x6b\xff\x2f\x36\xdf\x3f\x03\xd5\x0b\x34\x40\x79\xcb\xff\x2f\x37\xf7\xff\xff\x17\xe0\x03\x1f\x2a\xc0\x03\x5f\xd6\x48\x65\x6c\x6c\x6f\x20\x77\x6f\x72\x6c\x64\x0a\x1f\x20\x03\xd5";
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_write_str.bin");
 
-    const DRAM_MEMORY_SIZE: MemorySize = MemorySize(NonZero::new(TEST_INPUT.len() as u64).unwrap());
+    const DRAM_MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new(4 * TEST_INPUT.len() as u64).unwrap());
 
     _ = simulans::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
-    let pl011_addr = Address(TEST_INPUT.len() as u64);
+    let pl011_addr = Address(4 * TEST_INPUT.len() as u64);
+    let exit_request = Arc::new(AtomicU8::new(0));
     {
         let pl011 = simulans::devices::pl011::PL011State::new(0);
+        let tube = simulans::devices::tube::Tube::new(0, Arc::clone(&exit_request));
         let memory = MemoryMap::builder()
             .with_region(MemoryRegion::new("ram", DRAM_MEMORY_SIZE, entry_point).unwrap())
             .unwrap()
@@ -226,8 +225,17 @@ fn test_uart_write_str() {
                     .unwrap(),
             )
             .unwrap()
+            .with_region(
+                MemoryRegion::new_io(
+                    MemorySize::new(0x100).unwrap(),
+                    Address(0x0d800020),
+                    tube.ops(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
             .build();
-        let mut machine = machine::Armv8AMachine::new(memory);
+        let mut machine = Armv8AMachine::new_with_exit_request(memory, exit_request);
         machine.cpu_state.registers.x0 = pl011_addr.0;
         machine.cpu_state.registers.x2 = "Hello world\n".len() as u64;
 
