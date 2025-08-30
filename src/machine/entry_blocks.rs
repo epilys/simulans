@@ -63,7 +63,7 @@ impl EntryBlocks {
             .range(pc..=pc)
             .map(|(k, _)| *k)
             .collect::<Vec<_>>();
-        log::trace!(
+        tracing::trace!(
             "Invalidating {} entry block{} at address 0x{:x}",
             invalidated_keys.len(),
             if invalidated_keys.len() == 1 { "" } else { "s" },
@@ -81,7 +81,7 @@ impl EntryBlocks {
             .range(range.clone())
             .map(|(k, _)| *k)
             .collect::<Vec<_>>();
-        log::trace!(
+        tracing::trace!(
             "Invalidating {} entry block{} at address range 0x{:x}-0x{:x}",
             invalidated_keys.len(),
             if invalidated_keys.len() == 1 { "" } else { "s" },

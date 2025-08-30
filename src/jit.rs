@@ -60,7 +60,7 @@ pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMac
         return next_entry;
     }
     if let Some(entry) = machine.entry_blocks.get(&pc) {
-        log::trace!("lookup entry entry found for 0x{:x}-0x{:x}", pc, entry.0);
+        tracing::trace!("lookup entry entry found for 0x{:x}-0x{:x}", pc, entry.0);
         // let mem_region = machine.memory.find_region(Address(pc)).unwrap();
         // let mmapped_region = mem_region.as_mmap().unwrap();
         // let input = &mmapped_region.as_ref()[(pc -
@@ -68,12 +68,12 @@ pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMac
         // usize - pc as usize + 4)]; _ = crate::disas(input, pc);
         return entry.1;
     }
-    log::trace!("generating entry for pc 0x{:x}", pc);
+    tracing::trace!("generating entry for pc 0x{:x}", pc);
 
     let (pc_range, next_entry) = context.compile(machine, pc).unwrap();
     machine.entry_blocks.insert(pc_range, next_entry);
 
-    log::trace!("returning generated entry for pc 0x{:x}", pc);
+    tracing::trace!("returning generated entry for pc 0x{:x}", pc);
     next_entry
 }
 
@@ -224,7 +224,7 @@ impl JitContext {
         machine: &mut Armv8AMachine,
         program_counter: u64,
     ) -> Result<(std::ops::RangeInclusive<u64>, Entry), Box<dyn std::error::Error>> {
-        log::trace!("jit compile called for pc = 0x{:x}", program_counter);
+        tracing::trace!("jit compile called for pc = 0x{:x}", program_counter);
         if let Some(_func_id) = self.func_ids.remove(&program_counter) {
             // Cranelift doesn't support hotswapping anymore, so just re-allocate
             // the JIT builder context.
@@ -268,10 +268,10 @@ impl JitContext {
 
         // {
         //     let pc = program_counter;
-        //     log::trace!("cranelift IR for translation block at pc={pc:#x}:");
-        //     log::trace!("{}", self.ctx.func);
-        //     log::trace!("Native generated code for translation block at
-        // pc={pc:#x}:");     log::trace!(
+        //     tracing::trace!("cranelift IR for translation block at pc={pc:#x}:");
+        //     tracing::trace!("{}", self.ctx.func);
+        //     tracing::trace!("Native generated code for translation block at
+        // pc={pc:#x}:");     tracing::trace!(
         //         "{}",
         //         self.ctx.compiled_code().unwrap().vcode.as_ref().unwrap()
         //     );
@@ -403,8 +403,8 @@ impl JitContext {
         if let Some(first) = decoded_iter.next() {
             let first = first.map_err(|err| format!("Error decoding instruction: {}", err))?;
             last_pc = first.address();
-            log::trace!("{:#?}", first);
-            log::trace!("0x{:x}: {}", first.address(), first);
+            tracing::trace!("{:#?}", first);
+            tracing::trace!("0x{:x}: {}", first.address(), first);
             if let ControlFlow::Break(jump_pc) = trans.translate_instruction(&first) {
                 prev_pc = first.address();
                 next_pc = jump_pc;
@@ -421,8 +421,8 @@ impl JitContext {
                 for insn in decoded_iter {
                     match insn {
                         Ok(insn) => {
-                            log::trace!("{:#?}", insn);
-                            log::trace!("0x{:x}: {}", insn.address(), insn);
+                            tracing::trace!("{:#?}", insn);
+                            tracing::trace!("0x{:x}: {}", insn.address(), insn);
                             if !machine.hw_breakpoints.is_empty()
                                 && machine.hw_breakpoints.contains(&Address(insn.address()))
                             {

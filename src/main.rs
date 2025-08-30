@@ -73,15 +73,36 @@ use simulans::{
 mod cli;
 use cli::Args;
 
+struct LogWriter;
+
+impl std::io::Write for LogWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut lck = std::io::stdout().lock();
+        lck.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use tracing_subscriber::filter::LevelFilter;
+
     let args = Args::parse()?;
     let log_level = match args.verbose {
-        0 => log::LevelFilter::Error,
-        1 => log::LevelFilter::Info,
-        2 => log::LevelFilter::Debug,
-        _ => log::LevelFilter::Trace,
+        0 => LevelFilter::ERROR,
+        1 => LevelFilter::INFO,
+        2 => LevelFilter::DEBUG,
+        _ => LevelFilter::TRACE,
     };
-    env_logger::Builder::new().filter_level(log_level).init();
+
+    // [ref:FIXME]: support no colors
+    let (non_blocking, _guard) = tracing_appender::non_blocking(LogWriter);
+    tracing_subscriber::fmt()
+        .with_max_level(log_level)
+        .with_writer(non_blocking)
+        .init();
     run_app(args)?;
     Ok(())
 }

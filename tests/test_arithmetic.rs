@@ -27,9 +27,8 @@ use simulans::{main_loop, memory::*};
 #[macro_use]
 mod utils;
 
-#[test]
+#[test_log::test]
 fn test_sdiv() {
-    _ = env_logger::builder().is_test(true).try_init();
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_sdiv.bin");
     _ = simulans::disas(TEST_INPUT, 0);
     // Capstone output:
@@ -63,10 +62,8 @@ fn test_sdiv() {
     );
 }
 
-#[test]
+#[test_log::test]
 fn test_mov() {
-    _ = env_logger::builder().is_test(true).try_init();
-
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_mov.bin");
 
     // _ = simulans::disas(TEST_INPUT, 0);
@@ -81,10 +78,8 @@ fn test_mov() {
     assert_hex_eq!(machine.cpu_state.registers.x2, 0x80803519);
 }
 
-#[test]
+#[test_log::test]
 fn test_bitfields() {
-    _ = env_logger::builder().is_test(true).try_init();
-
     // ```asm
     // // load a 64-bit immediate using MOV
     // .macro movq Xn, imm
@@ -126,10 +121,8 @@ fn test_bitfields() {
     assert_hex_eq!(machine.cpu_state.registers.x5, (0x55555555 & 0b1) << 63);
 }
 
-#[test]
+#[test_log::test]
 fn test_bitfields_2() {
-    _ = env_logger::builder().is_test(true).try_init();
-
     // ```asm
     // // load a 64-bit immediate using MOV
     // .macro movq Xn, imm

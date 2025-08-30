@@ -27,7 +27,7 @@ use simulans::{cpu_state::NZCV, main_loop, memory::*};
 #[macro_use]
 mod utils;
 
-#[test]
+#[test_log::test]
 /// ```asm
 /// // load a 64-bit immediate using MOV
 /// .macro movq Xn, imm
@@ -195,8 +195,6 @@ mod utils;
 /// csel x29, x0, x1, nv
 /// ```
 fn test_conditional_execution() {
-    _ = env_logger::builder().is_test(true).try_init();
-
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_cond.bin");
 
     const MEMORY_SIZE: MemorySize =
@@ -312,7 +310,7 @@ fn test_conditional_execution() {
     }
 }
 
-#[test]
+#[test_log::test]
 /// ```asm
 /// msr NZCV, xzr
 ///
@@ -331,8 +329,6 @@ fn test_conditional_execution() {
 /// mrs x10, NZCV
 /// ```
 fn test_cmp_nzcv() {
-    _ = env_logger::builder().is_test(true).try_init();
-
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_cmp.bin");
 
     const MEMORY_SIZE: MemorySize =
@@ -445,7 +441,7 @@ fn test_cmp_nzcv() {
 // b.nlast│ │   0x4008008c <text_begin+140> stp xzr, xzr, [x29], #16 │
 // │  >0x40080090 <text_begin+144> b   0x40080084 <text_begin+132>
 
-#[test]
+#[test_log::test]
 /// ```asm
 /// // load a 64-bit immediate using MOV
 /// .macro movq Xn, imm
@@ -469,8 +465,6 @@ fn test_cmp_nzcv() {
 /// nop
 /// ```
 fn test_cmp_b_cnd() {
-    _ = env_logger::builder().is_test(true).try_init();
-
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_b_cnd.bin");
 
     const MEMORY_SIZE: MemorySize =
@@ -517,7 +511,7 @@ fn test_cmp_b_cnd() {
     }
 }
 
-#[test]
+#[test_log::test]
 /// ```asm
 /// // load a 64-bit immediate using MOV
 /// .macro movq Xn, imm
@@ -533,8 +527,6 @@ fn test_cmp_b_cnd() {
 /// cset w8, cs
 /// ```
 fn test_adds() {
-    _ = env_logger::builder().is_test(true).try_init();
-
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_adds.bin");
 
     const MEMORY_SIZE: MemorySize =

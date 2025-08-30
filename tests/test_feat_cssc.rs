@@ -30,8 +30,6 @@
 // [ref:TODO]: Neither capstone nor binja can disassemble FEAT_CSSE.
 //#[test]
 //fn test_feat_cssc() {
-//    _ = env_logger::builder().is_test(true).try_init();
-
 //    // ```asm
 //    // // load a 64-bit immediate using MOV
 //    // .macro movq Xn, imm

@@ -26,7 +26,7 @@ use simulans::{main_loop, memory::*};
 
 mod utils;
 
-#[test]
+#[test_log::test]
 fn test_simple_if() {
     // This code was compiled from this C function:
     // ```c
@@ -80,8 +80,6 @@ fn test_simple_if() {
     // _ = simulans::disas(FOOBAR, 0);
     const FOOBAR_UNOPT: &[u8] = include_bytes!("./inputs/test_simple_if.bin");
     // _ = simulans::disas(FOOBAR_UNOPT, 0);
-
-    _ = env_logger::builder().is_test(true).try_init();
 
     let entry_point = Address(0);
     {

@@ -36,7 +36,7 @@ use simulans::{
 mod utils;
 
 /// Test a simple function that squares its input.
-#[test]
+#[test_log::test]
 fn test_square() {
     // This code was compiled from this C function:
     // ```c
@@ -80,7 +80,7 @@ fn test_square() {
 }
 
 /// Test a str and a load from the stack
-#[test]
+#[test_log::test]
 fn test_load_stores() {
     // Capstone output:
     // 0x40080000: str x0, [sp, #-0x10]!
@@ -120,7 +120,7 @@ fn test_load_stores() {
 }
 
 /// Test a load stores adds and moves in the stack
-#[test]
+#[test_log::test]
 fn test_load_stores_2() {
     // Capstone output:
     // 0x40080000: mov x0, #0x1234
@@ -155,7 +155,7 @@ fn test_load_stores_2() {
 }
 
 /// Test exception levels
-#[test]
+#[test_log::test]
 fn test_exception_levels() {
     // Capstone output:
     // 0x40080000: mov x0, #1
@@ -201,10 +201,8 @@ fn test_exception_levels() {
     assert_hex_eq!(machine.cpu_state.registers.elr_el3, 0x60);
 }
 
-#[test]
+#[test_log::test]
 fn test_uart_write_str() {
-    _ = env_logger::builder().is_test(true).try_init();
-
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_write_str.bin");
 
     const DRAM_MEMORY_SIZE: MemorySize =

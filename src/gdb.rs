@@ -40,7 +40,7 @@ use gdbstub::{
         Target, TargetError, TargetResult,
     },
 };
-use log::{error, info};
+use tracing::{error, info, trace};
 
 use crate::memory::Address;
 
@@ -481,27 +481,28 @@ impl GdbStubRunner {
                 None => {
                     return format!(
                         "Log level is {:?}. Available levels: {{trace,debug,error,warn,info,off}}",
-                        log::max_level()
-                    )
+                        "" //FIXMElog::max_level()
+                    );
                 }
-                Some(trace) if trace.eq_ignore_ascii_case("trace") => {
-                    log::set_max_level(log::LevelFilter::Trace);
-                }
-                Some(debug) if debug.eq_ignore_ascii_case("debug") => {
-                    log::set_max_level(log::LevelFilter::Debug);
-                }
-                Some(error) if error.eq_ignore_ascii_case("error") => {
-                    log::set_max_level(log::LevelFilter::Error);
-                }
-                Some(info) if info.eq_ignore_ascii_case("info") => {
-                    log::set_max_level(log::LevelFilter::Info);
-                }
-                Some(warn) if warn.eq_ignore_ascii_case("warn") => {
-                    log::set_max_level(log::LevelFilter::Warn);
-                }
-                Some(off) if off.eq_ignore_ascii_case("off") => {
-                    log::set_max_level(log::LevelFilter::Off);
-                }
+                // FIXME
+                // Some(trace) if trace.eq_ignore_ascii_case("trace") => {
+                //     log::set_max_level(log::LevelFilter::Trace);
+                // }
+                // Some(debug) if debug.eq_ignore_ascii_case("debug") => {
+                //     log::set_max_level(log::LevelFilter::Debug);
+                // }
+                // Some(error) if error.eq_ignore_ascii_case("error") => {
+                //     log::set_max_level(log::LevelFilter::Error);
+                // }
+                // Some(info) if info.eq_ignore_ascii_case("info") => {
+                //     log::set_max_level(log::LevelFilter::Info);
+                // }
+                // Some(warn) if warn.eq_ignore_ascii_case("warn") => {
+                //     log::set_max_level(log::LevelFilter::Warn);
+                // }
+                // Some(off) if off.eq_ignore_ascii_case("off") => {
+                //     log::set_max_level(log::LevelFilter::Off);
+                // }
                 Some(other) => {
                     return format!(
                         "Invalid log level {other:?}: valid log level values: \
@@ -986,7 +987,7 @@ impl SwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        log::trace!(
+        trace!(
             "Adding software breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
             addr
@@ -1006,7 +1007,7 @@ impl SwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        log::trace!(
+        trace!(
             "Removing software breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
             addr
@@ -1024,7 +1025,7 @@ impl HwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        log::trace!(
+        trace!(
             "Adding hardware breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
             addr
@@ -1043,7 +1044,7 @@ impl HwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        log::trace!(
+        trace!(
             "Removing hardware breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
             addr
