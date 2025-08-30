@@ -3,11 +3,8 @@
 *.swo
 *.swx
 *.log
-# xtask outputs
-*.s
-*.S
-*.bin
-*.o
-*.elf
 tags
 target
+tests/inputs/*.bin
+tests/inputs/*.o
+tests/inputs/*.elf
