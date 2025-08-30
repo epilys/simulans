@@ -368,13 +368,15 @@ fn test_cmp_nzcv() {
             // cmp x0, x1
             // mrs x8, NZCV
             let mut nzcv = NZCV::from(0x0);
+            let mut fields = nzcv.fields();
             // A == B
-            nzcv.set_z(false);
+            fields.set_z(false);
             // A >= B
-            nzcv.set_c(false);
+            fields.set_c(false);
             // A < B
-            nzcv.set_n(true);
-            nzcv.set_v(false);
+            fields.set_n(true);
+            fields.set_v(false);
+            nzcv.set_fields(fields);
 
             assert_eq!(nzcv, NZCV::from(reg!(x8)));
             assert_hex_eq!(reg!(x8), nzcv.into());
@@ -385,14 +387,16 @@ fn test_cmp_nzcv() {
             // cmp x1, x0
             // mrs x9, NZCV
             let mut nzcv = NZCV::from(0x0);
+            let mut fields = nzcv.fields();
             // A == B
-            nzcv.set_z(false);
+            fields.set_z(false);
             // A >= B
-            nzcv.set_c(true);
+            fields.set_c(true);
             // A < B
-            nzcv.set_n(false);
+            fields.set_n(false);
             // Overflow
-            nzcv.set_v(false);
+            fields.set_v(false);
+            nzcv.set_fields(fields);
 
             assert_eq!(nzcv, NZCV::from(reg!(x9)));
             assert_hex_eq!(reg!(x9), nzcv.into());
@@ -403,14 +407,16 @@ fn test_cmp_nzcv() {
             // cmp xzr, xzr
             // mrs x10, NZCV
             let mut nzcv = NZCV::from(0x0);
+            let mut fields = nzcv.fields();
             // A == B
-            nzcv.set_z(true);
+            fields.set_z(true);
             // A >= B
-            nzcv.set_c(true);
+            fields.set_c(true);
             // A < B
-            nzcv.set_n(false);
+            fields.set_n(false);
             // Overflow
-            nzcv.set_v(false);
+            fields.set_v(false);
+            nzcv.set_fields(fields);
 
             assert_hex_eq!(reg!(nzcv).into(), reg!(x10));
             assert_eq!(nzcv, NZCV::from(reg!(x10)));
@@ -419,18 +425,22 @@ fn test_cmp_nzcv() {
 
         {
             let mut nzcv = NZCV::from(0x0);
+            let mut fields = nzcv.fields();
             // A == B
-            nzcv.set_z(false);
+            fields.set_z(false);
             // A >= B
-            nzcv.set_c(false);
+            fields.set_c(false);
             // A < B
-            nzcv.set_n(true);
+            fields.set_n(true);
             // Overflow
-            nzcv.set_v(false);
+            fields.set_v(false);
+            nzcv.set_fields(fields);
             assert_eq!(u64::from(nzcv) & (1 << 31), 1 << 31);
-            nzcv.set_n(false);
+            fields.set_n(false);
+            nzcv.set_fields(fields);
             assert_eq!(u64::from(nzcv) & (1 << 31), 0);
-            nzcv.set_z(true);
+            fields.set_z(true);
+            nzcv.set_fields(fields);
             assert_eq!(u64::from(nzcv) & (1 << 30), 1 << 30);
         }
     }
@@ -499,13 +509,15 @@ fn test_cmp_b_cnd() {
             // Results of CMP:
             // cmp x29, x30
             let mut nzcv = NZCV::from(0x0);
+            let mut fields = nzcv.fields();
             // A == B
-            nzcv.set_z(true);
+            fields.set_z(true);
             // A >= B
-            nzcv.set_c(true);
+            fields.set_c(true);
             // A < B
-            nzcv.set_n(false);
-            nzcv.set_v(false);
+            fields.set_n(false);
+            fields.set_v(false);
+            nzcv.set_fields(fields);
 
             assert_eq!(nzcv, reg!(nzcv));
             assert_hex_eq!(reg!(nzcv).into(), nzcv.into());
@@ -563,10 +575,13 @@ fn test_adds() {
 
         {
             let mut nzcv = NZCV::from(0x0);
-            nzcv.set_z(false);
-            nzcv.set_c(false);
-            nzcv.set_n(false);
-            nzcv.set_v(false);
+            let mut fields = nzcv.fields();
+
+            fields.set_z(false);
+            fields.set_c(false);
+            fields.set_n(false);
+            fields.set_v(false);
+            nzcv.set_fields(fields);
 
             assert_eq!(nzcv, reg!(nzcv));
             assert_hex_eq!(reg!(nzcv).into(), nzcv.into());
