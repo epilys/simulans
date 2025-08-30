@@ -315,8 +315,6 @@ pub struct ExecutionState {
     pub vector_registers: [(u64, u64); 32],
     /// Process Element state.
     pub pstate: PSTATE,
-    /// Saved status register (`SPSR_ELx`).
-    pub spsr: SavedProgramStatusRegister,
     /// Architectural features this CPU supports.
     pub arch_features: ArchFeatures,
 }
