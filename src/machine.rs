@@ -22,7 +22,15 @@
 
 //! Representation of an emulated machine.
 
-use std::{collections::BTreeSet, num::NonZero, pin::Pin};
+use std::{
+    collections::BTreeSet,
+    num::NonZero,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc,
+    },
+};
 
 use crate::{
     cpu_state::*,
@@ -59,6 +67,10 @@ pub extern "C" fn address_lookup(machine: &mut Armv8AMachine, address: u64) -> R
     }
 }
 
+pub extern "C" fn helper_set_exit_request(machine: &mut Armv8AMachine, exit_request: u8) {
+    machine.exit_request.store(exit_request, Ordering::SeqCst);
+}
+
 /// The state of the emulated machine.
 #[repr(C)]
 pub struct Armv8AMachine {
@@ -69,12 +81,17 @@ pub struct Armv8AMachine {
     pub entry_blocks: EntryBlocks,
     pub lookup_entry_func: Entry,
     pub hw_breakpoints: BTreeSet<Address>,
-    pub halted: u8,
+    pub exit_request: Arc<AtomicU8>,
     pub in_breakpoint: bool,
 }
 
 impl Armv8AMachine {
     pub fn new(memory: MemoryMap) -> Pin<Box<Self>> {
+        let exit_request = Arc::new(AtomicU8::new(0));
+        Self::new_with_exit_request(memory, exit_request)
+    }
+
+    pub fn new_with_exit_request(memory: MemoryMap, exit_request: Arc<AtomicU8>) -> Pin<Box<Self>> {
         Box::pin(Self {
             pc: 0,
             prev_pc: 0,
@@ -83,7 +100,7 @@ impl Armv8AMachine {
             entry_blocks: EntryBlocks::new(),
             lookup_entry_func: Entry(lookup_entry),
             hw_breakpoints: BTreeSet::new(),
-            halted: 0,
+            exit_request,
             in_breakpoint: false,
         })
     }
