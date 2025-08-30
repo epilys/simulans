@@ -22,7 +22,7 @@
 
 use std::num::NonZero;
 
-use simulans::{cpu_state::NZCV, machine, main_loop, memory::*};
+use simulans::{cpu_state::NZCV, main_loop, memory::*};
 
 #[macro_use]
 mod utils;
@@ -197,22 +197,18 @@ mod utils;
 fn test_conditional_execution() {
     _ = env_logger::builder().is_test(true).try_init();
 
-    const TEST_INPUT: &[u8] = b"\x1e\x42\x3b\xd5\xde\x7b\x40\x92\x1e\x42\x1b\xd5\x1e\x42\x3b\xd5\xde\xfb\x61\x92\x1e\x42\x1b\xd5\x1e\x42\x3b\xd5\xde\xfb\x62\x92\x1e\x42\x1b\xd5\x1e\x42\x3b\xd5\xde\xfb\x63\x92\x1e\x42\x1b\xd5\x40\x83\x99\xd2\x40\x19\xbe\xf2\x00\x00\xc0\xf2\x00\x00\xe0\xf2\x41\x17\x96\xd2\xc1\x5f\xb9\xf2\x01\x00\xc0\xf2\x01\x00\xe0\xf2\x1e\x42\x3b\xd5\xde\x03\x62\xb2\x1e\x42\x1b\xd5\x02\x00\x81\x9a\x03\x10\x81\x9a\x1e\x42\x3b\xd5\xde\xfb\x61\x92\x1e\x42\x1b\xd5\x04\x00\x81\x9a\x05\x10\x81\x9a\x1e\x42\x3b\xd5\xde\x03\x63\xb2\x1e\x42\x1b\xd5\x06\x20\x81\x9a\x07\x30\x81\x9a\x1e\x42\x3b\xd5\xde\xfb\x62\x92\x1e\x42\x1b\xd5\x08\x20\x81\x9a\x09\x30\x81\x9a\x1e\x42\x3b\xd5\xde\x83\x61\xb2\x1e\x42\x1b\xd5\x0a\x40\x81\x9a\x0b\x50\x81\x9a\x1e\x42\x3b\xd5\xde\x7b\x40\x92\x1e\x42\x1b\xd5\x0c\x40\x81\x9a\x0d\x50\x81\x9a\x1e\x42\x3b\xd5\xde\x03\x64\xb2\x1e\x42\x1b\xd5\x0e\x60\x81\x9a\x0f\x70\x81\x9a\x1e\x42\x3b\xd5\xde\xfb\x63\x92\x1e\x42\x1b\xd5\x10\x60\x81\x9a\x11\x70\x81\x9a\x1e\x42\x3b\xd5\xde\x03\x63\xb2\x1e\x42\x1b\xd5\x1e\x42\x3b\xd5\xde\xfb\x61\x92\x1e\x42\x1b\xd5\x12\x80\x81\x9a\x13\x90\x81\x9a\x1e\x42\x3b\xd5\xde\x83\x61\xb2\x1e\x42\x1b\xd5\x1e\x42\x3b\xd5\xde\x03\x64\xb2\x1e\x42\x1b\xd5\x14\xa0\x81\x9a\x15\xb0\x81\x9a\x1e\x42\x3b\xd5\xde\xfb\x63\x92\x1e\x42\x1b\xd5\x16\xa0\x81\x9a\x17\xb0\x81\x9a\x1e\x42\x3b\xd5\xde\xfb\x61\x92\x1e\x42\x1b\xd5\x1e\x42\x3b\xd5\xde\x7b\x40\x92\x1e\x42\x1b\xd5\x18\xc0\x81\x9a\x19\xd0\x81\x9a\x1e\x42\x3b\xd5\xde\x03\x64\xb2\x1e\x42\x1b\xd5\x1a\xc0\x81\x9a\x1b\xd0\x81\x9a\x1c\xe0\x81\x9a\x1d\xf0\x81\x9a";
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_cond.bin");
 
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
 
     // _ = simulans::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+
     {
-        let memory = MemoryMap::builder()
-            .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
-            .unwrap()
-            .build();
-        let mut machine = machine::Armv8AMachine::new(memory);
-
-        main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-
         macro_rules! reg {
             ($reg:ident) => {
                 machine.cpu_state.registers.$reg
@@ -337,22 +333,18 @@ fn test_conditional_execution() {
 fn test_cmp_nzcv() {
     _ = env_logger::builder().is_test(true).try_init();
 
-    const TEST_INPUT: &[u8] = b"\x1f\x42\x1b\xd5\x20\x00\x80\xd2\x41\x00\x80\xd2\x1f\x00\x01\xeb\x08\x42\x3b\xd5\x1f\x42\x1b\xd5\x3f\x00\x00\xeb\x09\x42\x3b\xd5\x1f\x42\x1b\xd5\xff\x03\x1f\xeb\x0a\x42\x3b\xd5";
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_cmp.bin");
 
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
 
     // _ = simulans::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+
     {
-        let memory = MemoryMap::builder()
-            .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
-            .unwrap()
-            .build();
-        let mut machine = machine::Armv8AMachine::new(memory);
-
-        main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-
         macro_rules! reg {
             ($reg:ident) => {
                 machine.cpu_state.registers.$reg
@@ -479,22 +471,18 @@ fn test_cmp_nzcv() {
 fn test_cmp_b_cnd() {
     _ = env_logger::builder().is_test(true).try_init();
 
-    const TEST_INPUT: &[u8] = b"\x1d\x00\x8c\xd2\x1d\x01\xa8\xf2\x1d\x00\xc0\xf2\x1d\x00\xe0\xf2\x1e\x00\x8c\xd2\x1e\x01\xa8\xf2\x1e\x00\xc0\xf2\x1e\x00\xe0\xf2\x02\x00\x80\xd2\xbf\x03\x1e\xeb\x42\x00\x00\x54\x05\x00\x00\x14\x22\x00\x80\xd2\x02\x00\xa0\xf2\x02\x00\xc0\xf2\x02\x00\xe0\xf2\x1f\x20\x03\xd5";
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_b_cnd.bin");
 
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
 
     _ = simulans::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+
     {
-        let memory = MemoryMap::builder()
-            .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
-            .unwrap()
-            .build();
-        let mut machine = machine::Armv8AMachine::new(memory);
-
-        main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-
         macro_rules! reg {
             ($reg:ident) => {
                 machine.cpu_state.registers.$reg
@@ -502,12 +490,12 @@ fn test_cmp_b_cnd() {
         }
 
         // Initial, constant values:
-        assert_hex_eq!(reg!(x29), 0x40086000);
-        assert_hex_eq!(reg!(x30), 0x40086000);
+        assert_hex_eq!(reg!(x5), 0x40086000);
+        assert_hex_eq!(reg!(x6), 0x40086000);
 
         {
             // Results of CMP:
-            // cmp x29, x30
+            // cmp x5, x6
             let mut nzcv = NZCV::from(0x0);
             let mut fields = nzcv.fields();
             // A == B
@@ -547,22 +535,18 @@ fn test_cmp_b_cnd() {
 fn test_adds() {
     _ = env_logger::builder().is_test(true).try_init();
 
-    const TEST_INPUT: &[u8] = b"\x01\x04\x8a\xd2\x21\x01\xa8\xf2\x01\x00\xc0\xf2\x01\x00\xe0\xf2\x02\x00\x80\xd2\x02\x20\xa0\xf2\x02\x00\xc0\xf2\x02\x00\xe0\xf2\x20\x00\x02\xab\xe8\x37\x9f\x1a";
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_adds.bin");
 
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
 
     _ = simulans::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+
     {
-        let memory = MemoryMap::builder()
-            .with_region(MemoryRegion::new("ram", MEMORY_SIZE, entry_point).unwrap())
-            .unwrap()
-            .build();
-        let mut machine = machine::Armv8AMachine::new(memory);
-
-        main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-
         macro_rules! reg {
             ($reg:ident) => {
                 machine.cpu_state.registers.$reg
