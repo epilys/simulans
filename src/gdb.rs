@@ -55,9 +55,11 @@ use gdbstub::{
         Target, TargetError, TargetResult,
     },
 };
-use log::{error, info};
 
-use crate::memory::Address;
+use crate::{
+    memory::Address,
+    tracing::{error, info, LevelFilter, TracingGuard},
+};
 
 /// Helper struct for memory map xml
 struct GdbMemoryMap {
@@ -138,6 +140,7 @@ impl std::fmt::Debug for GdbStubRequest<AArch64> {
 }
 
 pub struct GdbStubRunner {
+    tracing_guard: TracingGuard,
     request_receiver: Receiver<GdbStubRequest<AArch64>>,
     request_complete_signal: Arc<(Mutex<bool>, Condvar)>,
     stop_sender: SyncSender<SingleThreadStopReason<<AArch64 as Arch>::Usize>>,
@@ -491,37 +494,74 @@ impl GdbStubRunner {
             return String::from("Available monitor commands: {{log,pc,state,registers}}");
         }
 
-        match words[0] {
+        if let Err(err) = match words[0] {
             "log" => match words.get(1) {
                 None => {
                     return format!(
                         "Log level is {:?}. Available levels: {{trace,debug,error,warn,info,off}}",
-                        log::max_level()
-                    )
+                        self.tracing_guard.current_level()
+                    );
                 }
                 Some(trace) if trace.eq_ignore_ascii_case("trace") => {
-                    log::set_max_level(log::LevelFilter::Trace);
+                    self.tracing_guard.change_level(LevelFilter::TRACE)
                 }
                 Some(debug) if debug.eq_ignore_ascii_case("debug") => {
-                    log::set_max_level(log::LevelFilter::Debug);
+                    self.tracing_guard.change_level(LevelFilter::DEBUG)
                 }
                 Some(error) if error.eq_ignore_ascii_case("error") => {
-                    log::set_max_level(log::LevelFilter::Error);
+                    self.tracing_guard.change_level(LevelFilter::ERROR)
                 }
                 Some(info) if info.eq_ignore_ascii_case("info") => {
-                    log::set_max_level(log::LevelFilter::Info);
+                    self.tracing_guard.change_level(LevelFilter::INFO)
                 }
                 Some(warn) if warn.eq_ignore_ascii_case("warn") => {
-                    log::set_max_level(log::LevelFilter::Warn);
+                    self.tracing_guard.change_level(LevelFilter::WARN)
                 }
                 Some(off) if off.eq_ignore_ascii_case("off") => {
-                    log::set_max_level(log::LevelFilter::Off);
+                    self.tracing_guard.change_level(LevelFilter::OFF)
                 }
                 Some(other) => {
                     return format!(
                         "Invalid log level {other:?}: valid log level values: \
                          {{trace,debug,error,warn,info,off}}"
                     );
+                }
+            },
+            "trace" => match words.get(1) {
+                None => {
+                    return format!(
+                        "Active trace items {}",
+                        self.tracing_guard
+                            .events()
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<&str>>()
+                            .join(",")
+                    );
+                }
+                Some(item) => {
+                    let tokens = item.split('=').collect::<Vec<&str>>();
+                    if !item.contains('=')
+                        || tokens.len() != 2
+                        || ["off", "on"].contains(&tokens[1])
+                    {
+                        return "Invalid syntax: use TRACE_ITEM=[off|on]".to_string();
+                    }
+                    let item = match tokens[0].parse() {
+                        Ok(v) => v,
+                        Err(err) => return format!("{err}"),
+                    };
+                    let mut events = self.tracing_guard.events().clone();
+                    match tokens[1] {
+                        "off" => {
+                            events.remove(&item);
+                        }
+                        "on" => {
+                            events.insert(item);
+                        }
+                        _ => unreachable!(),
+                    }
+                    self.tracing_guard.set_events(events)
                 }
             },
             "pc" => {
@@ -541,6 +581,8 @@ impl GdbStubRunner {
                     "Unexpected command {other:?}: available commands: {{log,pc,state,registers}}"
                 );
             }
+        } {
+            return err.to_string();
         }
 
         String::new()
@@ -765,6 +807,7 @@ impl GdbStub {
     pub fn new(
         mut machine: Pin<Box<crate::machine::Armv8AMachine>>,
         start_address: crate::memory::Address,
+        tracing_guard: TracingGuard,
     ) -> Self {
         if machine.pc == 0 {
             machine.pc = start_address.0;
@@ -777,6 +820,7 @@ impl GdbStub {
             move || {
                 let jit_ctx = crate::jit::JitContext::new();
                 let mut runner = GdbStubRunner {
+                    tracing_guard,
                     request_receiver,
                     request_complete_signal,
                     stop_sender,
@@ -1001,7 +1045,9 @@ impl SwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        log::trace!(
+        tracing::event!(
+            target: "gdb",
+            tracing::Level::TRACE,
             "Adding software breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
             addr
@@ -1021,7 +1067,9 @@ impl SwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        log::trace!(
+        tracing::event!(
+            target: "gdb",
+            tracing::Level::TRACE,
             "Removing software breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
             addr
@@ -1039,7 +1087,9 @@ impl HwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        log::trace!(
+        tracing::event!(
+            target: "gdb",
+            tracing::Level::TRACE,
             "Adding hardware breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
             addr
@@ -1058,7 +1108,9 @@ impl HwBreakpoint for GdbStub {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        log::trace!(
+        tracing::event!(
+            target: "gdb",
+            tracing::Level::TRACE,
             "Removing hardware breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
             addr

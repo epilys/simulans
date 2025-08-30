@@ -134,7 +134,7 @@ mod linux {
             {
                 Ok(f) => f,
                 Err(err) => {
-                    log::error!("Could not open {}: {err}", path.display());
+                    tracing::error!("Could not open {}: {err}", path.display());
                     return Err(Errno::EINVAL);
                 }
             };
@@ -383,7 +383,7 @@ impl MemoryRegion {
     /// Returns a memory region backed by an `mmap(2)` created area.
     pub fn new(name: &str, size: MemorySize, phys_offset: Address) -> Result<Self, Errno> {
         if size.get().checked_add(phys_offset.0).is_none() {
-            log::error!("Size {size} cannot fit to offset {phys_offset}, it overflows.");
+            tracing::error!("Size {size} cannot fit to offset {phys_offset}, it overflows.");
             return Err(Errno::E2BIG);
         }
         MmappedMemory::new_region(name, size, phys_offset)
@@ -494,11 +494,13 @@ pub mod ops {
                 address_inside_region: u64,
                 value: $size,
             ) {
-                log::trace!(
-                    "writing {} value {} to address {}",
-                    stringify!($size),
+                tracing::event!(
+                    target: "memory",
+                    tracing::Level::TRACE,
+                    kind = "write",
+                    size = stringify!($size),
                     value,
-                    Address(address_inside_region)
+                    address = ?Address(address_inside_region)
                 );
                 match mem_region.backing {
                     MemoryBacking::Mmap(ref mut map @ MmappedMemory { .. }) => {
@@ -532,11 +534,13 @@ pub mod ops {
                 mem_region: &mut MemoryRegion,
                 address_inside_region: u64,
             ) -> $size {
-                log::trace!(
-                    "reading {} value from address {} (inside offset = {})",
-                    stringify!($size),
-                    mem_region.phys_offset + Address(address_inside_region),
-                    Address(address_inside_region)
+                tracing::event!(
+                    target: "memory",
+                    tracing::Level::TRACE,
+                    kind = "read",
+                    size = stringify!($size),
+                    address = ?Address(address_inside_region),
+                    inside_offset = ?Address(address_inside_region),
                 );
                 match mem_region.backing {
                     MemoryBacking::Mmap(ref map @ MmappedMemory {  .. }) => {
@@ -548,13 +552,13 @@ pub mod ops {
                         // SAFETY: this is safe as long as $size width does not exceed the map's
                         // size. We don't check for this, so FIXME
                             unsafe { std::ptr::read_unaligned(destination.cast::<$size>()) };
-                        log::trace!(
-                            "{}: read {} value {}=0x{:x}=0b{:b}",
-                            Address(address_inside_region),
-                            stringify!($size),
-                            value,
-                            value,
-                            value,
+                        tracing::event!(
+                            target: "memory",
+                            tracing::Level::TRACE,
+                            kind = "read",
+                            size = stringify!($size),
+                            address = ?Address(address_inside_region),
+                            "value {value}=0x{value:x}=0b{value:b}",
                         );
                         value
                     }

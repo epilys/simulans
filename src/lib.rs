@@ -120,6 +120,8 @@ pub mod interval_tree;
 pub mod jit;
 pub mod machine;
 pub mod memory;
+#[macro_use]
+pub mod tracing;
 
 /// Disassembles and prints each decoded aarch64 instruction to stdout using
 /// Capstone library, for debugging.
@@ -135,9 +137,9 @@ pub fn disas(input: &[u8], starting_address: u64) -> Result<(), Box<dyn std::err
         .expect("Failed to create Capstone object");
     cs.set_syntax(capstone::Syntax::Intel)?;
     let decoded_iter = cs.disasm_all(input, starting_address)?;
-    log::trace!("Capstone output:");
+    tracing::trace!("Capstone output:");
     for insn in decoded_iter.as_ref() {
-        log::trace!("{}", insn);
+        tracing::trace!("{}", insn);
     }
     Ok(())
 }

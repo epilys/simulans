@@ -32,14 +32,18 @@ use num_traits::cast::FromPrimitive;
 
 pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine, is_entry: bool) {
     if is_entry {
-        log::trace!(
+        tracing::event!(
+            target: "block_entry",
+            tracing::Level::TRACE,
             "entering block pc = 0x{:x}, prev_pc = 0x{:x} with registers:\n{:#?}",
             machine.pc,
             machine.prev_pc,
             machine.cpu_state.registers
         );
     } else {
-        log::trace!(
+        tracing::event!(
+            target: "block_exit",
+            tracing::Level::TRACE,
             "exiting block from 0x{:x} to pc 0x{:x} with registers:\n{:#?}",
             machine.prev_pc,
             machine.pc,

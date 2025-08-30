@@ -48,10 +48,11 @@ pub struct ResolvedAddress<'a> {
 }
 
 pub extern "C" fn address_lookup(machine: &mut Armv8AMachine, address: u64) -> ResolvedAddress<'_> {
-    log::trace!(
-        "address lookup from pc 0x{:x} for address 0x{:x}",
-        machine.pc,
-        address
+    tracing::event!(
+        target: "address_lookup",
+        tracing::Level::TRACE,
+        address = ?Address(address),
+        pc = ?Address(machine.pc),
     );
     let Some(mem_region) = machine.memory.find_region(Address(address)) else {
         panic!(
@@ -144,7 +145,7 @@ impl Armv8AMachine {
         address: Address,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let Some(input_size) = NonZero::new(input.len().try_into()?) else {
-            log::info!("Called `load_code` with empty slice which does nothing.");
+            tracing::info!("Called `load_code` with empty slice which does nothing.");
             return Ok(());
         };
         let Some(mem_region) = self.memory.find_region_mut(address) else {
@@ -165,7 +166,7 @@ impl Armv8AMachine {
             .into());
         }
         let address_inside_region = address.0 - mem_region.phys_offset.0;
-        log::trace!(
+        tracing::trace!(
             "loading code of {} in address {} (address inside region of size {} is {})",
             MemorySize((input.len() as u64).try_into().unwrap()),
             address,

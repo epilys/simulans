@@ -66,8 +66,9 @@
 
 use simulans::{
     devices::Device,
-    disas, machine, main_loop,
+    machine, main_loop,
     memory::{Address, MemoryMap, MemoryRegion, MemorySize},
+    tracing::Output,
 };
 
 mod cli;
@@ -75,18 +76,49 @@ use cli::Args;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse()?;
-    let log_level = match args.verbose {
-        0 => log::LevelFilter::Error,
-        1 => log::LevelFilter::Info,
-        2 => log::LevelFilter::Debug,
-        _ => log::LevelFilter::Trace,
-    };
-    env_logger::Builder::new().filter_level(log_level).init();
-    run_app(args)?;
-    Ok(())
+    run_app(args)
 }
 
 fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    use tracing_subscriber::filter::LevelFilter;
+
+    let log_level = match args.verbose {
+        0 => LevelFilter::ERROR,
+        1 => LevelFilter::INFO,
+        2 => LevelFilter::DEBUG,
+        _ => LevelFilter::TRACE,
+    };
+
+    let log_output = if let Some(ref log) = args.trace.destination {
+        if log.stderr {
+            Output::Stderr
+        } else if let Some(ref p) = log.file {
+            Output::File(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(p)
+                    .map_err(|err| format!("Could not open {}: {err}", p.display()))?,
+            )
+        } else {
+            Output::Stdout
+        }
+    } else {
+        Output::Stderr
+    };
+    let ansi = match args.trace.color.unwrap_or_default() {
+        clap::ColorChoice::Auto => {
+            matches!(nix::unistd::isatty(std::io::stdout()), Ok(true))
+        }
+        clap::ColorChoice::Always => true,
+        clap::ColorChoice::Never => false,
+    };
+    let tracing_guard = simulans::tracing::init(
+        log_level,
+        log_output,
+        ansi,
+        args.trace.trace_items.iter().cloned().collect(),
+    );
     let input = std::fs::read(&args.binary)?;
     // Create the machine instance, which holds the VM state.
 
@@ -119,7 +151,7 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     }
     let memory = memory_map_builder.build();
     let mut machine = machine::Armv8AMachine::new(memory);
-    disas(&input, args.entry_point_address().0)?;
+    // disas(&input, args.entry_point_address().0)?;
     if args.generate_fdt {
         let fdt = machine.generate_fdt(args.entry_point_address())?;
         if let Some(ref dump_dtb) = args.dump_dtb {
@@ -135,7 +167,8 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(path) = args.gdb_stub_path.as_ref() {
         machine.load_code(&input, args.entry_point_address())?;
-        let gdb_stub = simulans::gdb::GdbStub::new(machine, args.entry_point_address());
+        let gdb_stub =
+            simulans::gdb::GdbStub::new(machine, args.entry_point_address(), tracing_guard);
         simulans::gdb::main_loop(gdb_stub, path);
     } else {
         main_loop(&mut machine, args.entry_point_address(), &input)?;

@@ -23,7 +23,10 @@
 use std::{borrow::Cow, num::NonZero, path::PathBuf};
 
 use clap::Parser;
-use simulans::memory::{Address, MemorySize, KERNEL_ADDRESS, PHYS_MEM_START};
+use simulans::{
+    memory::{Address, MemorySize, KERNEL_ADDRESS, PHYS_MEM_START},
+    tracing::TraceItem,
+};
 
 fn maybe_hex(s: &str) -> Result<Address, Cow<'static, str>> {
     const HEX_PREFIX: &str = "0x";
@@ -144,6 +147,40 @@ pub struct Args {
     /// Start a GDB stub instead at given Unix domain socket path.
     #[arg(long)]
     pub gdb_stub_path: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub trace: Trace,
+}
+
+#[derive(Parser, Debug)]
+pub struct Trace {
+    #[command(flatten)]
+    pub destination: Option<TraceDestination>,
+
+    #[allow(clippy::struct_field_names)]
+    #[arg(long, value_name = "ITEM", value_delimiter = ',')]
+    /// By default named trace items are not logged and must be enabled.
+    pub trace_items: Vec<TraceItem>,
+
+    #[arg(long, value_name = "WHEN")]
+    /// Color output.
+    pub color: Option<clap::ColorChoice>,
+}
+
+#[derive(Parser, Debug)]
+#[group(required = false, multiple = false)]
+pub struct TraceDestination {
+    /// Output logs to standard output.
+    #[arg(long = "trace")]
+    pub stdout: bool,
+
+    #[arg(long = "trace-stderr")]
+    /// Output logs to standard error.
+    pub stderr: bool,
+
+    #[arg(long = "trace-file", value_name = "LOG_FILE")]
+    /// Output logs to specified file (will be created).
+    pub file: Option<PathBuf>,
 }
 
 impl Args {

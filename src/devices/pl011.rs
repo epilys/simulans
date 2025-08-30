@@ -165,7 +165,13 @@ impl PL011Registers {
     ) -> bool {
         use RegisterOffset::*;
 
-        log::trace!("write offset {offset:?} value {value}");
+        tracing::event!(
+            target: "pl011",
+            tracing::Level::TRACE,
+            kind = "write",
+            ?offset,
+            "value {value}=0x{value:x}=0b{value:b}",
+        );
         match offset {
             DR => {
                 // interrupts always checked
@@ -226,7 +232,7 @@ impl PL011Registers {
             DMACR => {
                 self.dmacr = value;
                 if value & 3 > 0 {
-                    log::error!("pl011: DMA not implemented");
+                    tracing::error!("pl011: DMA not implemented");
                 }
             }
         }
@@ -418,7 +424,7 @@ impl crate::memory::DeviceMemoryOps for PL011MemoryOps {
                 u64::from(device_id[(offset - 0xfe0) >> 2])
             }
             Err(_) => {
-                log::error!("pl011_read: Bad offset 0x{:x} width {:?}", offset, width);
+                tracing::error!("pl011_read: Bad offset 0x{:x} width {:?}", offset, width);
                 0
             }
             Ok(field) => {
@@ -436,27 +442,22 @@ impl crate::memory::DeviceMemoryOps for PL011MemoryOps {
                     }
                     result
                 };
-                log::trace!(
-                    "pl011_read: offset 0x{:x} field {:?} result = 0x{:x} width {:?}",
-                    offset,
-                    field,
-                    result,
-                    width
+                tracing::event!(
+                    target: "pl011",
+                    tracing::Level::TRACE,
+                    kind = "read",
+                    ?offset,
+                    ?field,
+                    ?width,
+                    ?result,
                 );
                 result.into()
             }
         }
     }
 
-    fn write(&self, offset: u64, value: u64, width: Width) {
-        log::trace!(
-            "pl011 writing {:?} at offset {} value 0x{:x}",
-            width,
-            crate::memory::Address(offset),
-            value
-        );
+    fn write(&self, offset: u64, value: u64, _width: Width) {
         if let Ok(field) = RegisterOffset::try_from(offset) {
-            log::trace!("pl011 field = {:?} value = 0x{:x}", &field, value);
             let mut char_backend = self.char_backend.lock();
             if field == RegisterOffset::DR {
                 // ??? Check if transmitter is enabled.
@@ -471,7 +472,7 @@ impl crate::memory::DeviceMemoryOps for PL011MemoryOps {
                 regs.update();
             }
         } else {
-            log::error!("write bad offset 0x{offset:x} value 0x{value:x}");
+            tracing::error!("write bad offset 0x{offset:x} value 0x{value:x}");
         }
     }
 }
