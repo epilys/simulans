@@ -25,7 +25,9 @@
 use bilge::prelude::*;
 
 use crate::{
-    cpu_state::{ArchMode, DAIFFields, Exception, ExceptionLevel, SpSel},
+    cpu_state::{
+        ArchMode, DAIFFields, Exception, ExceptionLevel, Mode, SavedProgramStatusRegister, SpSel,
+    },
     memory::Address,
 };
 
@@ -242,4 +244,160 @@ pub fn aarch64_take_exception(
 
     // VBAR_ELx[]<63:11>:vect_offset<10:0>
     machine.pc = setbits!(vbar_elx, 0, 11, getbits!(vect_offset.0, 0, 11));
+}
+
+/// Convert an SPSR value encoding to an Exception level.
+fn EL_from_SPSR(
+    machine: &crate::machine::Armv8AMachine,
+    spsr: SavedProgramStatusRegister,
+) -> Option<ExceptionLevel> {
+    if matches!(spsr.nRW(), ArchMode::_64) {
+        // AArch64 state
+        let el = match spsr.M() {
+            Mode::EL0 => ExceptionLevel::EL0,
+            Mode::EL1t | Mode::EL1h => ExceptionLevel::EL1,
+            Mode::EL1tNV | Mode::EL1hNV => ExceptionLevel::EL2,
+            _ => ExceptionLevel::EL2,
+        };
+
+        if !machine.cpu_state.have_el(el) {
+            // Exception level not implemented
+            return None;
+        }
+        if matches!(spsr.M(), Mode::Undefined) {
+            // M<1> must be 0
+            return None;
+        }
+
+        if matches!(
+            (el, spsr.M()),
+            (ExceptionLevel::EL0, Mode::EL1h | Mode::EL1hNV)
+        ) {
+            // for EL0, M<0> must be 0
+            return None;
+        }
+
+        // elsif IsFeatureImplemented(FEAT_RME) && el != EL3 && effective_nse_ns == '10'
+        // then     valid = FALSE;      // Only EL3 valid in Root state
+        // elsif el == EL2 && HaveEL(EL3) && !IsSecureEL2Enabled() && SCR_EL3.NS == '0'
+        // then     valid = FALSE;      // Unless Secure EL2 is enabled, EL2
+        // valid only in Non-secure state
+        Some(el)
+    } else {
+        None
+    }
+}
+
+/// Check for illegal return
+///
+/// * To an unimplemented Exception level.
+/// * To `EL2` in Secure state, when `SecureEL2` is not enabled.
+/// * To `EL0` using `AArch64` state, with `SPSR.M<0>==1`.
+/// * To `AArch64` state with `SPSR.M<1>==1`.
+/// * To `AArch32` state with an illegal value of `SPSR.M`.
+fn illegal_exception_return(
+    machine: &crate::machine::Armv8AMachine,
+    spsr: SavedProgramStatusRegister,
+) -> bool {
+    let Some(target_el) = EL_from_SPSR(machine, spsr) else {
+        return true;
+    };
+
+    // Check for return to higher Exception level
+    if target_el as u32 > machine.cpu_state.pstate.EL() as u32 {
+        return true;
+    }
+
+    false
+}
+
+/// Set PSTATE based on a `SavedProgramStatusRegister` value
+fn set_PSTATE_from_PSR(
+    machine: &mut crate::machine::Armv8AMachine,
+    spsr: SavedProgramStatusRegister,
+    illegal_psr_state: bool,
+) {
+    if illegal_psr_state {
+        machine.cpu_state.pstate.set_IL(true);
+        // if IsFeatureImplemented(FEAT_SSBS) then PSTATE.SSBS = bit UNKNOWN;
+        // if IsFeatureImplemented(FEAT_BTI) then PSTATE.BTYPE = bits(2)
+        // UNKNOWN; if IsFeatureImplemented(FEAT_UAO) then PSTATE.UAO =
+        // bit UNKNOWN; if IsFeatureImplemented(FEAT_DIT) then
+        // PSTATE.DIT = bit UNKNOWN; if IsFeatureImplemented(FEAT_MTE)
+        // then PSTATE.TCO = bit UNKNOWN;
+        // if IsFeatureImplemented(FEAT_PAuth_LR) then PSTATE.PACM = bit
+        // UNKNOWN; if IsFeatureImplemented(FEAT_UINJ) then PSTATE.UINJ
+        // = '0';
+    } else {
+        // State that is reinstated only on a legal exception return
+        machine.cpu_state.pstate.set_IL(spsr.IL());
+        // if IsFeatureImplemented(FEAT_UINJ) then PSTATE.UINJ = spsr<36>;
+        // if spsr<4> == '1' then                    // AArch32 state
+        //     AArch32.WriteMode(spsr<4:0>);         // Sets PSTATE.EL correctly
+        //     if IsFeatureImplemented(FEAT_SSBS) then PSTATE.SSBS = spsr<23>;
+        // else                                      // AArch64 state
+        machine.cpu_state.pstate.set_nRW(ArchMode::_64);
+        if let Some(el) = EL_from_SPSR(machine, spsr) {
+            machine.cpu_state.pstate.set_EL(el);
+        }
+        machine.cpu_state.pstate.set_SP(spsr.SP());
+        // if IsFeatureImplemented(FEAT_BTI) then PSTATE.BTYPE = spsr<11:10>;
+        // if IsFeatureImplemented(FEAT_SSBS) then PSTATE.SSBS = spsr<12>;
+        // if IsFeatureImplemented(FEAT_UAO) then PSTATE.UAO = spsr<23>;
+        // if IsFeatureImplemented(FEAT_DIT) then PSTATE.DIT = spsr<24>;
+        // if IsFeatureImplemented(FEAT_MTE) then PSTATE.TCO = spsr<25>;
+        // if IsFeatureImplemented(FEAT_GCS) then PSTATE.EXLOCK = spsr<34>;
+        // if IsFeatureImplemented(FEAT_PAuth_LR) then
+        //     PSTATE.PACM = if IsPACMEnabled() then spsr<35> else '0';
+    }
+
+    // If PSTATE.IL is set, it is CONSTRAINED UNPREDICTABLE whether the T bit is set
+    // to zero or copied from SPSR.
+    // if PSTATE.IL == '1' && PSTATE.nRW == '1' {
+    //     if ConstrainUnpredictableBool(Unpredictable_ILZEROT) then spsr<5> = '0';
+    // }
+
+    // State that is reinstated regardless of illegal exception return
+    machine.cpu_state.pstate.set_NZCV(spsr.NZCV());
+    //if IsFeatureImplemented(FEAT_PAN) then PSTATE.PAN = spsr<22>;
+    // if PSTATE.nRW == '1' then                     // AArch32 state
+    //     PSTATE.Q         = spsr<27>;
+    //     PSTATE.IT        = RestoredITBits(spsr);
+    //     ShouldAdvanceIT  = FALSE;
+    //     if IsFeatureImplemented(FEAT_DIT) then
+    //         PSTATE.DIT = (if (Restarting() || from_aarch64) then spsr<24> else
+    // spsr<21>);     PSTATE.GE        = spsr<19:16>;
+    //     PSTATE.E         = spsr<9>;
+    //     PSTATE.<A,I,F>   = spsr<8:6>;             // No PSTATE.D in AArch32 state
+    //     PSTATE.T         = spsr<5>;               // PSTATE.J is RES0
+    // else                                          // AArch64 state
+    // if (IsFeatureImplemented(FEAT_EBEP) || IsFeatureImplemented(FEAT_SPE_EXC) ||
+    //       IsFeatureImplemented(FEAT_TRBE_EXC)) then
+    //     PSTATE.PM    = spsr<32>;
+    // if IsFeatureImplemented(FEAT_NMI) then PSTATE.ALLINT  = spsr<13>;
+    machine.cpu_state.pstate.set_DAIF(spsr.DAIF());
+}
+
+/// Return from exception
+///
+/// [AArch64.ExceptionReturn](https://developer.arm.com/documentation/ddi0602/2024-12/Shared-Pseudocode/aarch64-functions-eret?lang=en#AArch64.ExceptionReturn.2)
+pub extern "C" fn aarch64_exception_return(
+    machine: &mut crate::machine::Armv8AMachine,
+    source_pc: Address,
+) {
+    let mut new_pc = machine.cpu_state.elr_elx();
+    let source_el = machine.cpu_state.pstate.EL();
+    let spsr = machine.cpu_state.spsr_elx();
+    // Attempts to change to an illegal state will invoke the Illegal Execution
+    // state mechanism
+    let illegal_psr_state: bool = illegal_exception_return(machine, spsr);
+    set_PSTATE_from_PSR(machine, spsr, illegal_psr_state);
+    let target_el = machine.cpu_state.pstate.EL();
+    tracing::event!(target: "exception", tracing::Level::TRACE, ?source_pc, ?source_el, ?target_el, ?new_pc, "exception return");
+    //ClearExclusiveLocal(ProcessorID());
+    //SendEventLocal();
+    if machine.cpu_state.pstate.IL() {
+        new_pc.0 &= !(0b11);
+    }
+    machine.pc = new_pc.0;
 }

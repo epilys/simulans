@@ -21,7 +21,7 @@
   msr sctlr_el1, xzr
   mov x0, xzr
   adr x0, quit
-  msr elr_el3, x0
+  msr elr_el1, x0
   eret
   nop
 

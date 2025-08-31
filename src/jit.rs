@@ -2983,7 +2983,23 @@ impl BlockTranslator<'_> {
             Op::EORTB => todo!(),
             Op::EORV => todo!(),
             Op::ERET => {
-                // [ref:FIXME]: select current EL from PSTATE, and jump to ELR_ELx.
+                let sigref = {
+                    let mut sig = self.module.make_signature();
+                    sig.params.push(AbiParam::new(self.pointer_type));
+                    sig.params.push(AbiParam::new(I64));
+                    self.builder.import_signature(sig)
+                };
+                let func = self.builder.ins().iconst(
+                    I64,
+                    crate::aarch64::aarch64_exception_return as usize as u64 as i64,
+                );
+                let pc = self.builder.ins().iconst(I64, instruction.address() as i64);
+                return self.emit_indirect_noreturn(
+                    instruction.address(),
+                    sigref,
+                    func,
+                    &[self.machine_ptr, pc],
+                );
             }
             Op::ERETAA => todo!(),
             Op::ERETAB => todo!(),

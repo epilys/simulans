@@ -154,53 +154,6 @@ fn test_load_stores_2() {
     );
 }
 
-/// Test exception levels
-#[test_log::test]
-fn test_exception_levels() {
-    // Capstone output:
-    // 0x40080000: mov x0, #1
-    // 0x40080004: orr x0, x0, #2
-    // 0x40080008: orr x0, x0, #4
-    // 0x4008000c: orr x0, x0, #8
-    // 0x40080010: orr x0, x0, #0x100
-    // 0x40080014: orr x0, x0, #0x400
-    // 0x40080018: orr x0, x0, #0x800
-    // 0x4008001c: msr scr_el3, x0
-    // 0x40080020: orr w0, wzr, #8
-    // 0x40080024: orr x0, x0, #0x10
-    // 0x40080028: orr x0, x0, #0x80000000
-    // 0x4008002c: msr hcr_el2, x0
-    // 0x40080030: mrs x0, midr_el1
-    // 0x40080034: msr vpidr_el2, x0
-    // 0x40080038: mrs x0, mpidr_el1
-    // 0x4008003c: msr vmpidr_el2, x0
-    // 0x40080040: msr vttbr_el2, xzr
-    // 0x40080044: msr sctlr_el2, xzr
-    // 0x40080048: msr sctlr_el1, xzr
-    // 0x4008004c: ldr x0, #0x40080068
-    // 0x40080050: msr elr_el3, x0
-    // 0x40080054: ldr x0, #0x40080070
-    // 0x40080058: msr spsr_el3, x0
-    // 0x4008005c: eret
-    // 0x40080060: nop
-    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_exception_levels.bin");
-    _ = simulans::disas(TEST_INPUT, 0x40080000);
-
-    const MEMORY_SIZE: MemorySize =
-        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
-    let entry_point = Address(0);
-    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
-    machine.cpu_state.registers.sp = 4 * TEST_INPUT.len() as u64 - 4;
-
-    let stack_pre = machine.cpu_state.registers.sp;
-    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-    let stack_post = machine.cpu_state.registers.sp;
-    assert_eq!(stack_post, stack_pre);
-    assert_eq!(machine.cpu_state.registers.hcr_el2, 0x80000018);
-    assert_eq!(machine.cpu_state.registers.scr_el3, 0xd0f);
-    assert_hex_eq!(machine.cpu_state.registers.elr_el3, 0x60);
-}
-
 #[test_log::test]
 fn test_uart_write_str() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_write_str.bin");

@@ -16,7 +16,7 @@ See `--help` output for all CLI options.
 
 ## Missing components at the moment
 
-- `EL{0,1,2}` trap handling.
+- ~~`EL{0,1,2}` trap handling.~~
 - ~~UART device.~~ [`./src/devices/pl011.rs`](./src/devices/pl011.rs)
 - MMU.
 - Timers.

@@ -30,6 +30,8 @@ use cranelift::prelude::*;
 use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
+use crate::memory::Address;
+
 pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine, is_entry: bool) {
     if is_entry {
         tracing::event!(
@@ -243,6 +245,16 @@ pub struct SavedProgramStatusRegister {
     pub _pacm: u1,
     pub _uinj: u1,
     pub _padding: u28,
+}
+
+impl SavedProgramStatusRegister {
+    pub fn SP(&self) -> SpSel {
+        if self.M() as u32 & 0b1 == 0 {
+            SpSel::SpEl0
+        } else {
+            SpSel::Current
+        }
+    }
 }
 
 #[bitsize(64)]
@@ -660,6 +672,14 @@ impl ExecutionState {
         }
     }
 
+    pub fn elr_elx(&self) -> Address {
+        match self.pstate.EL() {
+            ExceptionLevel::EL0 | ExceptionLevel::EL1 => Address(self.registers.elr_el1),
+            ExceptionLevel::EL2 => Address(self.registers.elr_el2),
+            ExceptionLevel::EL3 => Address(self.registers.elr_el3),
+        }
+    }
+
     pub fn set_elr_elx(&mut self, val: u64) {
         match self.pstate.EL() {
             ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.elr_el1 = val,
@@ -677,6 +697,14 @@ impl ExecutionState {
         spsr.set_nRW(ArchMode::_64);
         spsr.set_M(Mode::EL1h);
         spsr
+    }
+
+    pub fn spsr_elx(&self) -> SavedProgramStatusRegister {
+        match self.pstate.EL() {
+            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.spsr_el1,
+            ExceptionLevel::EL2 => self.registers.spsr_el2,
+            ExceptionLevel::EL3 => self.registers.spsr_el3,
+        }
     }
 
     pub fn set_spsr_elx(&mut self, val: SavedProgramStatusRegister) {
