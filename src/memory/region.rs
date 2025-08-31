@@ -114,8 +114,8 @@ mod linux {
             phys_offset: Address,
         ) -> Result<super::MemoryRegion, Errno> {
             let fd = memfd::memfd_create(
-                &CString::new(name).unwrap(),
-                memfd::MemFdCreateFlag::MFD_CLOEXEC,
+                CString::new(name).unwrap().as_c_str(),
+                memfd::MFdFlags::MFD_CLOEXEC,
             )?;
             Self::new_from_fd(name, fd, None, size, phys_offset)
         }
