@@ -208,16 +208,22 @@ pub struct NZCVFields {
     pub n: bool,
 }
 
+#[bitsize(4)]
+#[derive(Default, Copy, Clone, PartialEq, Eq, FromBits, DebugBits)]
+pub struct DAIFFields {
+    pub F: bool,
+    pub I: bool,
+    pub A: bool,
+    pub D: bool,
+}
+
 #[bitsize(64)]
 #[derive(Default, Copy, Clone, FromBits, DebugBits)]
 /// Saved status register (`SPSR_ELx`).
 pub struct SavedProgramStatusRegister {
     pub m: Mode,
     pub nRW: ArchMode,
-    pub f: bool,
-    pub i: bool,
-    pub a: bool,
-    pub d: bool,
+    pub DAIF: DAIFFields,
     pub _btype: u2,
     pub _ssbs: u1,
     pub _allint: u1,
@@ -260,10 +266,7 @@ pub struct PSTATE {
     pub EL: ExceptionLevel,
     pub IL: bool,
     pub SS: bool,
-    pub F: bool,
-    pub I: bool,
-    pub A: bool,
-    pub D: bool,
+    pub DAIF: DAIFFields,
     pub NZCV: NZCVFields,
     pub _res0: u50,
 }
