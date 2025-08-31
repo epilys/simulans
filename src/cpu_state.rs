@@ -199,13 +199,13 @@ pub struct NZCV {
 #[derive(Default, Copy, Clone, PartialEq, Eq, FromBits, DebugBits)]
 pub struct NZCVFields {
     /// Overflow condition flag. (bit `[28]`)
-    pub v: bool,
+    pub V: bool,
     /// Carry condition flag. (bit `[29]`)
-    pub c: bool,
+    pub C: bool,
     /// Zero condition flag. (bit `[30]`)
-    pub z: bool,
+    pub Z: bool,
     /// Negative condition flag. (bit `[31]`)
-    pub n: bool,
+    pub N: bool,
 }
 
 #[bitsize(4)]
@@ -221,21 +221,21 @@ pub struct DAIFFields {
 #[derive(Default, Copy, Clone, FromBits, DebugBits)]
 /// Saved status register (`SPSR_ELx`).
 pub struct SavedProgramStatusRegister {
-    pub m: Mode,
+    pub M: Mode,
     pub nRW: ArchMode,
     pub DAIF: DAIFFields,
     pub _btype: u2,
     pub _ssbs: u1,
     pub _allint: u1,
     pub __res: u6,
-    pub il: bool,
-    pub ss: bool,
+    pub IL: bool,
+    pub SS: bool,
     pub _pan: u1,
     pub _uao: u1,
     pub _dit: u1,
     pub _tco: u1,
     pub __res0: u2,
-    pub nzcv: NZCVFields,
+    pub NZCV: NZCVFields,
     pub _pm: u1,
     pub _ppend: u1,
     pub _exlock: u1,

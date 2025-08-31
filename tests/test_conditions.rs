@@ -358,12 +358,12 @@ fn test_cmp_nzcv() {
             let mut nzcv = NZCV::from(0x0);
             let mut fields = nzcv.fields();
             // A == B
-            fields.set_z(false);
+            fields.set_Z(false);
             // A >= B
-            fields.set_c(false);
+            fields.set_C(false);
             // A < B
-            fields.set_n(true);
-            fields.set_v(false);
+            fields.set_N(true);
+            fields.set_V(false);
             nzcv.set_fields(fields);
 
             assert_eq!(nzcv, NZCV::from(reg!(x8)));
@@ -377,13 +377,13 @@ fn test_cmp_nzcv() {
             let mut nzcv = NZCV::from(0x0);
             let mut fields = nzcv.fields();
             // A == B
-            fields.set_z(false);
+            fields.set_Z(false);
             // A >= B
-            fields.set_c(true);
+            fields.set_C(true);
             // A < B
-            fields.set_n(false);
+            fields.set_N(false);
             // Overflow
-            fields.set_v(false);
+            fields.set_V(false);
             nzcv.set_fields(fields);
 
             assert_eq!(nzcv, NZCV::from(reg!(x9)));
@@ -397,13 +397,13 @@ fn test_cmp_nzcv() {
             let mut nzcv = NZCV::from(0x0);
             let mut fields = nzcv.fields();
             // A == B
-            fields.set_z(true);
+            fields.set_Z(true);
             // A >= B
-            fields.set_c(true);
+            fields.set_C(true);
             // A < B
-            fields.set_n(false);
+            fields.set_N(false);
             // Overflow
-            fields.set_v(false);
+            fields.set_V(false);
             nzcv.set_fields(fields);
 
             assert_hex_eq!(reg!(nzcv).into(), reg!(x10));
@@ -415,19 +415,19 @@ fn test_cmp_nzcv() {
             let mut nzcv = NZCV::from(0x0);
             let mut fields = nzcv.fields();
             // A == B
-            fields.set_z(false);
+            fields.set_Z(false);
             // A >= B
-            fields.set_c(false);
+            fields.set_C(false);
             // A < B
-            fields.set_n(true);
+            fields.set_N(true);
             // Overflow
-            fields.set_v(false);
+            fields.set_V(false);
             nzcv.set_fields(fields);
             assert_eq!(u64::from(nzcv) & (1 << 31), 1 << 31);
-            fields.set_n(false);
+            fields.set_N(false);
             nzcv.set_fields(fields);
             assert_eq!(u64::from(nzcv) & (1 << 31), 0);
-            fields.set_z(true);
+            fields.set_Z(true);
             nzcv.set_fields(fields);
             assert_eq!(u64::from(nzcv) & (1 << 30), 1 << 30);
         }
@@ -493,12 +493,12 @@ fn test_cmp_b_cnd() {
             let mut nzcv = NZCV::from(0x0);
             let mut fields = nzcv.fields();
             // A == B
-            fields.set_z(true);
+            fields.set_Z(true);
             // A >= B
-            fields.set_c(true);
+            fields.set_C(true);
             // A < B
-            fields.set_n(false);
-            fields.set_v(false);
+            fields.set_N(false);
+            fields.set_V(false);
             nzcv.set_fields(fields);
 
             assert_eq!(nzcv, reg!(nzcv));
@@ -553,10 +553,10 @@ fn test_adds() {
             let mut nzcv = NZCV::from(0x0);
             let mut fields = nzcv.fields();
 
-            fields.set_z(false);
-            fields.set_c(false);
-            fields.set_n(false);
-            fields.set_v(false);
+            fields.set_Z(false);
+            fields.set_C(false);
+            fields.set_N(false);
+            fields.set_V(false);
             nzcv.set_fields(fields);
 
             assert_eq!(nzcv, reg!(nzcv));
