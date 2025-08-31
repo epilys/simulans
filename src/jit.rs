@@ -409,6 +409,7 @@ impl JitContext {
             builder.import_signature(sig)
         };
         let mut trans = BlockTranslator {
+            address: program_counter,
             write_to_sysreg: false,
             write_to_simd: false,
             pointer_type: self.module.target_config().pointer_type(),
@@ -503,6 +504,7 @@ impl JitContext {
 
 /// In-progress state of translating instructions into Cranelift IR.
 struct BlockTranslator<'a> {
+    address: u64,
     write_to_sysreg: bool,
     write_to_simd: bool,
     builder: FunctionBuilder<'a>,
@@ -782,12 +784,7 @@ impl BlockTranslator<'_> {
         self.builder.def_var(var, value)
     }
 
-    fn branch_if_non_zero(
-        &mut self,
-        instruction: &bad64::Instruction,
-        test_value: Value,
-        label_value: Value,
-    ) {
+    fn branch_if_non_zero(&mut self, test_value: Value, label_value: Value) {
         let branch_not_taken_block = self.builder.create_block();
         let branch_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
@@ -796,7 +793,7 @@ impl BlockTranslator<'_> {
             .brif(test_value, branch_block, &[], branch_not_taken_block, &[]);
         self.builder.switch_to_block(branch_block);
         self.builder.seal_block(branch_block);
-        self.emit_jump(instruction.address(), label_value);
+        self.emit_jump(self.address, label_value);
         self.builder.switch_to_block(branch_not_taken_block);
         self.builder.seal_block(branch_not_taken_block);
         self.builder.ins().nop();
@@ -1343,11 +1340,12 @@ impl BlockTranslator<'_> {
     ) -> ControlFlow<Option<BlockExit>> {
         use bad64::Op;
 
+        self.address = instruction.address();
         if cfg!(feature = "accurate-pc") {
             let pc_value = self
                 .builder
                 .ins()
-                .iconst(I64, i64::try_from(instruction.address()).unwrap());
+                .iconst(I64, i64::try_from(self.address).unwrap());
             self.builder.ins().store(
                 MemFlags::trusted(),
                 pc_value,
@@ -1383,7 +1381,7 @@ impl BlockTranslator<'_> {
                     ),
                 };
                 let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(instruction, result, label_value);
+                self.branch_if_non_zero(result, label_value);
             }};
         }
         macro_rules! ands {
@@ -2120,7 +2118,7 @@ impl BlockTranslator<'_> {
                     other => unexpected_operand!(other),
                 };
                 let next_pc = self.builder.ins().iconst(I64, label as i64);
-                return self.unconditional_jump_epilogue(instruction, next_pc);
+                return self.unconditional_jump_epilogue(next_pc);
             }
             Op::BR => {
                 // This instruction branches unconditionally to an address in a register, with a
@@ -2129,11 +2127,11 @@ impl BlockTranslator<'_> {
                 // constant boolean branch_conditional = FALSE;
                 // BranchTo(target, BranchType_INDIR, branch_conditional);
                 let next_pc = self.translate_operand(&instruction.operands()[0]);
-                return self.unconditional_jump_epilogue(instruction, next_pc);
+                return self.unconditional_jump_epilogue(next_pc);
             }
             Op::RET => {
                 let next_pc = self.reg_to_value(&bad64::Reg::X30);
-                return self.unconditional_jump_epilogue(instruction, next_pc);
+                return self.unconditional_jump_epilogue(next_pc);
             }
             // Compares
             Op::CBNZ => {
@@ -2148,7 +2146,7 @@ impl BlockTranslator<'_> {
                         .icmp_imm(cranelift::prelude::IntCC::NotEqual, operand1, 0);
                 let is_zero_value = self.builder.ins().uextend(I64, is_zero_value);
                 let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(instruction, is_zero_value, label_value);
+                self.branch_if_non_zero(is_zero_value, label_value);
             }
             Op::CBZ => {
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
@@ -2162,7 +2160,7 @@ impl BlockTranslator<'_> {
                         .icmp_imm(cranelift::prelude::IntCC::Equal, operand1, 0);
                 let is_not_zero_value = self.builder.ins().uextend(I64, is_not_zero_value);
                 let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(instruction, is_not_zero_value, label_value);
+                self.branch_if_non_zero(is_not_zero_value, label_value);
             }
             // Bit-ops
             Op::BFI => {
@@ -2488,10 +2486,7 @@ impl BlockTranslator<'_> {
             Op::BIF => todo!(),
             Op::BIT => todo!(),
             Op::BL => {
-                let link_pc = self
-                    .builder
-                    .ins()
-                    .iconst(I64, (instruction.address() + 4) as i64);
+                let link_pc = self.builder.ins().iconst(I64, (self.address + 4) as i64);
                 let link_register = *self.reg_to_var(&bad64::Reg::X30, true);
                 self.builder.def_var(link_register, link_pc);
                 let label = match instruction.operands()[0] {
@@ -2499,17 +2494,14 @@ impl BlockTranslator<'_> {
                     other => unexpected_operand!(other),
                 };
                 let label_value = self.builder.ins().iconst(I64, label as i64);
-                return self.unconditional_jump_epilogue(instruction, label_value);
+                return self.unconditional_jump_epilogue(label_value);
             }
             Op::BLR => {
-                let link_pc = self
-                    .builder
-                    .ins()
-                    .iconst(I64, (instruction.address() + 4) as i64);
+                let link_pc = self.builder.ins().iconst(I64, (self.address + 4) as i64);
                 let link_register = *self.reg_to_var(&bad64::Reg::X30, true);
                 self.builder.def_var(link_register, link_pc);
                 let next_pc = self.translate_operand(&instruction.operands()[0]);
-                return self.unconditional_jump_epilogue(instruction, next_pc);
+                return self.unconditional_jump_epilogue(next_pc);
             }
             Op::BLRAA => todo!(),
             Op::BLRAAZ => todo!(),
@@ -2993,9 +2985,9 @@ impl BlockTranslator<'_> {
                     I64,
                     crate::aarch64::aarch64_exception_return as usize as u64 as i64,
                 );
-                let pc = self.builder.ins().iconst(I64, instruction.address() as i64);
+                let pc = self.builder.ins().iconst(I64, self.address as i64);
                 return self.emit_indirect_noreturn(
-                    instruction.address(),
+                    self.address,
                     sigref,
                     func,
                     &[self.machine_ptr, pc],
@@ -4006,7 +3998,7 @@ impl BlockTranslator<'_> {
                         .icmp_imm(cranelift::prelude::IntCC::NotEqual, result, 0);
                 let is_not_zero_value = self.builder.ins().uextend(I64, is_not_zero_value);
                 let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(instruction, is_not_zero_value, label_value);
+                self.branch_if_non_zero(is_not_zero_value, label_value);
             }
             Op::TBX => todo!(),
             Op::TBZ => {
@@ -4033,7 +4025,7 @@ impl BlockTranslator<'_> {
                         .icmp_imm(cranelift::prelude::IntCC::Equal, result, 0);
                 let is_zero_value = self.builder.ins().uextend(I64, is_zero_value);
                 let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(instruction, is_zero_value, label_value);
+                self.branch_if_non_zero(is_zero_value, label_value);
             }
             Op::TCANCEL => todo!(),
             Op::TCOMMIT => todo!(),
@@ -4134,9 +4126,9 @@ impl BlockTranslator<'_> {
                     I64,
                     crate::aarch64::aarch64_undefined as usize as u64 as i64,
                 );
-                let pc = self.builder.ins().iconst(I64, instruction.address() as i64);
+                let pc = self.builder.ins().iconst(I64, self.address as i64);
                 return self.emit_indirect_noreturn(
-                    instruction.address(),
+                    self.address,
                     sigref,
                     func,
                     &[self.machine_ptr, pc],
@@ -4406,17 +4398,10 @@ impl BlockTranslator<'_> {
         self.builder.ins().return_(&[translate_func]);
     }
 
-    fn unconditional_jump_epilogue(
-        &mut self,
-        source_instruction: &bad64::Instruction,
-        dest_label: Value,
-    ) -> ControlFlow<Option<BlockExit>> {
+    fn unconditional_jump_epilogue(&mut self, dest_label: Value) -> ControlFlow<Option<BlockExit>> {
         // [ref:can_trap]: Check `dest_label` alignment.
         if cfg!(feature = "accurate-pc") {
-            let pc = self
-                .builder
-                .ins()
-                .iconst(I64, source_instruction.address() as i64);
+            let pc = self.builder.ins().iconst(I64, self.address as i64);
             self.builder.ins().store(
                 MemFlags::trusted(),
                 pc,
