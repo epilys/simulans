@@ -160,5 +160,6 @@ pub fn main_loop(
     while machine.exit_request.load(Ordering::SeqCst) == 0 {
         func = (func.0)(&mut jit_ctx, machine);
     }
+    machine.entry_blocks.clear();
     Ok(())
 }

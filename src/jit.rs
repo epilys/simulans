@@ -41,6 +41,8 @@ use crate::{
     memory::{Address, Width},
 };
 
+mod sysregs;
+
 enum BlockExit {
     Branch(Value),
     Exception,
@@ -352,6 +354,12 @@ impl JitContext {
             )
             .into());
         };
+        _ = crate::disas(
+            &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
+                .try_into()
+                .unwrap()..],
+            program_counter,
+        );
         let mut decoded_iter = bad64::disasm(
             &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
                 .try_into()
@@ -585,6 +593,10 @@ impl BlockTranslator<'_> {
                 // [ref:FIXME]: ID_AA64MMFR0_EL1
                 self.builder.ins().iconst(I64, 0)
             }
+            (3, 0, 0, 7, 2) => {
+                // [ref:FIXME]: ID_AA64MMFR2_EL1
+                self.builder.ins().iconst(I64, 0)
+            }
             (0b11, 0, 0, 0, 0) => {
                 // [ref:FIXME]: MIDR_EL1
                 self.builder.ins().iconst(I64, 0)
@@ -593,9 +605,14 @@ impl BlockTranslator<'_> {
                 // [ref:FIXME]: MPIDR_EL1
                 self.builder.ins().iconst(I64, 0)
             }
+            (3, 3, 0, 0, 1) => {
+                // [ref:FIXME]: CTR_EL0
+                self.builder.ins().iconst(I64, 0xb444c004)
+            }
             _other => unimplemented!(
-                "unimplemented sysreg encoding: {:?}",
-                bad64::Operand::ImplSpec { o0, o1, cm, cn, o2 }
+                "unimplemented sysreg encoding: {:?} pc =0x{:x?}",
+                bad64::Operand::ImplSpec { o0, o1, cm, cn, o2 },
+                self.address,
             ),
         }
     }
@@ -641,8 +658,7 @@ impl BlockTranslator<'_> {
     fn condition_holds(&mut self, condition: bad64::Condition) -> Value {
         use bad64::Condition;
 
-        let var = *self.sysreg_to_var(&bad64::SysReg::NZCV, false);
-        let var = self.builder.use_var(var);
+        let var = self.read_sysreg(&bad64::SysReg::NZCV);
 
         macro_rules! cmp_pstate {
             (PSTATE.N) => {{
@@ -773,7 +789,6 @@ impl BlockTranslator<'_> {
 
     /// Update CPU state of NZCV flags.
     fn update_nzcv(&mut self, [n, z, c, v]: [Value; 4]) {
-        let var = *self.sysreg_to_var(&bad64::SysReg::NZCV, true);
         let n = self.builder.ins().rotl_imm(n, 31);
         let z = self.builder.ins().rotl_imm(z, 30);
         let c = self.builder.ins().rotl_imm(c, 29);
@@ -781,7 +796,7 @@ impl BlockTranslator<'_> {
         let value = self.builder.ins().bor(n, z);
         let value = self.builder.ins().bor(value, c);
         let value = self.builder.ins().bor(value, v);
-        self.builder.def_var(var, value)
+        self.write_sysreg(&bad64::SysReg::NZCV, value);
     }
 
     fn branch_if_non_zero(&mut self, test_value: Value, label_value: Value) {
@@ -1007,10 +1022,7 @@ impl BlockTranslator<'_> {
             Operand::ImplSpec { o0, o1, cm, cn, o2 } => {
                 self.translate_o0_op1_CRn_CRm_op2(*o0, *o1, *cm, *cn, *o2)
             }
-            Operand::SysReg(reg) => {
-                let var = *self.sysreg_to_var(reg, false);
-                self.builder.use_var(var)
-            }
+            Operand::SysReg(reg) => self.read_sysreg(reg),
             Operand::MemExt {
                 regs: [ref address, ref offset],
                 shift,
@@ -1033,14 +1045,6 @@ impl BlockTranslator<'_> {
             }
             other => unimplemented!("unexpected rhs in translate_operand: {:?}", other),
         }
-    }
-
-    #[inline]
-    fn sysreg_to_var(&mut self, reg: &bad64::SysReg, write: bool) -> &Variable {
-        self.write_to_sysreg |= write;
-        self.sys_registers.get(reg).unwrap_or_else(|| {
-            unimplemented!("unimplemented sysreg {reg:?}");
-        })
     }
 
     #[cold]
@@ -1518,16 +1522,15 @@ impl BlockTranslator<'_> {
             // Special registers
             Op::MSR => {
                 // [ref:can_trap]
-                let target = match instruction.operands()[0] {
-                    bad64::Operand::SysReg(ref sysreg) => *self.sysreg_to_var(sysreg, true),
-                    other => unexpected_operand!(other),
-                };
                 let mut value = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[1]);
                 if !matches!(width, Width::_64) {
                     value = self.builder.ins().uextend(I64, value);
                 }
-                self.builder.def_var(target, value);
+                match instruction.operands()[0] {
+                    bad64::Operand::SysReg(ref reg) => self.write_sysreg(reg, value),
+                    other => unexpected_operand!(other),
+                }
             }
             Op::MRS => {
                 // Move System register to general-purpose register
@@ -2472,7 +2475,15 @@ impl BlockTranslator<'_> {
                 write_to_destination!(result, destination);
             }
             Op::BGRP => todo!(),
-            Op::BIC => todo!(),
+            Op::BIC => {
+                // [ref:needs_unit_test]
+                let destination = get_destination_register!();
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let negb = self.builder.ins().bnot(b);
+                let (result, _nzcv) = ands!(a, negb);
+                write_to_destination!(result, destination);
+            }
             Op::BICS => {
                 // [ref:needs_unit_test]
                 let destination = get_destination_register!();
@@ -2600,8 +2611,7 @@ impl BlockTranslator<'_> {
                     if !matches!(new_nzcv_width, Width::_64) {
                         new_nzcv = self.builder.ins().uextend(I64, new_nzcv);
                     }
-                    let var = *self.sysreg_to_var(&bad64::SysReg::NZCV, true);
-                    self.builder.def_var(var, new_nzcv)
+                    self.write_sysreg(&bad64::SysReg::NZCV, new_nzcv);
                 }
                 self.builder.ins().jump(merge_block, &[]);
                 self.builder.switch_to_block(merge_block);
@@ -2950,7 +2960,9 @@ impl BlockTranslator<'_> {
             }
             Op::CTERMEQ => todo!(),
             Op::CTERMNE => todo!(),
-            Op::DC => todo!(),
+            Op::DC => {
+                // Data Cache operation
+            }
             Op::DCPS1 => todo!(),
             Op::DCPS2 => todo!(),
             Op::DCPS3 => todo!(),
@@ -2960,7 +2972,9 @@ impl BlockTranslator<'_> {
             Op::DECP => todo!(),
             Op::DECW => todo!(),
             Op::DGH => todo!(),
-            Op::DMB => todo!(),
+            Op::DMB => {
+                // Data Memory Barrier
+            }
             Op::DRPS => todo!(),
             Op::DSB => {
                 // Data synchronization barrier

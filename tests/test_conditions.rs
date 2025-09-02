@@ -208,6 +208,12 @@ fn test_conditional_execution() {
 
     {
         macro_rules! reg {
+            (nzcv) => {
+                NZCV::new(
+                    bilge::prelude::u28::new(0),
+                    machine.cpu_state.PSTATE().NZCV(),
+                )
+            };
             ($reg:ident) => {
                 machine.cpu_state.registers.$reg
             };
@@ -342,6 +348,12 @@ fn test_cmp_nzcv() {
 
     {
         macro_rules! reg {
+            (nzcv) => {
+                NZCV::new(
+                    bilge::prelude::u28::new(0),
+                    machine.cpu_state.PSTATE().NZCV(),
+                )
+            };
             ($reg:ident) => {
                 machine.cpu_state.registers.$reg
             };
@@ -478,6 +490,12 @@ fn test_cmp_b_cnd() {
 
     {
         macro_rules! reg {
+            (nzcv) => {
+                NZCV::new(
+                    bilge::prelude::u28::new(0),
+                    machine.cpu_state.PSTATE().NZCV(),
+                )
+            };
             ($reg:ident) => {
                 machine.cpu_state.registers.$reg
             };
@@ -540,6 +558,12 @@ fn test_adds() {
 
     {
         macro_rules! reg {
+            (nzcv) => {
+                NZCV::new(
+                    bilge::prelude::u28::new(0),
+                    machine.cpu_state.PSTATE().NZCV(),
+                )
+            };
             ($reg:ident) => {
                 machine.cpu_state.registers.$reg
             };

@@ -134,14 +134,14 @@ pub struct RegisterFile {
     ///
     /// Controls Secure state and trapping of exceptions to EL3
     pub scr_el3: u64,
-    pub spsr_el1: SavedProgramStatusRegister,
-    pub spsr_el2: SavedProgramStatusRegister,
-    pub spsr_el3: SavedProgramStatusRegister,
+    pub spsr_el1: u64,
+    pub spsr_el2: u64,
+    pub spsr_el3: u64,
     pub elr_el1: u64,
     pub elr_el2: u64,
     pub elr_el3: u64,
     pub esr_el1: u64,
-    pub nzcv: NZCV,
+    pub pstate: u64,
 }
 
 #[bitsize(2)]
@@ -258,7 +258,7 @@ impl SavedProgramStatusRegister {
 }
 
 #[bitsize(64)]
-#[derive(Default, DebugBits)]
+#[derive(Clone, Default, FromBits, DebugBits)]
 #[allow(non_snake_case)]
 /// `PSTATE` isn't an architectural register for `ARMv8-A`. Its bit fields are
 /// accessed through special-purpose registers.
@@ -275,13 +275,16 @@ impl SavedProgramStatusRegister {
 /// | `SPSel`                  | At `EL1` or higher, this selects between the `SP` for the current Exception level and `SP_EL0`. | `SP`            |
 pub struct PSTATE {
     pub SP: SpSel,
-    pub nRW: ArchMode,
+    pub _res0: u1,
     pub EL: ExceptionLevel,
+    pub nRW: ArchMode,
+    pub DAIF: DAIFFields,
+    pub _res1: u10,
     pub IL: bool,
     pub SS: bool,
-    pub DAIF: DAIFFields,
+    pub _res2: u7,
     pub NZCV: NZCVFields,
-    pub _res0: u50,
+    pub _res3: u32,
 }
 
 /// Classes of exception.
@@ -386,14 +389,54 @@ pub struct ExecutionState {
     pub registers: RegisterFile,
     /// Vector (SIMD) registers.
     pub vector_registers: [(u64, u64); 32],
-    /// Process Element state.
-    pub pstate: PSTATE,
     pub exit_request: Option<ExitRequest>,
     /// Architectural features this CPU supports.
     pub arch_features: ArchFeatures,
 }
 
 const MEMFLAGS: MemFlags = MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
+
+pub struct PSTATERef<'a> {
+    #[allow(dead_code)]
+    value: &'a u64,
+    view: PSTATE,
+}
+
+impl std::ops::Deref for PSTATERef<'_> {
+    type Target = PSTATE;
+
+    #[inline]
+    fn deref(&self) -> &PSTATE {
+        &self.view
+    }
+}
+
+pub struct PSTATERefMut<'a> {
+    value: &'a mut u64,
+    view: PSTATE,
+}
+
+impl std::ops::Deref for PSTATERefMut<'_> {
+    type Target = PSTATE;
+
+    #[inline]
+    fn deref(&self) -> &PSTATE {
+        &self.view
+    }
+}
+
+impl std::ops::DerefMut for PSTATERefMut<'_> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut PSTATE {
+        &mut self.view
+    }
+}
+
+impl Drop for PSTATERefMut<'_> {
+    fn drop(&mut self) {
+        *self.value = self.view.clone().into();
+    }
+}
 
 impl ExecutionState {
     /// Generate JIT instructions to assign a variable for each register and set
@@ -460,7 +503,6 @@ impl ExecutionState {
             elr_el3 => SysReg::ELR_EL3,
             spsr_el1 => SysReg::SPSR_EL1,
             esr_el1 => SysReg::ESR_EL1,
-            nzcv => SysReg::NZCV,
         }
         reg_field! {
             x0 => Reg::X0,
@@ -592,7 +634,6 @@ impl ExecutionState {
                 elr_el3 => SysReg::ELR_EL3,
                 spsr_el1 => SysReg::SPSR_EL1,
                 esr_el1 => SysReg::ESR_EL1,
-                nzcv => SysReg::NZCV,
             };
         }
         reg_field! {
@@ -665,15 +706,31 @@ impl ExecutionState {
         matches!(el, ExceptionLevel::EL0 | ExceptionLevel::EL1)
     }
 
+    pub fn PSTATE(&'_ self) -> PSTATERef<'_> {
+        let view = self.registers.pstate.into();
+        PSTATERef {
+            value: &self.registers.pstate,
+            view,
+        }
+    }
+
+    pub fn PSTATE_mut(&'_ mut self) -> PSTATERefMut<'_> {
+        let view = self.registers.pstate.into();
+        PSTATERefMut {
+            value: &mut self.registers.pstate,
+            view,
+        }
+    }
+
     pub fn vbar_elx(&self) -> u64 {
-        match self.pstate.EL() {
+        match self.PSTATE().EL() {
             ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.vbar_el1,
             other => unimplemented!("other vbar for {other:?}"),
         }
     }
 
     pub fn elr_elx(&self) -> Address {
-        match self.pstate.EL() {
+        match self.PSTATE().EL() {
             ExceptionLevel::EL0 | ExceptionLevel::EL1 => Address(self.registers.elr_el1),
             ExceptionLevel::EL2 => Address(self.registers.elr_el2),
             ExceptionLevel::EL3 => Address(self.registers.elr_el3),
@@ -681,7 +738,7 @@ impl ExecutionState {
     }
 
     pub fn set_elr_elx(&mut self, val: u64) {
-        match self.pstate.EL() {
+        match self.PSTATE().EL() {
             ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.elr_el1 = val,
             ExceptionLevel::EL2 => self.registers.elr_el2 = val,
             ExceptionLevel::EL3 => self.registers.elr_el3 = val,
@@ -690,28 +747,29 @@ impl ExecutionState {
 
     pub fn psr_from_PSTATE(&self) -> SavedProgramStatusRegister {
         let mut spsr = SavedProgramStatusRegister::from(0);
-        spsr.set_NZCV(self.registers.nzcv.fields());
-        spsr.set_DAIF(self.pstate.DAIF());
-        spsr.set_SS(self.pstate.SS());
-        spsr.set_IL(self.pstate.IL());
+        let pstate = self.PSTATE();
+        spsr.set_NZCV(pstate.NZCV());
+        spsr.set_DAIF(pstate.DAIF());
+        spsr.set_SS(pstate.SS());
+        spsr.set_IL(pstate.IL());
         spsr.set_nRW(ArchMode::_64);
         spsr.set_M(Mode::EL1h);
         spsr
     }
 
     pub fn spsr_elx(&self) -> SavedProgramStatusRegister {
-        match self.pstate.EL() {
-            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.spsr_el1,
-            ExceptionLevel::EL2 => self.registers.spsr_el2,
-            ExceptionLevel::EL3 => self.registers.spsr_el3,
+        match self.PSTATE().EL() {
+            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.spsr_el1.into(),
+            ExceptionLevel::EL2 => self.registers.spsr_el2.into(),
+            ExceptionLevel::EL3 => self.registers.spsr_el3.into(),
         }
     }
 
     pub fn set_spsr_elx(&mut self, val: SavedProgramStatusRegister) {
-        match self.pstate.EL() {
-            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.spsr_el1 = val,
-            ExceptionLevel::EL2 => self.registers.spsr_el2 = val,
-            ExceptionLevel::EL3 => self.registers.spsr_el3 = val,
+        match self.PSTATE().EL() {
+            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.spsr_el1 = val.into(),
+            ExceptionLevel::EL2 => self.registers.spsr_el2 = val.into(),
+            ExceptionLevel::EL3 => self.registers.spsr_el3 = val.into(),
         }
     }
 }

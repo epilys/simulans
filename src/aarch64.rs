@@ -130,7 +130,7 @@ pub extern "C" fn aarch64_undefined(
     preferred_exception_return: Address,
 ) {
     tracing::event!(target: "exception", tracing::Level::TRACE, "AArch64.Undefined");
-    let current_el = machine.cpu_state.pstate.EL();
+    let current_el = machine.cpu_state.PSTATE().EL();
 
     let route_to_el2 =
         matches!(current_el, ExceptionLevel::EL0) && machine.cpu_state.EL2_enabled() && {
@@ -183,11 +183,11 @@ pub fn aarch64_take_exception(
     }
     assert!(machine.cpu_state.have_el(target_el));
     //assert!(!ELUsingAArch32(target_el));
-    assert!(target_el as u32 >= machine.cpu_state.pstate.EL() as u32);
+    assert!(target_el as u32 >= machine.cpu_state.PSTATE().EL() as u32);
 
     let mut adjusted_vect_offset = vect_offset;
 
-    if target_el as u32 > machine.cpu_state.pstate.EL() as u32 {
+    if target_el as u32 > machine.cpu_state.PSTATE().EL() as u32 {
         // Skip aarch32, we don't support it.
         // let lower_32: bool = if target_el == ExceptionLevel::EL3 {
         //     if machine.cpu_state.EL2_enabled() {
@@ -205,13 +205,13 @@ pub fn aarch64_take_exception(
         // };
         let lower_32 = false;
         adjusted_vect_offset += if lower_32 { 0x600_u64 } else { 0x400 };
-    } else if matches!(machine.cpu_state.pstate.SP(), SpSel::Current) {
+    } else if matches!(machine.cpu_state.PSTATE().SP(), SpSel::Current) {
         adjusted_vect_offset += 0x200_u64;
     }
     tracing::event!(
         target: "exception",
         tracing::Level::TRACE,
-        current_el = ?machine.cpu_state.pstate.EL(),
+        current_el = ?machine.cpu_state.PSTATE().EL(),
         ?target_el,
         ?vect_offset,
         ?adjusted_vect_offset,
@@ -222,9 +222,9 @@ pub fn aarch64_take_exception(
 
     // bits(64) spsr = GetPSRFromPSTATE(AArch64_NonDebugState, 64);
     let spsr = machine.cpu_state.psr_from_PSTATE();
-    machine.cpu_state.pstate.set_EL(target_el);
-    machine.cpu_state.pstate.set_nRW(ArchMode::_64);
-    machine.cpu_state.pstate.set_SP(SpSel::Current);
+    machine.cpu_state.PSTATE_mut().set_EL(target_el);
+    machine.cpu_state.PSTATE_mut().set_nRW(ArchMode::_64);
+    machine.cpu_state.PSTATE_mut().set_SP(SpSel::Current);
 
     // SPSR_ELx[] = spsr;
     machine.cpu_state.set_spsr_elx(spsr);
@@ -232,13 +232,13 @@ pub fn aarch64_take_exception(
     // ELR_ELx[] = preferred_exception_return;
     machine.cpu_state.set_elr_elx(preferred_exception_return.0);
 
-    machine.cpu_state.pstate.set_SS(false);
+    machine.cpu_state.PSTATE_mut().set_SS(false);
     // PSTATE.<D,A,I,F> = '1111';
     machine
         .cpu_state
-        .pstate
+        .PSTATE_mut()
         .set_DAIF(DAIFFields::new(true, true, true, true));
-    machine.cpu_state.pstate.set_IL(false);
+    machine.cpu_state.PSTATE_mut().set_IL(false);
 
     let vbar_elx = machine.cpu_state.vbar_elx();
 
@@ -304,7 +304,7 @@ fn illegal_exception_return(
     };
 
     // Check for return to higher Exception level
-    if target_el as u32 > machine.cpu_state.pstate.EL() as u32 {
+    if target_el as u32 > machine.cpu_state.PSTATE().EL() as u32 {
         return true;
     }
 
@@ -318,7 +318,7 @@ fn set_PSTATE_from_PSR(
     illegal_psr_state: bool,
 ) {
     if illegal_psr_state {
-        machine.cpu_state.pstate.set_IL(true);
+        machine.cpu_state.PSTATE_mut().set_IL(true);
         // if IsFeatureImplemented(FEAT_SSBS) then PSTATE.SSBS = bit UNKNOWN;
         // if IsFeatureImplemented(FEAT_BTI) then PSTATE.BTYPE = bits(2)
         // UNKNOWN; if IsFeatureImplemented(FEAT_UAO) then PSTATE.UAO =
@@ -330,17 +330,17 @@ fn set_PSTATE_from_PSR(
         // = '0';
     } else {
         // State that is reinstated only on a legal exception return
-        machine.cpu_state.pstate.set_IL(spsr.IL());
+        machine.cpu_state.PSTATE_mut().set_IL(spsr.IL());
         // if IsFeatureImplemented(FEAT_UINJ) then PSTATE.UINJ = spsr<36>;
         // if spsr<4> == '1' then                    // AArch32 state
         //     AArch32.WriteMode(spsr<4:0>);         // Sets PSTATE.EL correctly
         //     if IsFeatureImplemented(FEAT_SSBS) then PSTATE.SSBS = spsr<23>;
         // else                                      // AArch64 state
-        machine.cpu_state.pstate.set_nRW(ArchMode::_64);
+        machine.cpu_state.PSTATE_mut().set_nRW(ArchMode::_64);
         if let Some(el) = EL_from_SPSR(machine, spsr) {
-            machine.cpu_state.pstate.set_EL(el);
+            machine.cpu_state.PSTATE_mut().set_EL(el);
         }
-        machine.cpu_state.pstate.set_SP(spsr.SP());
+        machine.cpu_state.PSTATE_mut().set_SP(spsr.SP());
         // if IsFeatureImplemented(FEAT_BTI) then PSTATE.BTYPE = spsr<11:10>;
         // if IsFeatureImplemented(FEAT_SSBS) then PSTATE.SSBS = spsr<12>;
         // if IsFeatureImplemented(FEAT_UAO) then PSTATE.UAO = spsr<23>;
@@ -358,7 +358,7 @@ fn set_PSTATE_from_PSR(
     // }
 
     // State that is reinstated regardless of illegal exception return
-    machine.cpu_state.pstate.set_NZCV(spsr.NZCV());
+    machine.cpu_state.PSTATE_mut().set_NZCV(spsr.NZCV());
     //if IsFeatureImplemented(FEAT_PAN) then PSTATE.PAN = spsr<22>;
     // if PSTATE.nRW == '1' then                     // AArch32 state
     //     PSTATE.Q         = spsr<27>;
@@ -375,7 +375,7 @@ fn set_PSTATE_from_PSR(
     //       IsFeatureImplemented(FEAT_TRBE_EXC)) then
     //     PSTATE.PM    = spsr<32>;
     // if IsFeatureImplemented(FEAT_NMI) then PSTATE.ALLINT  = spsr<13>;
-    machine.cpu_state.pstate.set_DAIF(spsr.DAIF());
+    machine.cpu_state.PSTATE_mut().set_DAIF(spsr.DAIF());
 }
 
 /// Return from exception
@@ -386,17 +386,17 @@ pub extern "C" fn aarch64_exception_return(
     source_pc: Address,
 ) {
     let mut new_pc = machine.cpu_state.elr_elx();
-    let source_el = machine.cpu_state.pstate.EL();
+    let source_el = machine.cpu_state.PSTATE().EL();
     let spsr = machine.cpu_state.spsr_elx();
     // Attempts to change to an illegal state will invoke the Illegal Execution
     // state mechanism
     let illegal_psr_state: bool = illegal_exception_return(machine, spsr);
     set_PSTATE_from_PSR(machine, spsr, illegal_psr_state);
-    let target_el = machine.cpu_state.pstate.EL();
+    let target_el = machine.cpu_state.PSTATE().EL();
     tracing::event!(target: "exception", tracing::Level::TRACE, ?source_pc, ?source_el, ?target_el, ?new_pc, "exception return");
     //ClearExclusiveLocal(ProcessorID());
     //SendEventLocal();
-    if machine.cpu_state.pstate.IL() {
+    if machine.cpu_state.PSTATE().IL() {
         new_pc.0 &= !(0b11);
     }
     machine.pc = new_pc.0;

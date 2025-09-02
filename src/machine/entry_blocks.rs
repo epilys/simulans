@@ -57,6 +57,11 @@ impl EntryBlocks {
     }
 
     #[inline]
+    pub fn clear(&mut self) {
+        self.entries.clear()
+    }
+
+    #[inline]
     pub fn invalidate(&mut self, pc: u64) {
         let invalidated_keys = self
             .entries

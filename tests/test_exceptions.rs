@@ -65,9 +65,42 @@ fn test_eret_to_el0() {
     let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
     let mut spsr_el1 = SavedProgramStatusRegister::default();
     spsr_el1.set_M(Mode::EL0);
-    machine.cpu_state.registers.spsr_el1 = spsr_el1;
+    machine.cpu_state.registers.spsr_el1 = spsr_el1.into();
 
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
     assert_hex_eq!(machine.cpu_state.registers.elr_el1, 0x14);
-    assert_eq!(machine.cpu_state.pstate.EL(), ExceptionLevel::EL0);
+    assert_eq!(machine.cpu_state.PSTATE().EL(), ExceptionLevel::EL0);
+}
+
+/// Test PSTATE pseudoregisters
+#[test_log::test]
+fn test_pstate_pseudoregisters() {
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_pstate_pseudoregisters.bin");
+    _ = simulans::disas(TEST_INPUT, 0x40080000);
+
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    {
+        let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+        machine.cpu_state.PSTATE_mut().set_EL(ExceptionLevel::EL1);
+
+        main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+        assert_hex_eq!(machine.cpu_state.registers.x0, 1 << 2);
+    }
+    {
+        let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+        machine.cpu_state.PSTATE_mut().set_EL(ExceptionLevel::EL2);
+
+        main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+        assert_hex_eq!(machine.cpu_state.registers.x0, 2 << 2);
+    }
+
+    {
+        let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+        machine.cpu_state.PSTATE_mut().set_EL(ExceptionLevel::EL3);
+
+        main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+        assert_hex_eq!(machine.cpu_state.registers.x0, 3 << 2);
+    }
 }

@@ -195,7 +195,7 @@ impl GdbStubRunner {
         }
         regs.sp = self.machine.cpu_state.registers.sp;
         regs.pc = self.machine.pc;
-        regs.cpsr = u64::from(self.machine.cpu_state.registers.nzcv) as u32;
+        regs.cpsr = self.machine.cpu_state.registers.pstate as u32;
         regs.v.fill(0);
         regs.fpcr = 0;
         regs.fpsr = 0;
@@ -245,7 +245,8 @@ impl GdbStubRunner {
         }
         self.machine.cpu_state.registers.sp = regs.sp;
         self.machine.pc = regs.pc;
-        self.machine.cpu_state.registers.nzcv = u64::from(regs.cpsr).into();
+        self.machine.cpu_state.registers.pstate =
+            self.machine.cpu_state.registers.pstate & !(u64::from(u32::MAX)) | u64::from(regs.cpsr);
     }
 
     #[inline(always)]
@@ -356,7 +357,7 @@ impl GdbStubRunner {
             AArch64RegId::Sp => read_64bit_reg!(self.machine.cpu_state.registers.sp),
             AArch64RegId::Pc => read_64bit_reg!(self.machine.pc),
             AArch64RegId::Pstate => {
-                read_64bit_reg!(u64::from(self.machine.cpu_state.registers.nzcv))
+                read_64bit_reg!(self.machine.cpu_state.registers.pstate)
             }
             AArch64RegId::V(_) => Ok(Box::new([0; 16])),
             AArch64RegId::SP_EL0 => read_64bit_reg!(self.machine.cpu_state.registers.sp_el0),
@@ -379,7 +380,7 @@ impl GdbStubRunner {
                 read_64bit_reg!(self.machine.cpu_state.registers.vmpidr_el2)
             }
             AArch64RegId::SPSR_EL3 => {
-                read_64bit_reg!(u64::from(self.machine.cpu_state.registers.spsr_el3))
+                read_64bit_reg!(self.machine.cpu_state.registers.spsr_el3)
             }
             AArch64RegId::ELR_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.elr_el1),
             AArch64RegId::ELR_EL2 => read_64bit_reg!(self.machine.cpu_state.registers.elr_el2),
@@ -451,7 +452,7 @@ impl GdbStubRunner {
             AArch64RegId::Sp => write_64bit_reg!(self.machine.cpu_state.registers.sp),
             AArch64RegId::Pc => write_64bit_reg!(self.machine.pc),
             AArch64RegId::Pstate => {
-                self.machine.cpu_state.registers.nzcv = u64::from_ne_bytes(val_64).into();
+                self.machine.cpu_state.registers.pstate = u64::from_ne_bytes(val_64);
             }
             AArch64RegId::V(_) => {
                 // FIXME
@@ -477,7 +478,7 @@ impl GdbStubRunner {
                 write_64bit_reg!(self.machine.cpu_state.registers.vmpidr_el2)
             }
             AArch64RegId::SPSR_EL3 => {
-                self.machine.cpu_state.registers.spsr_el3 = u64::from_ne_bytes(val_64).into();
+                self.machine.cpu_state.registers.spsr_el3 = u64::from_ne_bytes(val_64);
             }
             AArch64RegId::ELR_EL1 => write_64bit_reg!(self.machine.cpu_state.registers.elr_el1),
             AArch64RegId::ELR_EL2 => write_64bit_reg!(self.machine.cpu_state.registers.elr_el2),
