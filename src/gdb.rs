@@ -145,7 +145,7 @@ pub struct GdbStubRunner {
     request_complete_signal: Arc<(Mutex<bool>, Condvar)>,
     stop_sender: SyncSender<SingleThreadStopReason<<AArch64 as Arch>::Usize>>,
     machine: Pin<Box<crate::machine::Armv8AMachine>>,
-    jit_ctx: Pin<Box<crate::jit::JitContext>>,
+    jit: crate::jit::Jit,
 }
 
 type AArch64 = gdbstub_arch::aarch64::AArch64;
@@ -597,7 +597,7 @@ impl GdbStubRunner {
             addr
         );
         self.machine.hw_breakpoints.insert(Address(addr));
-        self.machine.entry_blocks.invalidate(addr);
+        self.jit.entry_blocks.invalidate(addr);
     }
 
     #[inline(always)]
@@ -610,7 +610,7 @@ impl GdbStubRunner {
         if !self.machine.hw_breakpoints.remove(&Address(addr)) {
             return false;
         }
-        self.machine.entry_blocks.invalidate(addr);
+        self.jit.entry_blocks.invalidate(addr);
         true
     }
 
@@ -666,12 +666,12 @@ impl GdbStubRunner {
                     return Some(State::Running);
                 }
                 GdbStubRequest::SingleStep => {
-                    self_.jit_ctx.single_step = true;
+                    self_.jit.single_step = true;
                     let pc = self_.machine.pc;
-                    self_.machine.entry_blocks.invalidate(pc);
-                    let entry = crate::jit::lookup_entry(&mut self_.jit_ctx, &mut self_.machine);
-                    (entry.0)(&mut self_.jit_ctx, &mut self_.machine);
-                    // self_.jit_ctx.single_step = false;
+                    self_.jit.entry_blocks.invalidate(pc);
+                    let entry = crate::jit::lookup_entry(&mut self_.jit, &mut self_.machine);
+                    (entry.0)(&mut self_.jit, &mut self_.machine);
+                    // self_.jit.single_step = false;
                     self_
                         .stop_sender
                         .send(SingleThreadStopReason::DoneStep)
@@ -717,9 +717,9 @@ impl GdbStubRunner {
                             }
                             self.ack();
                         }
-                        if self.jit_ctx.single_step {
+                        if self.jit.single_step {
                             let pc = self.machine.pc;
-                            self.machine.entry_blocks.invalidate(pc);
+                            self.jit.entry_blocks.invalidate(pc);
                         }
                         if self
                             .machine
@@ -732,7 +732,7 @@ impl GdbStubRunner {
                             } else {
                                 let pc = self.machine.pc;
                                 self.machine.in_breakpoint = true;
-                                self.machine.entry_blocks.invalidate(pc);
+                                self.jit.entry_blocks.invalidate(pc);
                                 self.stop_sender
                                     .send(SingleThreadStopReason::HwBreak(()))
                                     .unwrap();
@@ -740,10 +740,10 @@ impl GdbStubRunner {
                                 continue 'main_loop;
                             }
                         }
-                        let entry = crate::jit::lookup_entry(&mut self.jit_ctx, &mut self.machine);
-                        (entry.0)(&mut self.jit_ctx, &mut self.machine);
-                        if self.jit_ctx.single_step {
-                            // self.jit_ctx.single_step = false;
+                        let entry = crate::jit::lookup_entry(&mut self.jit, &mut self.machine);
+                        (entry.0)(&mut self.jit, &mut self.machine);
+                        if self.jit.single_step {
+                            // self.jit.single_step = false;
                             self.stop_sender
                                 .send(SingleThreadStopReason::DoneStep)
                                 .unwrap();
@@ -757,7 +757,7 @@ impl GdbStubRunner {
                         {
                             let pc = self.machine.pc;
                             self.machine.in_breakpoint = true;
-                            self.machine.entry_blocks.invalidate(pc);
+                            self.jit.entry_blocks.invalidate(pc);
                             self.stop_sender
                                 .send(SingleThreadStopReason::HwBreak(()))
                                 .unwrap();
@@ -819,14 +819,14 @@ impl GdbStub {
         std::thread::spawn({
             let request_complete_signal = Arc::clone(&request_complete_signal);
             move || {
-                let jit_ctx = crate::jit::JitContext::new();
+                let jit = crate::jit::Jit::new();
                 let mut runner = GdbStubRunner {
                     tracing_guard,
                     request_receiver,
                     request_complete_signal,
                     stop_sender,
                     machine,
-                    jit_ctx,
+                    jit,
                 };
                 runner.run();
             }
@@ -986,7 +986,7 @@ impl SingleThreadResume for GdbStub {
     #[inline(always)]
     fn resume(&mut self, _signal: Option<Signal>) -> Result<(), Self::Error> {
         info!("resume/continue called");
-        // self.jit_ctx.single_step = false;
+        // self.jit.single_step = false;
         self.send_request(GdbStubRequest::Resume);
         Ok(())
     }

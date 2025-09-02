@@ -22,7 +22,7 @@
 
 //! Generation of JIT code as translation blocks.
 
-use std::{ops::ControlFlow, pin::Pin};
+use std::ops::ControlFlow;
 
 use codegen::ir::{
     instructions::BlockArg,
@@ -30,14 +30,13 @@ use codegen::ir::{
 };
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
+use cranelift_module::{Linkage, Module};
 use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
-use rustc_hash::FxHashMap;
 
 use crate::{
     cpu_state::ExecutionState,
-    machine::Armv8AMachine,
+    machine::{Armv8AMachine, EntryBlock, EntryBlocks},
     memory::{Address, Width},
 };
 
@@ -54,33 +53,37 @@ enum BlockExit {
 ///
 /// It can be either a JIT compiled translation block, or a special emulator
 /// function.
-pub struct Entry(pub extern "C" fn(&mut JitContext, &mut Armv8AMachine) -> Entry);
+pub struct Entry(pub extern "C" fn(&mut Jit, &mut Armv8AMachine) -> Entry);
 
 /// Lookup [`machine.pc`] in cached entry blocks
 /// ([`Armv8AMachine::entry_blocks`]).
 #[no_mangle]
-pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMachine) -> Entry {
+pub extern "C" fn lookup_entry(jit: &mut Jit, machine: &mut Armv8AMachine) -> Entry {
     let pc: u64 = machine.pc;
-    if context.single_step {
+    if jit.single_step {
         // Do not cache single step blocks
-        let (_, next_entry) = context.compile(machine, pc).unwrap();
+        jit.entry_blocks.invalidate(pc);
+        let context = JitContext::new(true);
+        let block = context.compile(machine, pc).unwrap();
+        let next_entry = block.entry;
+        jit.entry_blocks.insert(block);
         return next_entry;
     }
-    if let Some(entry) = machine.entry_blocks.get(&pc) {
+    if let Some(tb) = jit.entry_blocks.get(&pc) {
         tracing::event!(
             target: "lookup_entry",
             tracing::Level::TRACE,
             pc = ?Address(pc),
             "re-using cached entry for 0x{:x}-0x{:x}",
             pc,
-            entry.0
+            tb.start
         );
         // let mem_region = machine.memory.find_region(Address(pc)).unwrap();
         // let mmapped_region = mem_region.as_mmap().unwrap();
         // let input = &mmapped_region.as_ref()[(pc -
-        // mem_region.phys_offset.0).try_into().unwrap()..]     [..(entry.0 as
+        // mem_region.phys_offset.0).try_into().unwrap()..]     [..(tb.start as
         // usize - pc as usize + 4)]; _ = crate::disas(input, pc);
-        return entry.1;
+        return tb.entry;
     }
     tracing::event!(
         target: "lookup_entry",
@@ -89,8 +92,10 @@ pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMac
         "generating entry",
     );
 
-    let (pc_range, next_entry) = context.compile(machine, pc).unwrap();
-    machine.entry_blocks.insert(pc_range, next_entry);
+    let new_ctx = JitContext::new(false);
+    let block = new_ctx.compile(machine, pc).unwrap();
+    let next_entry = block.entry;
+    jit.entry_blocks.insert(block);
 
     tracing::event!(
         target: "lookup_entry",
@@ -99,6 +104,26 @@ pub extern "C" fn lookup_entry(context: &mut JitContext, machine: &mut Armv8AMac
         "returning generated entry",
     );
     next_entry
+}
+
+pub struct Jit {
+    pub entry_blocks: EntryBlocks,
+    pub single_step: bool,
+}
+
+impl Jit {
+    pub fn new() -> Self {
+        Self {
+            entry_blocks: EntryBlocks::new(),
+            single_step: false,
+        }
+    }
+}
+
+impl Default for Jit {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// JIT context/builder used to disassemble code and JIT compile it.
@@ -113,8 +138,7 @@ pub struct JitContext {
     /// The module, with the jit backend, which manages the JIT'd
     /// functions.
     module: JITModule,
-    func_ids: FxHashMap<u64, FuncId>,
-    pub single_step: bool,
+    single_step: bool,
 }
 
 struct MemOpsTable {
@@ -219,7 +243,7 @@ impl MemOpsTable {
 
 impl JitContext {
     /// Returns a new [`JitContext`].
-    pub fn new() -> Pin<Box<Self>> {
+    pub fn new(single_step: bool) -> Self {
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
 
@@ -232,43 +256,27 @@ impl JitContext {
                 .unwrap(),
             cranelift_module::default_libcall_names(),
         ));
-        Box::pin(Self {
+        Self {
             builder_context: FunctionBuilderContext::new(),
             ctx: module.make_context(),
-            func_ids: FxHashMap::default(),
             module,
-            single_step: false,
-        })
+            single_step,
+        }
     }
 
     /// Performs compilation of a block starting at `program_counter`] and
     /// returns an [`Entry`] for it.
     pub fn compile(
-        &mut self,
+        mut self,
         machine: &mut Armv8AMachine,
         program_counter: u64,
-    ) -> Result<(std::ops::RangeInclusive<u64>, Entry), Box<dyn std::error::Error>> {
+    ) -> Result<EntryBlock, Box<dyn std::error::Error>> {
         tracing::event!(
             target: "jit",
             tracing::Level::TRACE,
             pc = ?Address(program_counter),
             "compiling",
         );
-        if let Some(_func_id) = self.func_ids.remove(&program_counter) {
-            // Cranelift doesn't support hotswapping anymore, so just re-allocate
-            // the JIT builder context.
-            let Self {
-                builder_context,
-                ctx,
-                func_ids,
-                module,
-                ..
-            } = *Pin::into_inner(Self::new());
-            self.builder_context = builder_context;
-            self.ctx = ctx;
-            self.func_ids = func_ids;
-            self.module = module;
-        }
         let mut sig = self.module.make_signature();
         sig.params
             .push(AbiParam::new(self.module.target_config().pointer_type()));
@@ -293,7 +301,6 @@ impl JitContext {
 
         // Define the function to jit. This finishes compilation.
         self.module.define_function(id, &mut self.ctx)?;
-        self.func_ids.insert(program_counter, id);
 
         // {
         //     let pc = program_counter;
@@ -319,11 +326,15 @@ impl JitContext {
         let code = unsafe {
             std::mem::transmute::<
                 *const u8,
-                for<'a, 'b> extern "C" fn(&'a mut Self, &'b mut Armv8AMachine) -> Entry,
+                for<'a, 'b> extern "C" fn(&'a mut Jit, &'b mut Armv8AMachine) -> Entry,
             >(self.module.get_finalized_function(id))
         };
-
-        Ok((program_counter..=last_pc, Entry(code)))
+        Ok(EntryBlock {
+            start: program_counter,
+            end: last_pc,
+            entry: Entry(code),
+            ctx: self.module,
+        })
     }
 
     /// Translate instructions starting from address `program_counter`.

@@ -39,7 +39,7 @@ use crate::{
 };
 
 mod entry_blocks;
-pub use entry_blocks::EntryBlocks;
+pub use entry_blocks::{EntryBlock, EntryBlocks};
 
 #[repr(C)]
 pub struct ResolvedAddress<'a> {
@@ -79,7 +79,6 @@ pub struct Armv8AMachine {
     pub prev_pc: u64,
     pub cpu_state: ExecutionState,
     pub memory: MemoryMap,
-    pub entry_blocks: EntryBlocks,
     pub lookup_entry_func: Entry,
     pub hw_breakpoints: BTreeSet<Address>,
     pub exit_request: Arc<AtomicU8>,
@@ -98,7 +97,6 @@ impl Armv8AMachine {
             prev_pc: 0,
             cpu_state: ExecutionState::default(),
             memory,
-            entry_blocks: EntryBlocks::new(),
             lookup_entry_func: Entry(lookup_entry),
             hw_breakpoints: BTreeSet::new(),
             exit_request,

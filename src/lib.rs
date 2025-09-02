@@ -105,7 +105,11 @@
     clippy::unused_enumerate_index,
     clippy::waker_clone_wake,
 )]
-#![allow(clippy::multiple_crate_versions, clippy::cognitive_complexity)]
+#![allow(
+    clippy::multiple_crate_versions,
+    clippy::missing_const_for_fn,
+    clippy::cognitive_complexity
+)]
 
 #[cfg(not(target_pointer_width = "64"))]
 core::compile_error!("Can only be compiled on targets with 64bit address support");
@@ -150,16 +154,14 @@ pub fn main_loop(
     start_address: memory::Address,
     code: &[u8],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut jit_ctx = jit::JitContext::new();
-    jit_ctx.single_step = false;
+    let mut jit = jit::Jit::new();
     machine.load_code(code, start_address)?;
     if machine.pc == 0 {
         machine.pc = start_address.0;
     }
     let mut func = machine.lookup_entry_func;
     while machine.exit_request.load(Ordering::SeqCst) == 0 {
-        func = (func.0)(&mut jit_ctx, machine);
+        func = (func.0)(&mut jit, machine);
     }
-    machine.entry_blocks.clear();
     Ok(())
 }

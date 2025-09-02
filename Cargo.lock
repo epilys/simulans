@@ -977,7 +977,6 @@ dependencies = [
  "memmap2",
  "nix",
  "num-traits",
- "rustc-hash 2.1.1",
  "serde",
  "serde_derive",
  "serde_json",

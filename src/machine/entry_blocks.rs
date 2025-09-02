@@ -26,9 +26,30 @@ use std::{collections::BTreeMap, ops::RangeInclusive};
 
 use crate::jit::Entry;
 
-#[repr(C)]
+#[must_use]
+pub struct EntryBlock {
+    pub start: u64,
+    pub end: u64,
+    pub entry: Entry,
+    pub ctx: cranelift_jit::JITModule,
+}
+
+impl EntryBlock {
+    fn free(self) {
+        let module = self.ctx;
+        // SAFETY: After we drop the block, nobody should be able to call self.entry.
+        unsafe { module.free_memory() };
+    }
+}
+
 pub struct EntryBlocks {
-    pub entries: BTreeMap<u64, (u64, Entry)>,
+    pub entries: BTreeMap<u64, EntryBlock>,
+}
+
+impl Drop for EntryBlocks {
+    fn drop(&mut self) {
+        self.clear();
+    }
 }
 
 impl Default for EntryBlocks {
@@ -46,19 +67,21 @@ impl EntryBlocks {
     }
 
     #[inline]
-    pub fn get(&self, pc: &u64) -> Option<&(u64, Entry)> {
+    pub fn get(&self, pc: &u64) -> Option<&EntryBlock> {
         self.entries.get(pc)
     }
 
     #[inline]
-    pub fn insert(&mut self, pc_range: RangeInclusive<u64>, entry: Entry) {
-        self.entries
-            .insert(*pc_range.start(), (*pc_range.end(), entry));
+    pub fn insert(&mut self, block: EntryBlock) {
+        let start = block.start;
+        self.entries.insert(start, block);
     }
 
     #[inline]
     pub fn clear(&mut self) {
-        self.entries.clear()
+        while let Some((_, b)) = self.entries.pop_first() {
+            b.free();
+        }
     }
 
     #[inline]
@@ -68,14 +91,18 @@ impl EntryBlocks {
             .range(pc..=pc)
             .map(|(k, _)| *k)
             .collect::<Vec<_>>();
-        tracing::trace!(
-            "Invalidating {} entry block{} at address 0x{:x}",
-            invalidated_keys.len(),
-            if invalidated_keys.len() == 1 { "" } else { "s" },
-            pc
-        );
-        for k in invalidated_keys {
-            self.entries.remove(&k);
+        if !invalidated_keys.is_empty() {
+            tracing::trace!(
+                "Invalidating {} entry block{} at address 0x{:x}",
+                invalidated_keys.len(),
+                if invalidated_keys.len() == 1 { "" } else { "s" },
+                pc
+            );
+            for k in invalidated_keys {
+                if let Some(b) = self.entries.remove(&k) {
+                    b.free();
+                }
+            }
         }
     }
 
@@ -86,15 +113,19 @@ impl EntryBlocks {
             .range(range.clone())
             .map(|(k, _)| *k)
             .collect::<Vec<_>>();
-        tracing::trace!(
-            "Invalidating {} entry block{} at address range 0x{:x}-0x{:x}",
-            invalidated_keys.len(),
-            if invalidated_keys.len() == 1 { "" } else { "s" },
-            range.start(),
-            range.end()
-        );
-        for k in invalidated_keys {
-            self.entries.remove(&k);
+        if !invalidated_keys.is_empty() {
+            tracing::trace!(
+                "Invalidating {} entry block{} at address range 0x{:x}-0x{:x}",
+                invalidated_keys.len(),
+                if invalidated_keys.len() == 1 { "" } else { "s" },
+                range.start(),
+                range.end()
+            );
+            for k in invalidated_keys {
+                if let Some(b) = self.entries.remove(&k) {
+                    b.free();
+                }
+            }
         }
     }
 }
