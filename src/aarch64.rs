@@ -22,6 +22,8 @@
 
 #![allow(non_snake_case)]
 
+pub mod timer;
+
 use bilge::prelude::*;
 
 use crate::{

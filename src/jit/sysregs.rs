@@ -22,8 +22,9 @@
 
 #![allow(non_camel_case_types, clippy::upper_case_acronyms)]
 
-use codegen::ir::types::I64;
+use codegen::ir::types::{I64, I8};
 use cranelift::prelude::*;
+use cranelift_module::Module;
 
 use crate::{jit::BlockTranslator, machine::Armv8AMachine};
 
@@ -42,6 +43,9 @@ impl BlockTranslator<'_> {
             bad64::SysReg::DAIFSET => DAIF::generate_read(self),
             bad64::SysReg::CURRENTEL => CurrentEl::generate_read(self),
             bad64::SysReg::PSTATE_SPSEL => SPSel::generate_read(self),
+            bad64::SysReg::CNTFRQ_EL0 => CNTFRQ_EL0::generate_read(self),
+            bad64::SysReg::CNTP_TVAL_EL0 => CNTP_TVAL_EL0::generate_read(self),
+            bad64::SysReg::CNTP_CTL_EL0 => CNTP_CTL_EL0::generate_read(self),
             _ => {
                 let var = *self.sysreg_to_var(reg, false);
                 self.builder.use_var(var)
@@ -56,6 +60,9 @@ impl BlockTranslator<'_> {
             bad64::SysReg::DAIFSET => DAIF::generate_write(self, value),
             bad64::SysReg::CURRENTEL => CurrentEl::generate_write(self, value),
             bad64::SysReg::PSTATE_SPSEL => SPSel::generate_write(self, value),
+            bad64::SysReg::CNTFRQ_EL0 => CNTFRQ_EL0::generate_write(self, value),
+            bad64::SysReg::CNTP_TVAL_EL0 => CNTP_TVAL_EL0::generate_write(self, value),
+            bad64::SysReg::CNTP_CTL_EL0 => CNTP_CTL_EL0::generate_write(self, value),
             _ => {
                 let target = *self.sysreg_to_var(reg, true);
                 self.builder.def_var(target, value);
@@ -136,4 +143,75 @@ impl SystemRegister for SPSel {
     }
 
     fn generate_write(_: &mut BlockTranslator<'_>, _: Value) {}
+}
+
+pub struct CNTFRQ_EL0;
+
+impl SystemRegister for CNTFRQ_EL0 {
+    fn generate_read(jit: &mut BlockTranslator<'_>) -> Value {
+        let sigref = {
+            let mut sig = jit.module.make_signature();
+            sig.params.push(AbiParam::new(jit.pointer_type));
+            sig.returns.push(AbiParam::new(I64));
+            jit.builder.import_signature(sig)
+        };
+        let func = jit.builder.ins().iconst(
+            I64,
+            crate::aarch64::timer::cntfrq_el0_read as usize as u64 as i64,
+        );
+        let pc = jit.address;
+        jit.indirect_call(pc, sigref, func, &[jit.machine_ptr])[0]
+    }
+
+    fn generate_write(_: &mut BlockTranslator<'_>, _: Value) {}
+}
+
+pub struct CNTP_TVAL_EL0;
+
+impl SystemRegister for CNTP_TVAL_EL0 {
+    fn generate_read(jit: &mut BlockTranslator<'_>) -> Value {
+        // [ref:FIXME]:
+        jit.builder.ins().iconst(I64, 0)
+    }
+
+    fn generate_write(jit: &mut BlockTranslator<'_>, value: Value) {
+        let sigref = {
+            let mut sig = jit.module.make_signature();
+            sig.params.push(AbiParam::new(jit.pointer_type));
+            sig.params.push(AbiParam::new(I64));
+            sig.returns.push(AbiParam::new(I8));
+            jit.builder.import_signature(sig)
+        };
+        let func = jit.builder.ins().iconst(
+            I64,
+            crate::aarch64::timer::cntp_tval_el0_write as usize as u64 as i64,
+        );
+        let pc = jit.address;
+        jit.indirect_call(pc, sigref, func, &[jit.machine_ptr, value]);
+    }
+}
+
+pub struct CNTP_CTL_EL0;
+
+impl SystemRegister for CNTP_CTL_EL0 {
+    fn generate_read(jit: &mut BlockTranslator<'_>) -> Value {
+        // [ref:FIXME]:
+        jit.builder.ins().iconst(I64, 0)
+    }
+
+    fn generate_write(jit: &mut BlockTranslator<'_>, value: Value) {
+        let sigref = {
+            let mut sig = jit.module.make_signature();
+            sig.params.push(AbiParam::new(jit.pointer_type));
+            sig.params.push(AbiParam::new(I64));
+            sig.returns.push(AbiParam::new(I8));
+            jit.builder.import_signature(sig)
+        };
+        let func = jit.builder.ins().iconst(
+            I64,
+            crate::aarch64::timer::cntp_ctl_el0_write as usize as u64 as i64,
+        );
+        let pc = jit.address;
+        jit.indirect_call(pc, sigref, func, &[jit.machine_ptr, value]);
+    }
 }
