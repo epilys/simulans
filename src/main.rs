@@ -151,6 +151,10 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     }
     let memory = memory_map_builder.build();
     let mut machine = machine::Armv8AMachine::new(memory);
+    machine
+        .cpu_state
+        .PSTATE_mut()
+        .set_EL(simulans::cpu_state::ExceptionLevel::EL1);
     // disas(&input, args.entry_point_address().0)?;
     if args.generate_fdt {
         let fdt = machine.generate_fdt(args.entry_point_address())?;
