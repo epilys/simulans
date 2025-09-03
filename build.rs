@@ -4,8 +4,18 @@ fn compile_assembly(
     input_path: &std::path::Path,
     output_path: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "macos")]
+    const ASSEMBLER: &str = "aarch64-elf-as";
+    #[cfg(target_os = "macos")]
+    const LINKER: &str = "aarch64-elf-ld";
+    #[cfg(target_os = "macos")]
+    const OBJCOPY: &str = "aarch64-elf-objcopy";
+
+    #[cfg(target_os = "linux")]
     const ASSEMBLER: &str = "aarch64-linux-gnu-as";
+    #[cfg(target_os = "linux")]
     const LINKER: &str = "aarch64-linux-gnu-ld";
+    #[cfg(target_os = "linux")]
     const OBJCOPY: &str = "aarch64-linux-gnu-objcopy";
 
     let o_output_path = output_path.join("out.o");

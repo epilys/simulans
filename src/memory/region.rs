@@ -389,6 +389,17 @@ impl MemoryRegion {
         MmappedMemory::new_region(name, size, phys_offset)
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn new_file(
+        _name: &str,
+        _path: PathBuf,
+        _size: MemorySize,
+        _phys_offset: Address,
+    ) -> Result<Self, Errno> {
+        Err(Errno::ENOTSUP)
+    }
+
+    #[cfg(not(target_os = "macos"))]
     pub fn new_file(
         name: &str,
         path: PathBuf,

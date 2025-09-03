@@ -155,7 +155,7 @@ pub struct TracingGuard {
 }
 
 impl TracingGuard {
-    pub const fn current_level(&self) -> LevelFilter {
+    pub fn current_level(&self) -> LevelFilter {
         self.current_level.get()
     }
 
