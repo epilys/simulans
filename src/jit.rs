@@ -26,7 +26,8 @@ use std::ops::ControlFlow;
 
 use codegen::ir::{
     instructions::BlockArg,
-    types::{I128, I16, I32, I64, I8},
+    types::{I128, I16, I32, I64, I64X2, I8},
+    Endianness,
 };
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
@@ -42,6 +43,8 @@ use crate::{
 };
 
 mod sysregs;
+
+const MEMFLAG_LITTLE_ENDIAN: MemFlags = MemFlags::new().with_endianness(Endianness::Little);
 
 enum BlockExit {
     Branch(Value),
@@ -1795,8 +1798,32 @@ impl BlockTranslator<'_> {
                     } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
-                let value = self.translate_operand(&instruction.operands()[1]);
-                let width = self.operand_width(&instruction.operands()[1]);
+                let mut value = self.translate_operand(&instruction.operands()[1]);
+                let mut width = self.operand_width(&instruction.operands()[1]);
+                if width == Width::_128 {
+                    value = self
+                        .builder
+                        .ins()
+                        .bitcast(I64X2, MEMFLAG_LITTLE_ENDIAN, value);
+                    let arrspec = match instruction.operands()[1] {
+                        bad64::Operand::Reg {
+                            reg: _,
+                            arrspec: Some(arrspec),
+                        } => arrspec,
+                        _ => unreachable!(),
+                    };
+                    value = match arrspec {
+                        bad64::ArrSpec::OneDouble(Some(lane)) => {
+                            self.builder.ins().extractlane(value, lane as u8)
+                        }
+                        _ => unreachable!(),
+                    };
+                    value = self
+                        .builder
+                        .ins()
+                        .bitcast(I64, MEMFLAG_LITTLE_ENDIAN, value);
+                    width = Width::_64;
+                }
                 write_to_register!(target, TypedValue { value, width });
             }
             Op::MOVK => {
@@ -3041,7 +3068,23 @@ impl BlockTranslator<'_> {
             Op::DSB => {
                 // Data synchronization barrier
             }
-            Op::DUP => todo!(),
+            Op::DUP => {
+                // Duplicate general-purpose register to vector
+                let (target, arrspec) = match instruction.operands()[0] {
+                    bad64::Operand::Reg {
+                        ref reg,
+                        arrspec: Some(arrspec),
+                    } => (self.reg_to_var(reg, true), arrspec),
+                    other => unexpected_operand!(other),
+                };
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[0]);
+                let value = match arrspec {
+                    bad64::ArrSpec::TwoDoubles(None) => self.builder.ins().iconcat(value, value),
+                    other => unimplemented!("{other:?}"),
+                };
+                write_to_register!(target, TypedValue { value, width });
+            }
             Op::DUPM => todo!(),
             Op::DVP => todo!(),
             Op::EON => todo!(),
@@ -3610,17 +3653,52 @@ impl BlockTranslator<'_> {
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
-                let a = self.builder.ins().band_imm(value, i64::from(u32::MAX));
-                let a = self.builder.ins().ireduce(I32, a);
-                let a = self.builder.ins().bswap(a);
-                let a = self.builder.ins().uextend(I64, a);
-                let b = self.builder.ins().ushr_imm(value, 32);
-                let b = self.builder.ins().ireduce(I32, b);
-                let b = self.builder.ins().bswap(b);
-                let b = self.builder.ins().uextend(I64, b);
-                let b = self.builder.ins().ishl_imm(b, 32);
-                let value = self.builder.ins().band(a, b);
                 let width = self.operand_width(&instruction.operands()[1]);
+
+                macro_rules! reverse_word {
+                    ($word_value:expr, lsb = $lsb:expr) => {{
+                        let word = if $lsb > 0 {
+                            self.builder.ins().ushr_imm($word_value, $lsb)
+                        } else {
+                            $word_value
+                        };
+                        let word = self.builder.ins().ireduce(I32, word);
+                        let word = self.builder.ins().bswap(word);
+                        let word = self.builder.ins().uextend(I64, word);
+                        if $lsb > 0 {
+                            self.builder.ins().ishl_imm(word, $lsb)
+                        } else {
+                            word
+                        }
+                    }};
+                }
+                let value = if matches!(width, Width::_128) {
+                    let w_1 = self.builder.ins().band_imm(value, i64::from(u32::MAX));
+                    let w_1 = self.builder.ins().ireduce(I64, w_1);
+                    let w_2 = self.builder.ins().ireduce(I64, value);
+                    let hdw = self.builder.ins().ushr_imm(value, 64);
+                    let w_3 = self.builder.ins().band_imm(hdw, i64::from(u32::MAX));
+                    let w_3 = self.builder.ins().ireduce(I64, w_3);
+                    let w_4 = self.builder.ins().ireduce(I64, hdw);
+                    let w_1 = reverse_word!(w_1, lsb = 0);
+                    let w_2 = reverse_word!(w_2, lsb = 32);
+                    let w_3 = reverse_word!(w_3, lsb = 0);
+                    let w_4 = reverse_word!(w_4, lsb = 32);
+                    let low = self.builder.ins().bor(w_1, w_2);
+                    let high = self.builder.ins().bor(w_3, w_4);
+                    self.builder.ins().iconcat(low, high)
+                } else {
+                    let a = self.builder.ins().band_imm(value, i64::from(u32::MAX));
+                    let a = self.builder.ins().ireduce(I32, a);
+                    let a = self.builder.ins().bswap(a);
+                    let a = self.builder.ins().uextend(I64, a);
+                    let b = self.builder.ins().ushr_imm(value, 32);
+                    let b = self.builder.ins().ireduce(I32, b);
+                    let b = self.builder.ins().bswap(b);
+                    let b = self.builder.ins().uextend(I64, b);
+                    let b = self.builder.ins().ishl_imm(b, 32);
+                    self.builder.ins().band(a, b)
+                };
                 write_to_register!(target, TypedValue { value, width });
             }
             Op::REVB => todo!(),

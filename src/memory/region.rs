@@ -527,7 +527,8 @@ pub mod ops {
                     MemoryBacking::Device(ref ops) => {
                         ops.write(
                             address_inside_region,
-                            u64::from(value),
+                            // [ref:TODO] allow for device 128bit IO?
+                            u64::try_from(value).unwrap(),
                             match std::mem::size_of::<$size>() {
                                 1 => Width::_8,
                                 2 => Width::_16,
@@ -574,6 +575,7 @@ pub mod ops {
                         );
                         value
                     }
+                    #[allow(clippy::cast_lossless)]
                     MemoryBacking::Device(ref ops) => ops.read(
                         address_inside_region,
                         match std::mem::size_of::<$size>() {
@@ -594,37 +596,11 @@ pub mod ops {
     def_op! { write memory_region_write_16: u16 }
     def_op! { write memory_region_write_32: u32 }
     def_op! { write memory_region_write_64: u64 }
+    def_op! { write memory_region_write_128: u128 }
 
     def_op! { read memory_region_read_8: u8 }
     def_op! { read memory_region_read_16: u16 }
     def_op! { read memory_region_read_32: u32 }
     def_op! { read memory_region_read_64: u64 }
-
-    pub extern "C" fn memory_region_write_128(
-        _mem_region: &mut MemoryRegion,
-        _address_inside_region: u64,
-        _value_hi: u64,
-        _value_lo: u64,
-    ) {
-        todo!()
-        // let destination = unsafe {
-        //     mem_region
-        //         .map
-        //         .as_mut_ptr()
-        //         .add(address_inside_region as usize)
-        // };
-        // unsafe {
-        //     *destination.cast::<u128>() = value;
-        // }
-    }
-
-    pub extern "C" fn memory_region_read_128(
-        _mem_region: &MemoryRegion,
-        _address_inside_region: u64,
-    ) -> u64 {
-        todo!()
-        // let destination = unsafe {
-        // mem_region.map.as_ptr().add(address_inside_region as usize) };
-        // unsafe { *destination.cast::<u64>() }
-    }
+    def_op! { read memory_region_read_128: u128 }
 }
