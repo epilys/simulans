@@ -46,7 +46,7 @@ pub const KERNEL_ADDRESS: usize = 0x40080000;
 // Default starting offset of DRAM inside the physical address space.
 pub const PHYS_MEM_START: u64 = 0x4000_0000;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd)]
 #[repr(i32)]
 /// Register/memory width in bits.
 pub enum Width {

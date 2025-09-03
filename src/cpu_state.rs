@@ -25,7 +25,7 @@
 #![allow(non_snake_case)]
 
 use bilge::prelude::*;
-use codegen::ir::types::I64;
+use codegen::ir::types::{I128, I64};
 use cranelift::prelude::*;
 use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
@@ -388,7 +388,7 @@ pub struct ExecutionState {
     /// Regular registers.
     pub registers: RegisterFile,
     /// Vector (SIMD) registers.
-    pub vector_registers: [(u64, u64); 32],
+    pub vector_registers: [u128; 32],
     pub exit_request: Option<ExitRequest>,
     /// Architectural features this CPU supports.
     pub arch_features: ArchFeatures,
@@ -543,31 +543,20 @@ impl ExecutionState {
             .ins()
             .iconst(I64, std::ptr::addr_of!(self.vector_registers) as i64);
         for i in 0_u32..=31 {
-            let d_reg = bad64::Reg::from_u32(bad64::Reg::D0 as u32 + i).unwrap();
-            assert!(!registers.contains_key(&d_reg));
             let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
             assert!(!registers.contains_key(&v_reg));
-            let offset = i * std::mem::size_of::<(u64, u64)>() as u32;
+            let offset = i * std::mem::size_of::<u128>() as u32;
             let offset = i32::try_from(offset).unwrap();
-            {
-                let d_value = builder.ins().load(I64, MEMFLAGS, vector_addr, offset);
-                let d_var = Variable::new(registers.len() + sys_registers.len());
-                registers.insert(d_reg, d_var);
-                builder.declare_var(d_var, I64);
-                builder.def_var(d_var, d_value);
-            }
-            {
-                let v_value = builder.ins().load(
-                    I64,
-                    MEMFLAGS,
-                    vector_addr,
-                    offset + std::mem::size_of::<u64>() as i32,
-                );
-                let v_var = Variable::new(registers.len() + sys_registers.len());
-                registers.insert(v_reg, v_var);
-                builder.declare_var(v_var, I64);
-                builder.def_var(v_var, v_value);
-            }
+            let v_value = builder.ins().load(
+                I128,
+                MEMFLAGS,
+                vector_addr,
+                offset + std::mem::size_of::<u128>() as i32,
+            );
+            let v_var = Variable::new(registers.len() + sys_registers.len());
+            registers.insert(v_reg, v_var);
+            builder.declare_var(v_var, I128);
+            builder.def_var(v_var, v_value);
         }
     }
 
@@ -675,25 +664,13 @@ impl ExecutionState {
                 .ins()
                 .iconst(I64, std::ptr::addr_of!(self.vector_registers) as i64);
             for i in 0_u32..=31 {
-                let offset = i * std::mem::size_of::<(u64, u64)>() as u32;
-                let d_reg = bad64::Reg::from_u32(bad64::Reg::D0 as u32 + i).unwrap();
-                let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
-                assert!(registers.contains_key(&d_reg));
-                assert!(registers.contains_key(&v_reg));
-                let var = &registers[&d_reg];
-                let low_bits_value = builder.use_var(*var);
+                let offset = i * std::mem::size_of::<u128>() as u32;
                 let offset = i32::try_from(offset).unwrap();
-                builder
-                    .ins()
-                    .store(MEMFLAGS, low_bits_value, vector_addr, offset);
+                let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
+                assert!(registers.contains_key(&v_reg));
                 let var = &registers[&v_reg];
-                let high_bits_value = builder.use_var(*var);
-                builder.ins().store(
-                    MEMFLAGS,
-                    high_bits_value,
-                    vector_addr,
-                    offset + std::mem::size_of::<u64>() as i32,
-                );
+                let value = builder.use_var(*var);
+                builder.ins().store(MEMFLAGS, value, vector_addr, offset);
             }
         }
     }

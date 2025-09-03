@@ -26,7 +26,7 @@ use std::ops::ControlFlow;
 
 use codegen::ir::{
     instructions::BlockArg,
-    types::{I16, I32, I64, I8},
+    types::{I128, I16, I32, I64, I8},
 };
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
@@ -166,7 +166,7 @@ impl MemOpsTable {
                 &self.write_sigrefs[3],
             ),
             Width::_128 => (
-                crate::memory::ops::memory_region_write_64 as usize as u64 as i64,
+                crate::memory::ops::memory_region_write_128 as usize as u64 as i64,
                 &self.write_sigrefs[4],
             ),
         }
@@ -191,7 +191,7 @@ impl MemOpsTable {
                 &self.read_sigrefs[3],
             ),
             Width::_128 => (
-                crate::memory::ops::memory_region_read_64 as usize as u64 as i64,
+                crate::memory::ops::memory_region_read_128 as usize as u64 as i64,
                 &self.read_sigrefs[4],
             ),
         }
@@ -223,7 +223,7 @@ impl MemOpsTable {
             sigref! { write I16 },
             sigref! { write I32 },
             sigref! { write I64 },
-            sigref! { write I64 },
+            sigref! { write I128 },
         ];
 
         let read_sigrefs = [
@@ -231,7 +231,7 @@ impl MemOpsTable {
             sigref! { read I16 },
             sigref! { read I32 },
             sigref! { read I64 },
-            sigref! { read I64 },
+            sigref! { read I128 },
         ];
 
         Self {
@@ -246,6 +246,9 @@ impl JitContext {
     pub fn new(single_step: bool) -> Self {
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
+        flag_builder
+            .set("enable_llvm_abi_extensions", "true")
+            .unwrap();
 
         let module = JITModule::new(JITBuilder::with_isa(
             cranelift_native::builder()
@@ -537,6 +540,19 @@ struct BlockTranslator<'a> {
     address_lookup_sigref: codegen::ir::SigRef,
     registers: IndexMap<bad64::Reg, Variable>,
     sys_registers: IndexMap<bad64::SysReg, Variable>,
+}
+
+#[derive(Debug)]
+struct TypedRegisterView {
+    var: Variable,
+    width: Width,
+    extend_to: Option<Width>,
+}
+
+#[derive(Debug)]
+struct TypedValue {
+    width: Width,
+    value: Value,
 }
 
 #[inline]
@@ -834,7 +850,7 @@ impl BlockTranslator<'_> {
         match operand {
             Operand::Reg {
                 ref reg,
-                arrspec: None,
+                arrspec: _,
             } => self.reg_to_value(reg),
             Operand::ShiftReg { ref reg, shift } => {
                 use bad64::Shift;
@@ -905,16 +921,16 @@ impl BlockTranslator<'_> {
                             imm_value,
                             TrapCode::INTEGER_OVERFLOW,
                         );
-                        let reg_var = *self.reg_to_var(reg, true);
-                        self.builder.def_var(reg_var, value);
+                        let reg_var = self.reg_to_var(reg, true);
+                        self.builder.def_var(reg_var.var, value);
                         self.reg_to_value(reg)
                     }
                     Imm::Signed(imm) if *imm < 0 => {
                         let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
                         let (value, _overflow_flag) =
                             self.builder.ins().usub_overflow(reg_val, imm_value);
-                        let reg_var = *self.reg_to_var(reg, true);
-                        self.builder.def_var(reg_var, value);
+                        let reg_var = self.reg_to_var(reg, true);
+                        self.builder.def_var(reg_var.var, value);
                         self.reg_to_value(reg)
                     }
                     Imm::Signed(imm) => {
@@ -925,8 +941,8 @@ impl BlockTranslator<'_> {
                             imm_value,
                             TrapCode::INTEGER_OVERFLOW,
                         );
-                        let reg_var = *self.reg_to_var(reg, true);
-                        self.builder.def_var(reg_var, value);
+                        let reg_var = self.reg_to_var(reg, true);
+                        self.builder.def_var(reg_var.var, value);
                         self.reg_to_value(reg)
                     }
                 }
@@ -943,15 +959,15 @@ impl BlockTranslator<'_> {
                             imm_value,
                             TrapCode::INTEGER_OVERFLOW,
                         );
-                        let reg_var = *self.reg_to_var(reg, true);
-                        self.builder.def_var(reg_var, post_value);
+                        let reg_var = self.reg_to_var(reg, true);
+                        self.builder.def_var(reg_var.var, post_value);
                     }
                     Imm::Signed(imm) if *imm < 0 => {
                         let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
                         let (post_value, _overflow_flag) =
                             self.builder.ins().usub_overflow(reg_val, imm_value);
-                        let reg_var = *self.reg_to_var(reg, true);
-                        self.builder.def_var(reg_var, post_value);
+                        let reg_var = self.reg_to_var(reg, true);
+                        self.builder.def_var(reg_var.var, post_value);
                     }
                     Imm::Signed(imm) => {
                         let imm_value = self.builder.ins().iconst(I64, *imm);
@@ -961,8 +977,8 @@ impl BlockTranslator<'_> {
                             imm_value,
                             TrapCode::INTEGER_OVERFLOW,
                         );
-                        let reg_var = *self.reg_to_var(reg, true);
-                        self.builder.def_var(reg_var, post_value);
+                        let reg_var = self.reg_to_var(reg, true);
+                        self.builder.def_var(reg_var.var, post_value);
                     }
                 }
                 reg_val
@@ -1059,77 +1075,44 @@ impl BlockTranslator<'_> {
     }
 
     #[cold]
-    fn simd_reg_to_var(&mut self, reg: &bad64::Reg, write: bool) -> &Variable {
+    fn simd_reg_to_var(&mut self, reg: &bad64::Reg, write: bool) -> TypedRegisterView {
         use bad64::Reg;
 
         self.write_to_simd |= write;
 
         let reg_no = *reg as u32;
-        if ((Reg::V0 as u32)..=(Reg::V31 as u32)).contains(&reg_no) {
-            unimplemented!()
-            // return &self.registers[reg];
-        }
-        if ((Reg::Q0 as u32)..=(Reg::Q31 as u32)).contains(&reg_no) {
-            unimplemented!()
-            // // 128 bits
-            // let i = reg_no - (Reg::Q0 as u32);
-            // let v_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
-            // let var = &self.registers[&v_reg];
-            // if write {
-            //     todo!()
-            // }
-            // return var;
-        }
-        if ((Reg::B0 as u32)..=(Reg::B31 as u32)).contains(&reg_no) {
-            // 8 bits
-            let i = reg_no - (Reg::B0 as u32);
-            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
-            let var = &self.registers[&d_reg];
-            if write {
-                let mask = self.builder.ins().iconst(I64, 0xff);
-                let unmasked_value = self.builder.use_var(self.registers[&d_reg]);
-                let masked_value = self.builder.ins().band(unmasked_value, mask);
-                self.builder.def_var(self.registers[&d_reg], masked_value);
-            }
-            return var;
-        }
-        if ((Reg::H0 as u32)..=(Reg::H31 as u32)).contains(&reg_no) {
-            // 16 bits
-            let i = reg_no - (Reg::H0 as u32);
-            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
-            let var = &self.registers[&d_reg];
-            if write {
-                let mask = self.builder.ins().iconst(I64, 0xffff);
-                let unmasked_value = self.builder.use_var(self.registers[&d_reg]);
-                let masked_value = self.builder.ins().band(unmasked_value, mask);
-                self.builder.def_var(self.registers[&d_reg], masked_value);
-            }
-            return var;
-        }
-        if ((Reg::S0 as u32)..=(Reg::S31 as u32)).contains(&reg_no) {
+        let (i, width) = if ((Reg::V0 as u32)..=(Reg::V31 as u32)).contains(&reg_no) {
+            (reg_no - (Reg::V0 as u32), Width::_128)
+        } else if ((Reg::Q0 as u32)..=(Reg::Q31 as u32)).contains(&reg_no) {
+            // Registers Q0-Q31 map directly to registers V0-V31.
+            (reg_no - (Reg::Q0 as u32), Width::_128)
+        } else if ((Reg::D0 as u32)..=(Reg::D31 as u32)).contains(&reg_no) {
+            (reg_no - (Reg::D0 as u32), Width::_64)
+        } else if ((Reg::S0 as u32)..=(Reg::S31 as u32)).contains(&reg_no) {
             // 32 bits
-            let i = reg_no - (Reg::S0 as u32);
-            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
-            let var = &self.registers[&d_reg];
-            if write {
-                let mask = self.builder.ins().iconst(I64, 0xffff_ffff);
-                let unmasked_value = self.builder.use_var(self.registers[&d_reg]);
-                let masked_value = self.builder.ins().band(unmasked_value, mask);
-                self.builder.def_var(self.registers[&d_reg], masked_value);
-            }
-            return var;
+            (reg_no - (Reg::S0 as u32), Width::_32)
+        } else if ((Reg::H0 as u32)..=(Reg::H31 as u32)).contains(&reg_no) {
+            // 16 bits
+            (reg_no - (Reg::H0 as u32), Width::_16)
+        } else {
+            // 8 bits
+            assert!(((Reg::B0 as u32)..=(Reg::B31 as u32)).contains(&reg_no));
+            (reg_no - (Reg::B0 as u32), Width::_8)
+        };
+        let reg = Reg::from_u32(i + Reg::V0 as u32).unwrap();
+        TypedRegisterView {
+            var: self.registers[&reg],
+            width,
+            extend_to: if matches!(width, Width::_128) {
+                None
+            } else {
+                Some(Width::_128)
+            },
         }
-        if ((Reg::D0 as u32)..=(Reg::D31 as u32)).contains(&reg_no) {
-            // 64 bits
-            let i = reg_no - (Reg::D0 as u32);
-            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
-            return &self.registers[&d_reg];
-        }
-        unreachable!()
     }
 
     #[inline]
-    fn reg_to_var(&mut self, reg: &bad64::Reg, write: bool) -> &Variable {
+    fn reg_to_var(&mut self, reg: &bad64::Reg, write: bool) -> TypedRegisterView {
         use bad64::Reg;
 
         if is_vector(reg) {
@@ -1177,9 +1160,19 @@ impl BlockTranslator<'_> {
             Reg::W29 => Reg::X29,
             Reg::W30 => Reg::X30,
             Reg::WSP => Reg::SP,
-            Reg::WZR => return &self.registers[&Reg::XZR],
+            Reg::WZR => {
+                return TypedRegisterView {
+                    var: self.registers[&Reg::XZR],
+                    width: Width::_32,
+                    extend_to: Some(Width::_64),
+                }
+            }
             _ => {
-                return &self.registers[reg];
+                return TypedRegisterView {
+                    var: self.registers[reg],
+                    width: Width::_64,
+                    extend_to: None,
+                };
             }
         };
         if write {
@@ -1190,61 +1183,25 @@ impl BlockTranslator<'_> {
             let masked_value = self.builder.ins().band(unmasked_value, mask);
             self.builder.def_var(self.registers[&reg_64], masked_value);
         }
-        &self.registers[&reg_64]
+        TypedRegisterView {
+            var: self.registers[&reg_64],
+            width: Width::_32,
+            extend_to: Some(Width::_64),
+        }
     }
 
     #[cold]
     fn simd_reg_to_value(&mut self, reg: &bad64::Reg) -> Value {
-        use bad64::Reg;
+        let target = self.simd_reg_to_var(reg, false);
+        let value = self.builder.use_var(target.var);
 
-        let reg_no = *reg as u32;
-        if ((Reg::V0 as u32)..=(Reg::V31 as u32)).contains(&reg_no) {
-            unimplemented!()
-            // return self.builder.use_var(self.registers[reg]);
+        match target.width {
+            Width::_128 => value,
+            Width::_64 => self.builder.ins().ireduce(I64, value),
+            Width::_32 => self.builder.ins().ireduce(I32, value),
+            Width::_16 => self.builder.ins().ireduce(I16, value),
+            Width::_8 => self.builder.ins().ireduce(I8, value),
         }
-        if ((Reg::Q0 as u32)..=(Reg::Q31 as u32)).contains(&reg_no) {
-            unimplemented!()
-            // // 128 bits
-            // let i = reg_no - (Reg::Q0 as u32);
-            // let v_reg = Reg::from_u32(i + Reg::V0 as u32).unwrap();
-            // let var = &self.registers[&v_reg];
-            // return self.builder.use_var(*var);
-        }
-        if ((Reg::B0 as u32)..=(Reg::B31 as u32)).contains(&reg_no) {
-            // 8 bits
-            let i = reg_no - (Reg::B0 as u32);
-            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
-            let var = &self.registers[&d_reg];
-            let value = self.builder.use_var(*var);
-            let mask = self.builder.ins().iconst(I64, 0xff);
-            return self.builder.ins().band(value, mask);
-        }
-        if ((Reg::H0 as u32)..=(Reg::H31 as u32)).contains(&reg_no) {
-            // 16 bits
-            let i = reg_no - (Reg::H0 as u32);
-            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
-            let var = &self.registers[&d_reg];
-            let value = self.builder.use_var(*var);
-            let mask = self.builder.ins().iconst(I64, 0xffff);
-            return self.builder.ins().band(value, mask);
-        }
-        if ((Reg::S0 as u32)..=(Reg::S31 as u32)).contains(&reg_no) {
-            // 32 bits
-            let i = reg_no - (Reg::S0 as u32);
-            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
-            let var = &self.registers[&d_reg];
-            let value = self.builder.use_var(*var);
-            let mask = self.builder.ins().iconst(I64, 0xffff_ffff);
-            return self.builder.ins().band(value, mask);
-        }
-        if ((Reg::D0 as u32)..=(Reg::D31 as u32)).contains(&reg_no) {
-            // 64 bits
-            let i = reg_no - (Reg::D0 as u32);
-            let d_reg = Reg::from_u32(i + Reg::D0 as u32).unwrap();
-            let var = &self.registers[&d_reg];
-            return self.builder.use_var(*var);
-        }
-        unreachable!()
     }
 
     #[inline]
@@ -1338,8 +1295,23 @@ impl BlockTranslator<'_> {
             | Operand::StrImm { .. } => unimplemented!(),
         };
 
-        let reg_val = *reg as u32;
-        if ((Reg::W0 as u32)..=(Reg::W30 as u32)).contains(&reg_val)
+        let reg_no = *reg as u32;
+
+        if is_vector(reg) {
+            if ((Reg::V0 as u32)..=(Reg::V31 as u32)).contains(&reg_no)
+                || ((Reg::Q0 as u32)..=(Reg::Q31 as u32)).contains(&reg_no)
+            {
+                Width::_128
+            } else if ((Reg::D0 as u32)..=(Reg::D31 as u32)).contains(&reg_no) {
+                Width::_64
+            } else if ((Reg::S0 as u32)..=(Reg::S31 as u32)).contains(&reg_no) {
+                Width::_32
+            } else if ((Reg::H0 as u32)..=(Reg::H31 as u32)).contains(&reg_no) {
+                Width::_16
+            } else {
+                Width::_8
+            }
+        } else if ((Reg::W0 as u32)..=(Reg::W30 as u32)).contains(&reg_no)
             || matches!(reg, Reg::WSP | Reg::WZR)
         {
             Width::_32
@@ -1370,17 +1342,50 @@ impl BlockTranslator<'_> {
         }
         let op = instruction.op();
 
-        macro_rules! write_to_destination {
-            ($val:expr, $target:expr) => {{
-                write_to_destination!(0, $val, $target);
-            }};
-            ($idx:expr, $val:expr, $target:expr) => {{
-                let width = self.operand_width(&instruction.operands()[$idx]);
-                let mut value = $val;
-                if !matches!(width, Width::_64) {
-                    value = self.builder.ins().uextend(I64, value);
+        macro_rules! write_to_register {
+            ($target:expr, $val:expr$(,)?) => {{
+                let val: TypedValue = $val;
+                let target: TypedRegisterView = $target;
+
+                let width = target.width;
+                let extend_to = target.extend_to;
+                let var = target.var;
+                let mut value = val.value;
+
+                let mut current_width = val.width;
+
+                if let Some(extend_to) = extend_to {
+                    if extend_to > current_width {
+                        value = self.builder.ins().uextend(extend_to.into(), value);
+                        current_width = extend_to;
+                    }
                 }
-                self.builder.def_var($target, value);
+                if width > current_width {
+                    value = self.builder.ins().uextend(width.into(), value);
+                }
+                self.builder.def_var(var, value);
+            }};
+            (signed $target:expr, $val:expr$(,)?) => {{
+                let val: TypedValue = $val;
+                let target: TypedRegisterView = $target;
+
+                let width = target.width;
+                let extend_to = target.extend_to;
+                let var = target.var;
+                let mut value = val.value;
+
+                let mut current_width = val.width;
+
+                if let Some(extend_to) = extend_to {
+                    if extend_to > current_width {
+                        value = self.builder.ins().sextend(extend_to.into(), value);
+                        current_width = extend_to;
+                    }
+                }
+                if width > current_width {
+                    value = self.builder.ins().sextend(width.into(), value);
+                }
+                self.builder.def_var(var, value);
             }};
         }
         // Common implementations
@@ -1450,7 +1455,13 @@ impl BlockTranslator<'_> {
                 self.builder.seal_block(merge_block);
 
                 let phi = self.builder.block_params(merge_block)[0];
-                write_to_destination!(phi, $Rd);
+                write_to_register!(
+                    $Rd,
+                    TypedValue {
+                        value: phi,
+                        width: $width,
+                    },
+                );
                 phi
             }};
             (inv Rd = $Rd:expr, Rn = $Rn:expr, Rm = $Rm:expr, cond = $cond:expr, width = $width:expr) => {{
@@ -1478,7 +1489,13 @@ impl BlockTranslator<'_> {
                 self.builder.seal_block(merge_block);
 
                 let phi = self.builder.block_params(merge_block)[0];
-                write_to_destination!(phi, $Rd);
+                write_to_register!(
+                    $Rd,
+                    TypedValue {
+                        value: phi,
+                        width: $width,
+                    },
+                );
                 phi
             }};
             (neg Rd = $Rd:expr, Rn = $Rn:expr, Rm = $Rm:expr, cond = $cond:expr, width = $width:expr) => {{
@@ -1507,7 +1524,13 @@ impl BlockTranslator<'_> {
                 self.builder.seal_block(merge_block);
 
                 let phi = self.builder.block_params(merge_block)[0];
-                write_to_destination!(phi, $Rd);
+                write_to_register!(
+                    $Rd,
+                    TypedValue {
+                        value: phi,
+                        width: $width,
+                    },
+                );
                 phi
             }};
         }
@@ -1516,8 +1539,8 @@ impl BlockTranslator<'_> {
                 match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 }
             }};
@@ -1549,12 +1572,19 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, false),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, false),
                     other => unexpected_operand!(other),
                 };
                 let sys_reg_value = self.translate_operand(&instruction.operands()[1]);
-                self.builder.def_var(target, sys_reg_value);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value: sys_reg_value,
+                        width
+                    }
+                );
             }
             // Memory-ops
             Op::ADRP => {
@@ -1562,31 +1592,33 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
-                self.builder.def_var(target, value);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::ADR => {
                 // Form PC-relative address
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
-                self.builder.def_var(target, value);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::STLR | Op::STR => {
                 // For STLR: [ref:atomics]: We don't model exclusive access (yet).
                 let value = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
+                        arrspec: _,
                     } => self.reg_to_value(reg),
                     other => unexpected_operand!(other),
                 };
@@ -1598,7 +1630,7 @@ impl BlockTranslator<'_> {
                 let value = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
+                        arrspec: _,
                     } => self.reg_to_value(reg),
                     other => unexpected_operand!(other),
                 };
@@ -1612,7 +1644,7 @@ impl BlockTranslator<'_> {
                 let value = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
+                        arrspec: _,
                     } => self.reg_to_value(reg),
                     other => unexpected_operand!(other),
                 };
@@ -1637,129 +1669,104 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, width);
-                match width {
-                    Width::_64 => self.builder.def_var(target, value),
-                    Width::_32 => {
-                        let value = self.builder.ins().uextend(I64, value);
-                        self.builder.def_var(target, value)
-                    }
-                    _ => panic!(),
-                }
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::LDP => {
                 let width = self.operand_width(&instruction.operands()[0]);
                 let target1 = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let target2 = match instruction.operands()[1] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
 
                 let source_address = self.translate_operand(&instruction.operands()[2]);
 
                 let value = self.generate_read(source_address, width);
-                match width {
-                    Width::_64 => self.builder.def_var(target1, value),
-                    Width::_32 => {
-                        let value = self.builder.ins().uextend(I64, value);
-                        self.builder.def_var(target1, value)
-                    }
-                    _ => panic!(),
-                }
+                write_to_register!(target1, TypedValue { value, width });
                 let source_address = self
                     .builder
                     .ins()
                     .iadd_imm(source_address, i64::from(width as i32) / 8);
                 let value = self.generate_read(source_address, width);
-                match width {
-                    Width::_64 => self.builder.def_var(target2, value),
-                    Width::_32 => {
-                        let value = self.builder.ins().uextend(I64, value);
-                        self.builder.def_var(target2, value)
-                    }
-                    _ => panic!(),
-                }
+                write_to_register!(target2, TypedValue { value, width });
             }
             Op::LDRH => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_16);
-                match width {
-                    Width::_64 => self.builder.def_var(target, value),
-                    Width::_32 | Width::_16 => {
-                        let value = self.builder.ins().uextend(I64, value);
-                        self.builder.def_var(target, value)
-                    }
-                    _ => panic!(),
-                }
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::LDUR => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, width);
-                match width {
-                    Width::_64 => self.builder.def_var(target, value),
-                    Width::_32 | Width::_16 => {
-                        let value = self.builder.ins().uextend(I64, value);
-                        self.builder.def_var(target, value)
-                    }
-                    _ => panic!(),
-                }
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::LDURB | Op::LDRB => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_8);
-                let value = self.builder.ins().uextend(I64, value);
-                self.builder.def_var(target, value)
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_8
+                    },
+                );
             }
             Op::LDURH => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_16);
-                let value = self.builder.ins().uextend(I64, value);
-                self.builder.def_var(target, value)
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_16
+                    },
+                );
             }
             Op::LDURSB | Op::LDRSB => {
                 // Load register signed byte (register)
@@ -1770,60 +1777,51 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
-                let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_8);
-                match width {
-                    Width::_8 => self.builder.def_var(target, value),
-                    Width::_32 | Width::_64 | Width::_16 => {
-                        let value = self.builder.ins().sextend(I64, value);
-                        self.builder.def_var(target, value)
-                    }
-                    _ => panic!(),
-                }
+                write_to_register!(signed target, TypedValue {
+                    value,
+                    width: Width::_8,
+                })
             }
             Op::LDRSW => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
-                let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_32);
-                match width {
-                    Width::_32 => self.builder.def_var(target, value),
-                    Width::_8 | Width::_64 | Width::_16 => {
-                        let value = self.builder.ins().sextend(I64, value);
-                        self.builder.def_var(target, value)
-                    }
-                    _ => panic!(),
-                }
+                write_to_register!(signed target, TypedValue {
+                    value,
+                    width: Width::_32
+                })
             }
             // Moves
             Op::MOV => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::MOVK => {
                 let (target, target_value) = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => (*self.reg_to_var(reg, true), self.reg_to_value(reg)),
+                        arrspec: _,
+                    } => (self.reg_to_var(reg, true), self.reg_to_value(reg)),
                     other => unexpected_operand!(other),
                 };
                 let (imm_value, shift_mask): (Value, u64) = match &instruction.operands()[1] {
@@ -1869,32 +1867,37 @@ impl BlockTranslator<'_> {
                     }
                     other => panic!("other: {:?}", other),
                 };
-                let mask = {
-                    let width = self.operand_width(&instruction.operands()[0]);
-                    self.builder.ins().iconst(width.into(), shift_mask as i64)
-                };
+                let width = self.operand_width(&instruction.operands()[0]);
+                let mask = { self.builder.ins().iconst(width.into(), shift_mask as i64) };
                 let masked_value = self.builder.ins().band(target_value, mask);
                 let value = self.builder.ins().bor(masked_value, imm_value);
-                write_to_destination!(value, target);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::MOVZ => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let imm_value = self.translate_operand(&instruction.operands()[1]);
-                write_to_destination!(imm_value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value: imm_value,
+                        width,
+                    },
+                );
             }
             // Int-ops
             Op::ADD => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -1913,14 +1916,14 @@ impl BlockTranslator<'_> {
                     }
                 };
                 let (value, _overflow) = self.builder.ins().uadd_overflow(a, b);
-                write_to_destination!(value, target);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::SUB => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -1938,14 +1941,14 @@ impl BlockTranslator<'_> {
                     }
                 };
                 let (value, _ignore_overflow) = self.builder.ins().usub_overflow(a, b);
-                write_to_destination!(value, target);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::SUBS => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -1965,21 +1968,28 @@ impl BlockTranslator<'_> {
                 let negoperand2 = self.builder.ins().bnot(b);
                 let one = self.builder.ins().iconst(I8, 1);
                 let (result, nzcv) = self.add_with_carry(a, negoperand2, b, one, width);
-                write_to_destination!(result, target);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
                 self.update_nzcv(nzcv);
             }
             Op::MUL => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
                 let value = self.builder.ins().imul(a, b);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::MSUB => {
                 // [ref:needs_unit_test]
@@ -1990,7 +2000,8 @@ impl BlockTranslator<'_> {
                 let a = self.translate_operand(&instruction.operands()[3]);
                 let b = self.builder.ins().imul(n, m);
                 let (value, _ignore_overflow) = self.builder.ins().usub_overflow(a, b);
-                write_to_destination!(value, destination);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(destination, TypedValue { value, width });
             }
             Op::SDIV => {
                 // [ref:verify_implementation]
@@ -2010,8 +2021,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2061,14 +2072,14 @@ impl BlockTranslator<'_> {
                 // parameter.
                 let phi = self.builder.block_params(merge_block)[0];
 
-                write_to_destination!(phi, target);
+                write_to_register!(target, TypedValue { value: phi, width });
             }
             Op::UDIV => {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2119,7 +2130,7 @@ impl BlockTranslator<'_> {
                 // parameter.
                 let phi = self.builder.block_params(merge_block)[0];
 
-                write_to_destination!(phi, target);
+                write_to_register!(target, TypedValue { value: phi, width });
             }
             // Branches
             Op::B => {
@@ -2210,8 +2221,8 @@ impl BlockTranslator<'_> {
                 let dst = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2240,7 +2251,13 @@ impl BlockTranslator<'_> {
                 let target_mask = self.builder.ins().bnot(target_mask);
                 let dst_value = self.builder.ins().band(target_mask, dst_value);
                 let dst_value = self.builder.ins().bor(dst_value, bits_mask);
-                write_to_destination!(dst_value, dst);
+                write_to_register!(
+                    dst,
+                    TypedValue {
+                        value: dst_value,
+                        width,
+                    },
+                );
             }
             Op::ORR => {
                 // Bitwise OR
@@ -2249,14 +2266,15 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
                 let value = self.builder.ins().bor(a, b);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::AND => {
                 // Bitwise AND
@@ -2265,28 +2283,30 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
                 let value = self.builder.ins().band(a, b);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::EOR => {
                 // Bitwise XOR
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
                 let value = self.builder.ins().bxor(a, b);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::LSL => {
                 // Logical shift left
@@ -2295,28 +2315,30 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
                 let value = self.builder.ins().ishl(a, b);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::LSR => {
                 // Logical shift right
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
                 let value = self.builder.ins().ushr(a, b);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::ABS => {
                 // Absolute value
@@ -2325,13 +2347,14 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().iabs(value);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::ADC => {
                 // Add with carry
@@ -2342,8 +2365,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2352,7 +2375,13 @@ impl BlockTranslator<'_> {
                 let carry_in = self.condition_holds(bad64::Condition::CS);
                 let (result, nzcv) =
                     self.add_with_carry(operand1, operand2, operand2, carry_in, width);
-                write_to_destination!(result, target);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
                 self.update_nzcv(nzcv);
             }
             Op::ADCLB => todo!(),
@@ -2370,8 +2399,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2391,7 +2420,13 @@ impl BlockTranslator<'_> {
                 };
                 let zero = self.builder.ins().iconst(I8, 0);
                 let (result, nzcv) = self.add_with_carry(a, b, b, zero, width);
-                write_to_destination!(result, target);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
                 self.update_nzcv(nzcv);
             }
             Op::ADDV => todo!(),
@@ -2408,14 +2443,21 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
+                let width = self.operand_width(&instruction.operands()[1]);
                 let (result, nzcv) = ands!(a, b);
-                write_to_destination!(result, target);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
                 self.update_nzcv(nzcv);
             }
             Op::ANDV => todo!(),
@@ -2462,6 +2504,7 @@ impl BlockTranslator<'_> {
                 let destination = get_destination_register!();
                 let dst_val = self.translate_operand(&instruction.operands()[0]);
                 let source = self.translate_operand(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[1]);
                 let lsb: i64 = match instruction.operands()[2] {
                     bad64::Operand::Imm32 {
                         imm: bad64::Imm::Unsigned(lsb),
@@ -2483,7 +2526,13 @@ impl BlockTranslator<'_> {
                     .ins()
                     .band_imm(dst_val, !(2_i64.pow(w as u32) - 1));
                 let result = self.builder.ins().bor(source, dst_val);
-                write_to_destination!(result, destination);
+                write_to_register!(
+                    destination,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
             }
             Op::BGRP => todo!(),
             Op::BIC => {
@@ -2491,26 +2540,40 @@ impl BlockTranslator<'_> {
                 let destination = get_destination_register!();
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
+                let width = self.operand_width(&instruction.operands()[1]);
                 let negb = self.builder.ins().bnot(b);
                 let (result, _nzcv) = ands!(a, negb);
-                write_to_destination!(result, destination);
+                write_to_register!(
+                    destination,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
             }
             Op::BICS => {
                 // [ref:needs_unit_test]
                 let destination = get_destination_register!();
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
+                let width = self.operand_width(&instruction.operands()[1]);
                 let negb = self.builder.ins().bnot(b);
                 let (result, nzcv) = ands!(a, negb);
                 self.update_nzcv(nzcv);
-                write_to_destination!(result, destination);
+                write_to_register!(
+                    destination,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
             }
             Op::BIF => todo!(),
             Op::BIT => todo!(),
             Op::BL => {
                 let link_pc = self.builder.ins().iconst(I64, (self.address + 4) as i64);
-                let link_register = *self.reg_to_var(&bad64::Reg::X30, true);
-                self.builder.def_var(link_register, link_pc);
+                let link_register = self.reg_to_var(&bad64::Reg::X30, true);
+                self.builder.def_var(link_register.var, link_pc);
                 let label = match instruction.operands()[0] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     other => unexpected_operand!(other),
@@ -2520,8 +2583,8 @@ impl BlockTranslator<'_> {
             }
             Op::BLR => {
                 let link_pc = self.builder.ins().iconst(I64, (self.address + 4) as i64);
-                let link_register = *self.reg_to_var(&bad64::Reg::X30, true);
-                self.builder.def_var(link_register, link_pc);
+                let link_register = self.reg_to_var(&bad64::Reg::X30, true);
+                self.builder.def_var(link_register.var, link_pc);
                 let next_pc = self.translate_operand(&instruction.operands()[0]);
                 return self.unconditional_jump_epilogue(next_pc);
             }
@@ -2641,27 +2704,29 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[1]);
                 // [ref:verify_implementation]
                 let value = self.builder.ins().cls(value);
-                write_to_destination!(value, target);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::CLZ => {
                 // Count leading zeros.
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[1]);
                 let value = self.builder.ins().clz(value);
-                write_to_destination!(value, target);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::CMEQ => todo!(),
             Op::CMGE => todo!(),
@@ -2734,13 +2799,14 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[1]);
                 let value = self.builder.ins().popcnt(value);
-                write_to_destination!(value, target);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::COMPACT => todo!(),
             Op::CPP => todo!(),
@@ -2760,8 +2826,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2797,7 +2863,7 @@ impl BlockTranslator<'_> {
                 self.builder.seal_block(merge_block);
 
                 let phi = self.builder.block_params(merge_block)[0];
-                write_to_destination!(phi, target);
+                write_to_register!(target, TypedValue { value: phi, width });
             }
             Op::CSET => {
                 // Conditional set: an alias of CSINC.
@@ -2808,8 +2874,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2832,8 +2898,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2855,8 +2921,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2878,8 +2944,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2897,8 +2963,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2914,8 +2980,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2935,8 +3001,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2957,8 +3023,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -3107,12 +3173,13 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::FMSB => todo!(),
             Op::FMSUB => todo!(),
@@ -3249,27 +3316,33 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, width);
-                write_to_destination!(value, target);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::LDAXRB => {
                 // [ref:atomics]: We don't model exclusive access (yet).
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_8);
-                write_to_destination!(value, target);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_8
+                    },
+                );
             }
             Op::LDAXRH => todo!(),
             Op::LDCLR => todo!(),
@@ -3421,8 +3494,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
@@ -3431,7 +3504,7 @@ impl BlockTranslator<'_> {
                 if width == Width::_32 {
                     value = self.builder.ins().band_imm(value, i64::from(u32::MAX));
                 }
-                write_to_destination!(value, target);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::MVNI => todo!(),
             Op::NAND => todo!(),
@@ -3441,8 +3514,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
@@ -3451,7 +3524,7 @@ impl BlockTranslator<'_> {
                 if width == Width::_32 {
                     value = self.builder.ins().band_imm(value, i64::from(u32::MAX));
                 }
-                write_to_destination!(value, target);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::NEGS => todo!(),
             Op::NGC => todo!(),
@@ -3510,13 +3583,14 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().bitrev(value);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::RDFFR => todo!(),
             Op::RDFFRS => todo!(),
@@ -3528,13 +3602,14 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[1]);
                 let value = self.builder.ins().bswap(value);
-                write_to_destination!(value, target);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::REV16 => todo!(),
             Op::REV32 => {
@@ -3545,8 +3620,8 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
@@ -3560,7 +3635,8 @@ impl BlockTranslator<'_> {
                 let b = self.builder.ins().uextend(I64, b);
                 let b = self.builder.ins().ishl_imm(b, 32);
                 let value = self.builder.ins().band(a, b);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::REVB => todo!(),
             Op::REVD => todo!(),
@@ -3831,13 +3907,12 @@ impl BlockTranslator<'_> {
                 let status_target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let target = self.translate_operand(&instruction.operands()[2]);
-                // let width = self.operand_width(&instruction.operands()[2]);
                 // assert_eq!(width, Width::_8); ?
                 let value = self.builder.ins().ireduce(I8, value);
                 self.generate_write(target, value, Width::_8);
@@ -3850,7 +3925,13 @@ impl BlockTranslator<'_> {
                     let width = self.operand_width(&instruction.operands()[0]);
                     self.builder.ins().iconst(width.into(), 0)
                 };
-                write_to_destination!(zero, status_target);
+                write_to_register!(
+                    status_target,
+                    TypedValue {
+                        value: zero,
+                        width: Width::_32,
+                    },
+                );
             }
             Op::STLXRH => todo!(),
             Op::STNP => todo!(),
@@ -3895,7 +3976,7 @@ impl BlockTranslator<'_> {
                 let value = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
+                        arrspec: _,
                     } => self.reg_to_value(reg),
                     other => unexpected_operand!(other),
                 };
@@ -3917,8 +3998,8 @@ impl BlockTranslator<'_> {
                 let status_target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
@@ -3934,15 +4015,21 @@ impl BlockTranslator<'_> {
                     let width = self.operand_width(&instruction.operands()[0]);
                     self.builder.ins().iconst(width.into(), 0)
                 };
-                write_to_destination!(zero, status_target);
+                write_to_register!(
+                    status_target,
+                    TypedValue {
+                        value: zero,
+                        width: Width::_32,
+                    },
+                );
             }
             Op::STXRB => {
                 // [ref:atomics]: We don't model exclusive access (yet).
                 let status_target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let value = self.translate_operand(&instruction.operands()[1]);
@@ -3958,7 +4045,13 @@ impl BlockTranslator<'_> {
                     let width = self.operand_width(&instruction.operands()[0]);
                     self.builder.ins().iconst(width.into(), 0)
                 };
-                write_to_destination!(zero, status_target);
+                write_to_register!(
+                    status_target,
+                    TypedValue {
+                        value: zero,
+                        width: Width::_32,
+                    },
+                );
             }
             Op::STXRH => todo!(),
             Op::STZ2G => todo!(),
@@ -4112,7 +4205,14 @@ impl BlockTranslator<'_> {
                     other => unexpected_operand!(other),
                 };
                 let result = self.builder.ins().ishl_imm(masked, lsb);
-                write_to_destination!(result, destination);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(
+                    destination,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
             }
             Op::UBFM => todo!(),
             Op::UBFX => {
@@ -4136,7 +4236,14 @@ impl BlockTranslator<'_> {
                     other => unexpected_operand!(other),
                 };
                 let result = self.builder.ins().ushr_imm(result, lsb);
-                write_to_destination!(result, destination);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(
+                    destination,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
             }
             Op::UCLAMP => todo!(),
             Op::UCVTF => todo!(),
@@ -4190,14 +4297,15 @@ impl BlockTranslator<'_> {
                 let target = match instruction.operands()[0] {
                     bad64::Operand::Reg {
                         ref reg,
-                        arrspec: None,
-                    } => *self.reg_to_var(reg, true),
+                        arrspec: _,
+                    } => self.reg_to_var(reg, true),
                     other => unexpected_operand!(other),
                 };
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
                 let value = self.builder.ins().umulhi(a, b);
-                write_to_destination!(value, target);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             Op::UMULL => todo!(),
             Op::UMULL2 => todo!(),
