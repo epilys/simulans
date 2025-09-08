@@ -24,6 +24,7 @@
 
 use std::ops::ControlFlow;
 
+use bad64::ArrSpec;
 use codegen::ir::{
     instructions::BlockArg,
     types::{I128, I16, I32, I64, I64X2, I8},
@@ -551,6 +552,7 @@ struct TypedRegisterView {
     var: Variable,
     width: Width,
     extend_to: Option<Width>,
+    element: Option<ArrSpec>,
 }
 
 #[derive(Debug)]
@@ -852,14 +854,11 @@ impl BlockTranslator<'_> {
         use bad64::{Imm, Operand};
 
         match operand {
-            Operand::Reg {
-                ref reg,
-                arrspec: _,
-            } => self.reg_to_value(reg),
+            Operand::Reg { ref reg, arrspec } => self.reg_to_value(reg, *arrspec),
             Operand::ShiftReg { ref reg, shift } => {
                 use bad64::Shift;
 
-                let value = self.reg_to_value(reg);
+                let value = self.reg_to_value(reg, None);
                 match shift {
                     Shift::LSL(lsl) => self.builder.ins().ishl_imm(value, i64::from(*lsl)),
                     Shift::LSR(lsr) => self.builder.ins().ushr_imm(value, i64::from(*lsr)),
@@ -914,7 +913,7 @@ impl BlockTranslator<'_> {
                 }
             }
             Operand::MemPreIdx { ref reg, imm } => {
-                let reg_val = self.reg_to_value(reg);
+                let reg_val = self.reg_to_value(reg, None);
                 match imm {
                     Imm::Unsigned(imm) => {
                         let imm_value =
@@ -925,17 +924,17 @@ impl BlockTranslator<'_> {
                             imm_value,
                             TrapCode::INTEGER_OVERFLOW,
                         );
-                        let reg_var = self.reg_to_var(reg, true);
+                        let reg_var = self.reg_to_var(reg, None, true);
                         self.builder.def_var(reg_var.var, value);
-                        self.reg_to_value(reg)
+                        self.reg_to_value(reg, None)
                     }
                     Imm::Signed(imm) if *imm < 0 => {
                         let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
                         let (value, _overflow_flag) =
                             self.builder.ins().usub_overflow(reg_val, imm_value);
-                        let reg_var = self.reg_to_var(reg, true);
+                        let reg_var = self.reg_to_var(reg, None, true);
                         self.builder.def_var(reg_var.var, value);
-                        self.reg_to_value(reg)
+                        self.reg_to_value(reg, None)
                     }
                     Imm::Signed(imm) => {
                         let imm_value = self.builder.ins().iconst(I64, *imm);
@@ -945,14 +944,14 @@ impl BlockTranslator<'_> {
                             imm_value,
                             TrapCode::INTEGER_OVERFLOW,
                         );
-                        let reg_var = self.reg_to_var(reg, true);
+                        let reg_var = self.reg_to_var(reg, None, true);
                         self.builder.def_var(reg_var.var, value);
-                        self.reg_to_value(reg)
+                        self.reg_to_value(reg, None)
                     }
                 }
             }
             Operand::MemPostIdxImm { ref reg, imm } => {
-                let reg_val = self.reg_to_value(reg);
+                let reg_val = self.reg_to_value(reg, None);
                 match imm {
                     Imm::Unsigned(imm) => {
                         let imm_value =
@@ -963,14 +962,14 @@ impl BlockTranslator<'_> {
                             imm_value,
                             TrapCode::INTEGER_OVERFLOW,
                         );
-                        let reg_var = self.reg_to_var(reg, true);
+                        let reg_var = self.reg_to_var(reg, None, true);
                         self.builder.def_var(reg_var.var, post_value);
                     }
                     Imm::Signed(imm) if *imm < 0 => {
                         let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
                         let (post_value, _overflow_flag) =
                             self.builder.ins().usub_overflow(reg_val, imm_value);
-                        let reg_var = self.reg_to_var(reg, true);
+                        let reg_var = self.reg_to_var(reg, None, true);
                         self.builder.def_var(reg_var.var, post_value);
                     }
                     Imm::Signed(imm) => {
@@ -981,7 +980,7 @@ impl BlockTranslator<'_> {
                             imm_value,
                             TrapCode::INTEGER_OVERFLOW,
                         );
-                        let reg_var = self.reg_to_var(reg, true);
+                        let reg_var = self.reg_to_var(reg, None, true);
                         self.builder.def_var(reg_var.var, post_value);
                     }
                 }
@@ -1021,7 +1020,7 @@ impl BlockTranslator<'_> {
                 mul_vl: false,
                 arrspec: None,
             } => {
-                let reg_val = self.reg_to_value(reg);
+                let reg_val = self.reg_to_value(reg, None);
                 match offset {
                     Imm::Unsigned(imm) => {
                         let imm_value =
@@ -1059,8 +1058,8 @@ impl BlockTranslator<'_> {
                 shift,
                 arrspec: None,
             } => {
-                let address = self.reg_to_value(address);
-                let offset = self.reg_to_value(offset);
+                let address = self.reg_to_value(address, None);
+                let offset = self.reg_to_value(offset, None);
                 let offset = match shift {
                     None => offset,
                     Some(bad64::Shift::LSL(ref lsl)) => {
@@ -1079,7 +1078,12 @@ impl BlockTranslator<'_> {
     }
 
     #[cold]
-    fn simd_reg_to_var(&mut self, reg: &bad64::Reg, write: bool) -> TypedRegisterView {
+    fn simd_reg_to_var(
+        &mut self,
+        reg: &bad64::Reg,
+        element: Option<ArrSpec>,
+        write: bool,
+    ) -> TypedRegisterView {
         use bad64::Reg;
 
         self.write_to_simd |= write;
@@ -1112,15 +1116,21 @@ impl BlockTranslator<'_> {
             } else {
                 Some(Width::_128)
             },
+            element,
         }
     }
 
     #[inline]
-    fn reg_to_var(&mut self, reg: &bad64::Reg, write: bool) -> TypedRegisterView {
+    fn reg_to_var(
+        &mut self,
+        reg: &bad64::Reg,
+        element: Option<ArrSpec>,
+        write: bool,
+    ) -> TypedRegisterView {
         use bad64::Reg;
 
         if is_vector(reg) {
-            return self.simd_reg_to_var(reg, write);
+            return self.simd_reg_to_var(reg, element, write);
         }
 
         if reg.is_sve() {
@@ -1130,6 +1140,7 @@ impl BlockTranslator<'_> {
         if reg.is_pred() {
             todo!();
         }
+        assert!(element.is_none());
 
         let reg_64 = match reg {
             Reg::W0 => Reg::X0,
@@ -1169,6 +1180,7 @@ impl BlockTranslator<'_> {
                     var: self.registers[&Reg::XZR],
                     width: Width::_32,
                     extend_to: Some(Width::_64),
+                    element,
                 }
             }
             _ => {
@@ -1176,6 +1188,7 @@ impl BlockTranslator<'_> {
                     var: self.registers[reg],
                     width: Width::_64,
                     extend_to: None,
+                    element,
                 };
             }
         };
@@ -1191,16 +1204,33 @@ impl BlockTranslator<'_> {
             var: self.registers[&reg_64],
             width: Width::_32,
             extend_to: Some(Width::_64),
+            element,
         }
     }
 
     #[cold]
-    fn simd_reg_to_value(&mut self, reg: &bad64::Reg) -> Value {
-        let target = self.simd_reg_to_var(reg, false);
-        let value = self.builder.use_var(target.var);
+    fn simd_reg_to_value(&mut self, reg: &bad64::Reg, element: Option<ArrSpec>) -> Value {
+        let reg = self.simd_reg_to_var(reg, element, false);
+        let mut value = self.builder.use_var(reg.var);
 
-        match target.width {
-            Width::_128 => value,
+        match reg.width {
+            Width::_128 => match element {
+                None | Some(ArrSpec::OneDouble(None)) => value,
+                Some(ArrSpec::OneDouble(Some(lane))) => {
+                    value = self
+                        .builder
+                        .ins()
+                        .bitcast(I64X2, MEMFLAG_LITTLE_ENDIAN, value);
+                    value = self.builder.ins().extractlane(value, lane as u8);
+                    self.builder
+                        .ins()
+                        .bitcast(I64, MEMFLAG_LITTLE_ENDIAN, value)
+                }
+                Some(ArrSpec::EightBytes(None)) => value,
+                Some(ArrSpec::TwoDoubles(None)) => value,
+                Some(ArrSpec::SixteenBytes(None)) => value,
+                other => unreachable!("{other:?}"),
+            },
             Width::_64 => self.builder.ins().ireduce(I64, value),
             Width::_32 => self.builder.ins().ireduce(I32, value),
             Width::_16 => self.builder.ins().ireduce(I16, value),
@@ -1209,11 +1239,11 @@ impl BlockTranslator<'_> {
     }
 
     #[inline]
-    fn reg_to_value(&mut self, reg: &bad64::Reg) -> Value {
+    fn reg_to_value(&mut self, reg: &bad64::Reg, element: Option<ArrSpec>) -> Value {
         use bad64::Reg;
 
         if is_vector(reg) {
-            return self.simd_reg_to_value(reg);
+            return self.simd_reg_to_value(reg, element);
         }
 
         if reg.is_sve() {
@@ -1223,6 +1253,8 @@ impl BlockTranslator<'_> {
         if reg.is_pred() {
             todo!();
         }
+
+        assert!(element.is_none());
 
         let reg_64 = match reg {
             Reg::W0 => Reg::X0,
@@ -1544,10 +1576,7 @@ impl BlockTranslator<'_> {
             }};
             ($idx:expr) => {{
                 match instruction.operands()[$idx] {
-                    bad64::Operand::Reg {
-                        ref reg,
-                        arrspec: _,
-                    } => self.reg_to_var(reg, true),
+                    bad64::Operand::Reg { ref reg, arrspec } => self.reg_to_var(reg, arrspec, true),
                     other => unexpected_operand!(other),
                 }
             }};
@@ -1724,40 +1753,19 @@ impl BlockTranslator<'_> {
             // Moves
             Op::MOV => {
                 let target = get_destination_register!();
-                let mut value = self.translate_operand(&instruction.operands()[1]);
+                let value = self.translate_operand(&instruction.operands()[1]);
                 let mut width = self.operand_width(&instruction.operands()[1]);
                 if width == Width::_128 {
-                    value = self
-                        .builder
-                        .ins()
-                        .bitcast(I64X2, MEMFLAG_LITTLE_ENDIAN, value);
-                    let arrspec = match instruction.operands()[1] {
-                        bad64::Operand::Reg {
-                            reg: _,
-                            arrspec: Some(arrspec),
-                        } => arrspec,
-                        _ => unreachable!(),
-                    };
-                    value = match arrspec {
-                        bad64::ArrSpec::OneDouble(Some(lane)) => {
-                            self.builder.ins().extractlane(value, lane as u8)
-                        }
-                        _ => unreachable!(),
-                    };
-                    value = self
-                        .builder
-                        .ins()
-                        .bitcast(I64, MEMFLAG_LITTLE_ENDIAN, value);
                     width = Width::_64;
                 }
                 write_to_register!(target, TypedValue { value, width });
             }
             Op::MOVK => {
                 let (target, target_value) = match instruction.operands()[0] {
-                    bad64::Operand::Reg {
-                        ref reg,
-                        arrspec: _,
-                    } => (self.reg_to_var(reg, true), self.reg_to_value(reg)),
+                    bad64::Operand::Reg { ref reg, arrspec } => (
+                        self.reg_to_var(reg, arrspec, true),
+                        self.reg_to_value(reg, arrspec),
+                    ),
                     other => unexpected_operand!(other),
                 };
                 let (imm_value, shift_mask): (Value, u64) = match &instruction.operands()[1] {
@@ -2049,7 +2057,7 @@ impl BlockTranslator<'_> {
                 return self.unconditional_jump_epilogue(next_pc);
             }
             Op::RET => {
-                let next_pc = self.reg_to_value(&bad64::Reg::X30);
+                let next_pc = self.reg_to_value(&bad64::Reg::X30, None);
                 return self.unconditional_jump_epilogue(next_pc);
             }
             // Compares
@@ -2406,7 +2414,7 @@ impl BlockTranslator<'_> {
             Op::BIT => todo!(),
             Op::BL => {
                 let link_pc = self.builder.ins().iconst(I64, (self.address + 4) as i64);
-                let link_register = self.reg_to_var(&bad64::Reg::X30, true);
+                let link_register = self.reg_to_var(&bad64::Reg::X30, None, true);
                 self.builder.def_var(link_register.var, link_pc);
                 let label = match instruction.operands()[0] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
@@ -2417,7 +2425,7 @@ impl BlockTranslator<'_> {
             }
             Op::BLR => {
                 let link_pc = self.builder.ins().iconst(I64, (self.address + 4) as i64);
-                let link_register = self.reg_to_var(&bad64::Reg::X30, true);
+                let link_register = self.reg_to_var(&bad64::Reg::X30, None, true);
                 self.builder.def_var(link_register.var, link_pc);
                 let next_pc = self.translate_operand(&instruction.operands()[0]);
                 return self.unconditional_jump_epilogue(next_pc);
@@ -2822,17 +2830,11 @@ impl BlockTranslator<'_> {
             }
             Op::DUP => {
                 // Duplicate general-purpose register to vector
-                let (target, arrspec) = match instruction.operands()[0] {
-                    bad64::Operand::Reg {
-                        ref reg,
-                        arrspec: Some(arrspec),
-                    } => (self.reg_to_var(reg, true), arrspec),
-                    other => unexpected_operand!(other),
-                };
+                let target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
-                let width = self.operand_width(&instruction.operands()[0]);
-                let value = match arrspec {
-                    bad64::ArrSpec::TwoDoubles(None) => self.builder.ins().iconcat(value, value),
+                let width = target.width;
+                let value = match target.element {
+                    Some(ArrSpec::TwoDoubles(None)) => self.builder.ins().iconcat(value, value),
                     other => unimplemented!("{other:?}"),
                 };
                 write_to_register!(target, TypedValue { value, width });
