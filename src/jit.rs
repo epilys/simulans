@@ -368,12 +368,6 @@ impl JitContext {
             )
             .into());
         };
-        _ = crate::disas(
-            &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
-                .try_into()
-                .unwrap()..],
-            program_counter,
-        );
         let mut decoded_iter = bad64::disasm(
             &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
                 .try_into()
@@ -504,6 +498,12 @@ impl JitContext {
                 }
             }
         }
+        _ = crate::disas(
+            &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
+                .try_into()
+                .unwrap()..][..(last_pc - program_counter).try_into().unwrap()],
+            program_counter,
+        );
         match next_pc {
             Some(BlockExit::Branch(next_pc)) => {
                 trans.emit_jump(prev_pc, next_pc);
