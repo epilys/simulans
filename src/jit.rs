@@ -38,6 +38,7 @@ use crate::{
     cpu_state::ExecutionState,
     machine::{Armv8AMachine, EntryBlock, EntryBlocks},
     memory::{Address, Width},
+    tracing,
 };
 
 mod sysregs;
@@ -71,7 +72,7 @@ pub extern "C" fn lookup_entry(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
     }
     if let Some(tb) = jit.entry_blocks.get(&pc) {
         tracing::event!(
-            target: "lookup_entry",
+            target: tracing::TraceItem::LookupEntry.as_str(),
             tracing::Level::TRACE,
             pc = ?Address(pc),
             "re-using cached entry for 0x{:x}-0x{:x}",
@@ -86,7 +87,7 @@ pub extern "C" fn lookup_entry(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
         return tb.entry;
     }
     tracing::event!(
-        target: "lookup_entry",
+        target: tracing::TraceItem::LookupEntry.as_str(),
         tracing::Level::TRACE,
         pc = ?Address(pc),
         "generating entry",
@@ -98,7 +99,7 @@ pub extern "C" fn lookup_entry(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
     jit.entry_blocks.insert(block);
 
     tracing::event!(
-        target: "lookup_entry",
+        target: tracing::TraceItem::LookupEntry.as_str(),
         tracing::Level::TRACE,
         pc = ?Address(pc),
         "returning generated entry",
@@ -275,7 +276,7 @@ impl JitContext {
         program_counter: u64,
     ) -> Result<EntryBlock, Box<dyn std::error::Error>> {
         tracing::event!(
-            target: "jit",
+            target: tracing::TraceItem::Jit.as_str(),
             tracing::Level::TRACE,
             pc = ?Address(program_counter),
             "compiling",
@@ -448,7 +449,7 @@ impl JitContext {
             let first = first.map_err(|err| format!("Error decoding instruction: {}", err))?;
             last_pc = first.address();
             tracing::event!(
-                target: "jit",
+                target: tracing::TraceItem::Jit.as_str(),
                 tracing::Level::TRACE,
                 pc = ?Address(first.address()),
                 "{first:#?}",
@@ -470,7 +471,7 @@ impl JitContext {
                     match insn {
                         Ok(insn) => {
                             tracing::event!(
-                                target: "jit",
+                                target: tracing::TraceItem::Jit.as_str(),
                                 tracing::Level::TRACE,
                                 pc = ?Address(insn.address()),
                                 "{insn:#?}",

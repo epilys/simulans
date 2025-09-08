@@ -497,6 +497,7 @@ impl MemoryRegionDescription {
 
 pub mod ops {
     use super::*;
+    use crate::tracing;
 
     macro_rules! def_op {
         (write $fn:ident: $size:ty) => {
@@ -506,7 +507,7 @@ pub mod ops {
                 value: $size,
             ) {
                 tracing::event!(
-                    target: "memory",
+                    target: tracing::TraceItem::Memory.as_str(),
                     tracing::Level::TRACE,
                     kind = "write",
                     size = stringify!($size),
@@ -546,7 +547,7 @@ pub mod ops {
                 address_inside_region: u64,
             ) -> $size {
                 tracing::event!(
-                    target: "memory",
+                    target: tracing::TraceItem::Memory.as_str(),
                     tracing::Level::TRACE,
                     kind = "read",
                     size = stringify!($size),
@@ -564,7 +565,7 @@ pub mod ops {
                         // size. We don't check for this, so FIXME
                             unsafe { std::ptr::read_unaligned(destination.cast::<$size>()) };
                         tracing::event!(
-                            target: "memory",
+                            target: tracing::TraceItem::Memory.as_str(),
                             tracing::Level::TRACE,
                             kind = "read",
                             size = stringify!($size),

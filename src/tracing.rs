@@ -26,7 +26,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub use ::tracing::{error, event, info, trace, warn};
+pub use ::tracing::{error, event, event_enabled, info, trace, warn, Level};
 pub use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::{prelude::*, reload, Layer};
 
@@ -106,6 +106,14 @@ impl std::str::FromStr for TraceItem {
                 .collect::<Vec<&str>>()
                 .join(", ")
         )))
+    }
+}
+
+impl std::ops::Deref for TraceItem {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
     }
 }
 

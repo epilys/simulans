@@ -131,7 +131,13 @@ pub mod tracing;
 /// Disassembles and prints each decoded aarch64 instruction to stdout using
 /// Capstone library, for debugging.
 pub fn disas(input: &[u8], starting_address: u64) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fmt::Write;
+
     use capstone::prelude::*;
+
+    if !tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE) {
+        return Ok(());
+    }
 
     let mut cs = Capstone::new()
         .arm64()
@@ -142,12 +148,15 @@ pub fn disas(input: &[u8], starting_address: u64) -> Result<(), Box<dyn std::err
         .expect("Failed to create Capstone object");
     cs.set_syntax(capstone::Syntax::Intel)?;
     let decoded_iter = cs.disasm_all(input, starting_address)?;
+    let mut s = String::new();
     for insn in decoded_iter.as_ref() {
-        tracing::event!(
-            target: "in_asm",
-            ::tracing::Level::TRACE,
-            "{insn}");
+        writeln!(&mut s, "{insn}")?;
     }
+    tracing::event!(
+        target: tracing::TraceItem::InAsm.as_str(),
+        tracing::Level::TRACE,
+        "{s}"
+    );
     Ok(())
 }
 

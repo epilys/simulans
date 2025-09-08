@@ -56,10 +56,7 @@ use gdbstub::{
     },
 };
 
-use crate::{
-    memory::Address,
-    tracing::{error, info, LevelFilter, TracingGuard},
-};
+use crate::{memory::Address, tracing};
 
 /// Helper struct for memory map xml
 struct GdbMemoryMap {
@@ -140,7 +137,7 @@ impl std::fmt::Debug for GdbStubRequest<AArch64> {
 }
 
 pub struct GdbStubRunner {
-    tracing_guard: TracingGuard,
+    tracing_guard: tracing::TracingGuard,
     request_receiver: Receiver<GdbStubRequest<AArch64>>,
     request_complete_signal: Arc<(Mutex<bool>, Condvar)>,
     stop_sender: SyncSender<SingleThreadStopReason<<AArch64 as Arch>::Usize>>,
@@ -256,9 +253,9 @@ impl GdbStubRunner {
         max_bytes: usize,
     ) -> TargetResult<Box<[u8]>, GdbStub> {
         let start_address = Address(start_address);
-        info!("reading memory from {}", start_address);
+        tracing::info!("reading memory from {}", start_address);
         let Some(mem_region) = self.machine.memory.find_region(start_address) else {
-            error!(
+            tracing::error!(
                 "Cannot read from address {} which is not covered by a RAM memory region.",
                 start_address
             );
@@ -266,7 +263,7 @@ impl GdbStubRunner {
         };
         let address_inside_region = start_address.0 - mem_region.phys_offset.0;
         let Some(mmapped_region) = mem_region.as_mmap() else {
-            error!(
+            tracing::error!(
                 "Cannot read from address {} which is mapped to device memory",
                 start_address
             );
@@ -284,9 +281,9 @@ impl GdbStubRunner {
         value: &[u8],
     ) -> TargetResult<(), GdbStub> {
         let start_address = Address(start_address);
-        info!("writing to {} in memory", start_address);
+        tracing::info!("writing to {} in memory", start_address);
         let Some(mem_region) = self.machine.memory.find_region_mut(start_address) else {
-            error!(
+            tracing::error!(
                 "Cannot write to address {} which is not covered by a RAM memory region.",
                 start_address
             );
@@ -294,7 +291,7 @@ impl GdbStubRunner {
         };
         let address_inside_region = start_address.0 - mem_region.phys_offset.0;
         let Some(mmapped_region) = mem_region.as_mmap_mut() else {
-            error!(
+            tracing::error!(
                 "Cannot write to address {} which is mapped to device memory",
                 start_address
             );
@@ -351,7 +348,7 @@ impl GdbStubRunner {
             AArch64RegId::X(29) => read_64bit_reg!(self.machine.cpu_state.registers.x29),
             AArch64RegId::X(30) => read_64bit_reg!(self.machine.cpu_state.registers.x30),
             AArch64RegId::X(other) => {
-                error!("GDB requested read of invalid register x{other}");
+                tracing::error!("GDB requested read of invalid register x{other}");
                 Err(TargetError::NonFatal)
             }
             AArch64RegId::Sp => read_64bit_reg!(self.machine.cpu_state.registers.sp),
@@ -446,7 +443,7 @@ impl GdbStubRunner {
             AArch64RegId::X(29) => write_64bit_reg!(self.machine.cpu_state.registers.x29),
             AArch64RegId::X(30) => write_64bit_reg!(self.machine.cpu_state.registers.x30),
             AArch64RegId::X(other) => {
-                error!("GDB requested write of invalid register x{other}");
+                tracing::error!("GDB requested write of invalid register x{other}");
                 return Err(TargetError::NonFatal);
             }
             AArch64RegId::Sp => write_64bit_reg!(self.machine.cpu_state.registers.sp),
@@ -504,22 +501,22 @@ impl GdbStubRunner {
                     );
                 }
                 Some(trace) if trace.eq_ignore_ascii_case("trace") => {
-                    self.tracing_guard.change_level(LevelFilter::TRACE)
+                    self.tracing_guard.change_level(tracing::LevelFilter::TRACE)
                 }
                 Some(debug) if debug.eq_ignore_ascii_case("debug") => {
-                    self.tracing_guard.change_level(LevelFilter::DEBUG)
+                    self.tracing_guard.change_level(tracing::LevelFilter::DEBUG)
                 }
                 Some(error) if error.eq_ignore_ascii_case("error") => {
-                    self.tracing_guard.change_level(LevelFilter::ERROR)
+                    self.tracing_guard.change_level(tracing::LevelFilter::ERROR)
                 }
                 Some(info) if info.eq_ignore_ascii_case("info") => {
-                    self.tracing_guard.change_level(LevelFilter::INFO)
+                    self.tracing_guard.change_level(tracing::LevelFilter::INFO)
                 }
                 Some(warn) if warn.eq_ignore_ascii_case("warn") => {
-                    self.tracing_guard.change_level(LevelFilter::WARN)
+                    self.tracing_guard.change_level(tracing::LevelFilter::WARN)
                 }
                 Some(off) if off.eq_ignore_ascii_case("off") => {
-                    self.tracing_guard.change_level(LevelFilter::OFF)
+                    self.tracing_guard.change_level(tracing::LevelFilter::OFF)
                 }
                 Some(other) => {
                     return format!(
@@ -808,7 +805,7 @@ impl GdbStub {
     pub fn new(
         mut machine: Pin<Box<crate::machine::Armv8AMachine>>,
         start_address: crate::memory::Address,
-        tracing_guard: TracingGuard,
+        tracing_guard: tracing::TracingGuard,
     ) -> Self {
         if machine.pc == 0 {
             machine.pc = start_address.0;
@@ -985,7 +982,7 @@ impl SingleRegisterAccess<()> for GdbStub {
 impl SingleThreadResume for GdbStub {
     #[inline(always)]
     fn resume(&mut self, _signal: Option<Signal>) -> Result<(), Self::Error> {
-        info!("resume/continue called");
+        tracing::info!("resume/continue called");
         // self.jit.single_step = false;
         self.send_request(GdbStubRequest::Resume);
         Ok(())
@@ -1000,7 +997,7 @@ impl SingleThreadResume for GdbStub {
 impl SingleThreadSingleStep for GdbStub {
     #[inline(always)]
     fn step(&mut self, _signal: Option<Signal>) -> Result<(), Self::Error> {
-        info!("step called");
+        tracing::info!("step called");
         self.send_request(GdbStubRequest::SingleStep);
         Ok(())
     }
@@ -1047,7 +1044,7 @@ impl SwBreakpoint for GdbStub {
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
         tracing::event!(
-            target: "gdb",
+            target: tracing::TraceItem::Gdb.as_str(),
             tracing::Level::TRACE,
             "Adding software breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
@@ -1069,7 +1066,7 @@ impl SwBreakpoint for GdbStub {
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
         tracing::event!(
-            target: "gdb",
+            target: tracing::TraceItem::Gdb.as_str(),
             tracing::Level::TRACE,
             "Removing software breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
@@ -1089,7 +1086,7 @@ impl HwBreakpoint for GdbStub {
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
         tracing::event!(
-            target: "gdb",
+            target: tracing::TraceItem::Gdb.as_str(),
             tracing::Level::TRACE,
             "Adding hardware breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
@@ -1110,7 +1107,7 @@ impl HwBreakpoint for GdbStub {
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
         tracing::event!(
-            target: "gdb",
+            target: tracing::TraceItem::Gdb.as_str(),
             tracing::Level::TRACE,
             "Removing hardware breakpoint (kind = {:?}) to 0x{:x}",
             _kind,
@@ -1219,20 +1216,20 @@ pub fn main_loop(mut gdbstub: GdbStub, path: &std::path::Path) {
     let listener = match UnixListener::bind(path) {
         Ok(s) => SocketListener(s, path.to_path_buf()),
         Err(e) => {
-            error!("Failed to create a Unix domain socket listener: {}", e);
+            tracing::error!("Failed to create a Unix domain socket listener: {}", e);
             return;
         }
     };
-    info!("Waiting for a GDB connection on {}...", path.display());
+    tracing::info!("Waiting for a GDB connection on {}...", path.display());
 
     let (stream, addr) = match listener.0.accept() {
         Ok(v) => v,
         Err(e) => {
-            error!("Failed to accept a connection from GDB: {}", e);
+            tracing::error!("Failed to accept a connection from GDB: {}", e);
             return;
         }
     };
-    info!("GDB connected from {:?}", addr);
+    tracing::info!("GDB connected from {:?}", addr);
 
     let connection: Box<dyn ConnectionExt<Error = std::io::Error>> = Box::new(stream);
     let gdb = gdbstub::stub::GdbStub::new(connection);
@@ -1240,14 +1237,14 @@ pub fn main_loop(mut gdbstub: GdbStub, path: &std::path::Path) {
     match gdb.run_blocking::<GdbEventLoop>(&mut gdbstub) {
         Ok(disconnect_reason) => match disconnect_reason {
             DisconnectReason::Disconnect => {
-                info!("GDB client has disconnected. Exiting...");
+                tracing::info!("GDB client has disconnected. Exiting...");
             }
             other => {
-                error!("Target exited or terminated: {:?}", other);
+                tracing::error!("Target exited or terminated: {:?}", other);
             }
         },
         Err(e) => {
-            error!("error occurred in GDB session: {}", e);
+            tracing::error!("error occurred in GDB session: {}", e);
         }
     }
 }

@@ -30,12 +30,12 @@ use cranelift::prelude::*;
 use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
-use crate::memory::Address;
+use crate::{memory::Address, tracing};
 
 pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine, is_entry: bool) {
     if is_entry {
         tracing::event!(
-            target: "block_entry",
+            target: tracing::TraceItem::BlockEntry.as_str(),
             tracing::Level::TRACE,
             "entering block pc = 0x{:x}, prev_pc = 0x{:x} with registers:\n{:#?}",
             machine.pc,
@@ -44,7 +44,7 @@ pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine, is_en
         );
     } else {
         tracing::event!(
-            target: "block_exit",
+            target: tracing::TraceItem::BlockExit.as_str(),
             tracing::Level::TRACE,
             "exiting block from 0x{:x} to pc 0x{:x} with registers:\n{:#?}",
             machine.prev_pc,

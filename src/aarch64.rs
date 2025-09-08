@@ -29,6 +29,7 @@ use crate::{
         ArchMode, DAIFFields, Exception, ExceptionLevel, Mode, SavedProgramStatusRegister, SpSel,
     },
     memory::Address,
+    tracing,
 };
 
 macro_rules! bitmask {
@@ -129,7 +130,7 @@ pub extern "C" fn aarch64_undefined(
     machine: &mut crate::machine::Armv8AMachine,
     preferred_exception_return: Address,
 ) {
-    tracing::event!(target: "exception", tracing::Level::TRACE, "AArch64.Undefined");
+    tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, "AArch64.Undefined");
     let current_el = machine.cpu_state.PSTATE().EL();
 
     let route_to_el2 =
@@ -209,7 +210,7 @@ pub fn aarch64_take_exception(
         adjusted_vect_offset += 0x200_u64;
     }
     tracing::event!(
-        target: "exception",
+        target: tracing::TraceItem::Exception.as_str(),
         tracing::Level::TRACE,
         current_el = ?machine.cpu_state.PSTATE().EL(),
         ?target_el,
@@ -393,7 +394,7 @@ pub extern "C" fn aarch64_exception_return(
     let illegal_psr_state: bool = illegal_exception_return(machine, spsr);
     set_PSTATE_from_PSR(machine, spsr, illegal_psr_state);
     let target_el = machine.cpu_state.PSTATE().EL();
-    tracing::event!(target: "exception", tracing::Level::TRACE, ?source_pc, ?source_el, ?target_el, ?new_pc, "exception return");
+    tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, ?source_pc, ?source_el, ?target_el, ?new_pc, "exception return");
     //ClearExclusiveLocal(ProcessorID());
     //SendEventLocal();
     if machine.cpu_state.PSTATE().IL() {

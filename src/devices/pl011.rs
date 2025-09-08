@@ -25,7 +25,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::memory::Width;
+use crate::{memory::Width, tracing};
 
 // TODO: You must disable the UART before any of the control registers are
 // reprogrammed. When the UART is disabled in the middle of transmission or
@@ -166,7 +166,7 @@ impl PL011Registers {
         use RegisterOffset::*;
 
         tracing::event!(
-            target: "pl011",
+            target: tracing::TraceItem::Pl011.as_str(),
             tracing::Level::TRACE,
             kind = "write",
             ?offset,
@@ -443,7 +443,7 @@ impl crate::memory::DeviceMemoryOps for PL011MemoryOps {
                     result
                 };
                 tracing::event!(
-                    target: "pl011",
+                    target: tracing::TraceItem::Pl011.as_str(),
                     tracing::Level::TRACE,
                     kind = "read",
                     ?offset,

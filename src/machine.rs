@@ -36,6 +36,7 @@ use crate::{
     cpu_state::*,
     jit::{lookup_entry, Entry},
     memory::*,
+    tracing,
 };
 
 mod entry_blocks;
@@ -49,7 +50,7 @@ pub struct ResolvedAddress<'a> {
 
 pub extern "C" fn address_lookup(machine: &mut Armv8AMachine, address: u64) -> ResolvedAddress<'_> {
     tracing::event!(
-        target: "address_lookup",
+        target: tracing::TraceItem::AddressLookup.as_str(),
         tracing::Level::TRACE,
         address = ?Address(address),
         pc = ?Address(machine.pc),
