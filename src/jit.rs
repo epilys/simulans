@@ -1616,25 +1616,13 @@ impl BlockTranslator<'_> {
             }
             Op::STLR | Op::STR => {
                 // For STLR: [ref:atomics]: We don't model exclusive access (yet).
-                let value = match instruction.operands()[0] {
-                    bad64::Operand::Reg {
-                        ref reg,
-                        arrspec: _,
-                    } => self.reg_to_value(reg),
-                    other => unexpected_operand!(other),
-                };
+                let value = self.translate_operand(&instruction.operands()[0]);
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[0]);
                 self.generate_write(target, value, width);
             }
             Op::STRH => {
-                let value = match instruction.operands()[0] {
-                    bad64::Operand::Reg {
-                        ref reg,
-                        arrspec: _,
-                    } => self.reg_to_value(reg),
-                    other => unexpected_operand!(other),
-                };
+                let value = self.translate_operand(&instruction.operands()[0]);
                 // Reduce 32-bit register to least significant halfword.
                 let value = self.builder.ins().ireduce(I16, value);
                 let target = self.translate_operand(&instruction.operands()[1]);
@@ -1642,13 +1630,7 @@ impl BlockTranslator<'_> {
             }
             Op::STLRB | Op::STRB => {
                 // For STLRB: [ref:atomics]: We don't model exclusive access (yet).
-                let value = match instruction.operands()[0] {
-                    bad64::Operand::Reg {
-                        ref reg,
-                        arrspec: _,
-                    } => self.reg_to_value(reg),
-                    other => unexpected_operand!(other),
-                };
+                let value = self.translate_operand(&instruction.operands()[0]);
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().ireduce(I8, value);
                 self.generate_write(target, value, Width::_8);
@@ -3976,13 +3958,7 @@ impl BlockTranslator<'_> {
             Op::STUMINLB => todo!(),
             Op::STUMINLH => todo!(),
             Op::STUR => {
-                let value = match instruction.operands()[0] {
-                    bad64::Operand::Reg {
-                        ref reg,
-                        arrspec: _,
-                    } => self.reg_to_value(reg),
-                    other => unexpected_operand!(other),
-                };
+                let value = self.translate_operand(&instruction.operands()[0]);
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[0]);
                 self.generate_write(target, value, width);
