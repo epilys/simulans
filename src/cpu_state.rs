@@ -32,6 +32,9 @@ use num_traits::cast::FromPrimitive;
 
 use crate::{memory::Address, tracing};
 
+const TRUSTED_MEMFLAGS: MemFlags =
+    MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
+
 pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine, is_entry: bool) {
     if is_entry {
         tracing::event!(
@@ -394,8 +397,6 @@ pub struct ExecutionState {
     pub arch_features: ArchFeatures,
 }
 
-const MEMFLAGS: MemFlags = MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
-
 pub struct PSTATERef<'a> {
     #[allow(dead_code)]
     value: &'a u64,
@@ -456,7 +457,7 @@ impl ExecutionState {
                 $(
                     let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
                     let offset = core::mem::offset_of!(RegisterFile, $field) $(+ $index * std::mem::size_of::<u128>())*;
-                    let value = builder.ins().load(I64, MEMFLAGS, addr, i32::try_from(offset).unwrap());
+                    let value = builder.ins().load(I64, TRUSTED_MEMFLAGS, addr, i32::try_from(offset).unwrap());
                     let var = Variable::new(registers.len() + sys_registers.len());
                     assert!(!registers.contains_key(&$bad_reg));
                     registers.insert($bad_reg, var);
@@ -468,7 +469,7 @@ impl ExecutionState {
                 $(
                     let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
                     let offset = core::mem::offset_of!(RegisterFile, $field);
-                    let value = builder.ins().load(I64, MEMFLAGS, addr, i32::try_from(offset).unwrap());
+                    let value = builder.ins().load(I64, TRUSTED_MEMFLAGS, addr, i32::try_from(offset).unwrap());
                     let var = Variable::new(registers.len() + sys_registers.len());
                     assert!(!sys_registers.contains_key(&$bad_sys_reg));
                     sys_registers.insert($bad_sys_reg, var);
@@ -549,7 +550,7 @@ impl ExecutionState {
             let offset = i32::try_from(offset).unwrap();
             let v_value = builder.ins().load(
                 I128,
-                MEMFLAGS,
+                TRUSTED_MEMFLAGS,
                 vector_addr,
                 offset + std::mem::size_of::<u128>() as i32,
             );
@@ -581,7 +582,7 @@ impl ExecutionState {
                     assert!(registers.contains_key(&$bad_reg));
                     let var = &registers[&$bad_reg];
                     let var_value = builder.use_var(*var);
-                    builder.ins().store(MEMFLAGS, var_value, addr, i32::try_from(offset).unwrap());
+                    builder.ins().store(TRUSTED_MEMFLAGS, var_value, addr, i32::try_from(offset).unwrap());
                 )*
             }};
             (sys $($field:ident$($conversion:expr)? => $bad_sys_reg:expr),*$(,)?) => {{
@@ -591,7 +592,7 @@ impl ExecutionState {
                     assert!(sys_registers.contains_key(&$bad_sys_reg));
                     let var = &sys_registers[&$bad_sys_reg];
                     let var_value = builder.use_var(*var);
-                    builder.ins().store(MEMFLAGS, var_value, addr, i32::try_from(offset).unwrap());
+                    builder.ins().store(TRUSTED_MEMFLAGS, var_value, addr, i32::try_from(offset).unwrap());
                 )*
             }};
         }
@@ -670,7 +671,9 @@ impl ExecutionState {
                 assert!(registers.contains_key(&v_reg));
                 let var = &registers[&v_reg];
                 let value = builder.use_var(*var);
-                builder.ins().store(MEMFLAGS, value, vector_addr, offset);
+                builder
+                    .ins()
+                    .store(TRUSTED_MEMFLAGS, value, vector_addr, offset);
             }
         }
     }
