@@ -24,7 +24,7 @@ use std::num::NonZero;
 
 use vm_fdt::FdtWriter;
 
-use crate::memory::{Address, MemoryRegion, MemorySize};
+use crate::memory::{Address, MemoryMap};
 
 pub const FDT_MAX_SIZE: u64 = 0x200000;
 
@@ -34,35 +34,17 @@ pub struct Fdt {
     pub address: Address,
 }
 
-pub struct FdtBuilder {
-    phys_mem_start: Address,
-    phys_mem_end: Address,
-    fdt_offset: Address,
+pub struct FdtBuilder<'a> {
+    memory_map: &'a MemoryMap,
     cmdline: Option<String>,
-    mem_size: MemorySize,
     num_vcpus: NonZero<u32>,
 }
 
-impl FdtBuilder {
-    pub fn new(
-        region: &MemoryRegion,
-        mem_size: MemorySize,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        if region.last_addr().0 <= (FDT_MAX_SIZE + 0x10000_u64) {
-            return Err(format!(
-                "FDT max size {} cannot fit into region of size {}",
-                MemorySize((FDT_MAX_SIZE + 0x10000_u64).try_into().unwrap()),
-                region.size
-            )
-            .into());
-        }
-        let fdt_offset = region.last_addr() - FDT_MAX_SIZE - 0x10000_u64;
+impl<'a> FdtBuilder<'a> {
+    pub fn new(memory_map: &'a MemoryMap) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self {
-            fdt_offset,
-            phys_mem_start: region.start_addr(),
-            phys_mem_end: region.last_addr(),
+            memory_map,
             cmdline: None,
-            mem_size,
             num_vcpus: NonZero::new(1).unwrap(),
         })
     }
@@ -99,9 +81,17 @@ impl FdtBuilder {
             fdt.end_node(chosen_node)?;
         }
 
-        {
-            let mem_reg_prop = [self.phys_mem_start.0, self.mem_size.get()];
-            let memory_node = fdt.begin_node(&format!("memory@{}", self.phys_mem_start.0))?;
+        for region in self.memory_map.iter() {
+            let Some(mmap) = region.as_mmap() else {
+                continue;
+            };
+            // Skip boot rom
+            // [ref:TODO]: add DRAM memory type
+            if mmap.read_only {
+                continue;
+            }
+            let mem_reg_prop = [region.start_addr().0, region.len() as u64];
+            let memory_node = fdt.begin_node(&format!("memory@{:X?}", region.start_addr().0))?;
             fdt.property_string("device_type", "memory")?;
             fdt.property_array_u64("reg", &mem_reg_prop)?;
             fdt.end_node(memory_node)?;
@@ -131,24 +121,9 @@ impl FdtBuilder {
         fdt.end_node(root_node)?;
 
         let fdt = fdt.finish()?;
-        if self.fdt_offset + fdt.len() > self.phys_mem_end {
-            return Err(format!(
-                "fdt_offset {} plus fdt size {} bytes (total: {} bytes) is larger than DRAM \
-                 memory size of {} bytes",
-                self.fdt_offset,
-                fdt.len(),
-                self.fdt_offset + fdt.len(),
-                MemorySize(
-                    (self.phys_mem_end.0 - self.phys_mem_start.0)
-                        .try_into()
-                        .unwrap()
-                )
-            )
-            .into());
-        }
         Ok(Fdt {
             bytes: fdt,
-            address: self.fdt_offset,
+            address: Address(0x48000000),
         })
     }
 }

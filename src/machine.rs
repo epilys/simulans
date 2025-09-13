@@ -119,8 +119,7 @@ impl Armv8AMachine {
         &mut self,
         entry_point: Address,
     ) -> Result<crate::fdt::Fdt, Box<dyn std::error::Error>> {
-        let dram = self.memory.iter().next().unwrap();
-        let fdt = crate::fdt::FdtBuilder::new(dram, self.memory.max_size())?
+        let fdt = crate::fdt::FdtBuilder::new(&self.memory)?
             .num_vcpus(NonZero::new(1).unwrap())
             .cmdline(None)
             .build()?;
