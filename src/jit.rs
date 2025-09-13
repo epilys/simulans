@@ -1541,6 +1541,31 @@ impl BlockTranslator<'_> {
                 phi
             }};
         }
+        /// Sign-extend a bitfield value
+        /// (which might be any MSB depending on the bitfield's width)
+        // Is there a cleaner way to do this?
+        macro_rules! sign_extend_bitfield {
+            ($val:expr, $msb:expr, $width:expr) => {{
+                let msb = self
+                    .builder
+                    .ins()
+                    .band_imm($val, 2_i64.pow($msb as u32 - 1));
+                let is_one =
+                    self.builder
+                        .ins()
+                        .icmp_imm(cranelift::prelude::IntCC::NotEqual, msb, 0);
+                let is_one = self.builder.ins().uextend($width.into(), is_one);
+                let mask = self.builder.ins().iconst($width.into(), 0);
+                let mask = self.builder.ins().bnot(mask);
+                let mask = self
+                    .builder
+                    .ins()
+                    .band_imm(mask, !(2_i64.pow($msb as u32) - 1));
+                let mask = self.builder.ins().imul(mask, is_one);
+
+                self.builder.ins().bor($val, mask)
+            }};
+        }
         macro_rules! get_destination_register {
             () => {{
                 get_destination_register!(0)
@@ -3431,7 +3456,33 @@ impl BlockTranslator<'_> {
             Op::SBCS => todo!(),
             Op::SBFIZ => todo!(),
             Op::SBFM => todo!(),
-            Op::SBFX => todo!(),
+            Op::SBFX => {
+                let destination = get_destination_register!();
+                let source = self.translate_operand(&instruction.operands()[1]);
+                let lsb: i64 = match instruction.operands()[2] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(lsb),
+                        shift: None,
+                    } => lsb.try_into().unwrap(),
+                    other => unexpected_operand!(other),
+                };
+                let (value, wmask) = match instruction.operands()[3] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(wmask),
+                        shift: None,
+                    } => (
+                        self.builder
+                            .ins()
+                            .band_imm(source, (2_i64.pow(wmask as u32) - 1) << lsb),
+                        wmask,
+                    ),
+                    other => unexpected_operand!(other),
+                };
+                let value = self.builder.ins().ushr_imm(value, lsb);
+                let width = self.operand_width(&instruction.operands()[1]);
+                let value = sign_extend_bitfield!(value, wmask, width);
+                write_to_register!(destination, TypedValue { value, width },);
+            }
             Op::SCLAMP => todo!(),
             Op::SCVTF => todo!(),
             Op::SDIVR => todo!(),

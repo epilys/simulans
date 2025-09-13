@@ -147,3 +147,43 @@ fn test_bitfields_2() {
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
     assert_hex_eq!(machine.cpu_state.registers.x2, 0x720);
 }
+
+#[test_log::test]
+fn test_bitfields_signed() {
+    // ```asm
+    // movq x0, 0x1c85
+    // sbfx x1, x0, 2, 6
+    // ubfx x2, x0, 2, 6
+    // sbfx x3, x0, 2, 5
+    // ubfx x4, x0, 2, 5
+    // ```
+
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_bitfields_signed.bin");
+
+    _ = simulans::disas(TEST_INPUT, 0);
+    // Capstone output:
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+    assert_hex_eq!(machine.cpu_state.registers.x0, 0x1c85);
+    // sbfx x1, x0, 2, 6
+    assert_hex_eq!(
+        machine.cpu_state.registers.x1,
+        0b1111111111111111111111111111111111111111111111111111111111100001
+    );
+    // ubfx x2, x0, 2, 6
+    assert_hex_eq!(
+        machine.cpu_state.registers.x2,
+        0b0000000000000000000000000000000000000000000000000000000000100001
+    );
+    // sbfx x3, x0, 2, 5
+    assert_hex_eq!(machine.cpu_state.registers.x3, 1);
+    // ubfx x4, x0, 2, 5
+    assert_hex_eq!(
+        machine.cpu_state.registers.x4,
+        machine.cpu_state.registers.x3,
+    );
+}
