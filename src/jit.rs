@@ -877,8 +877,9 @@ impl BlockTranslator<'_> {
                             self.builder.ins().ishl_imm(value, i64::from(*uxtb))
                         }
                     }
-                    Shift::MSL(_msl) => {
-                        todo!()
+                    Shift::MSL(lsl) => {
+                        let val = self.builder.ins().ishl_imm(value, i64::from(*lsl));
+                        self.builder.ins().bor_imm(val, 2_i64.pow(*lsl) - 1)
                     }
                 }
             }
@@ -964,8 +965,11 @@ impl BlockTranslator<'_> {
                 match shift {
                     None => const_value,
                     Some(bad64::Shift::LSL(lsl)) => {
-                        let lsl = self.builder.ins().iconst(I64, i64::from(*lsl));
-                        self.builder.ins().ishl(const_value, lsl)
+                        self.builder.ins().ishl_imm(const_value, i64::from(*lsl))
+                    }
+                    Some(bad64::Shift::MSL(lsl)) => {
+                        let val = self.builder.ins().ishl_imm(const_value, i64::from(*lsl));
+                        self.builder.ins().bor_imm(val, 2_i64.pow(*lsl) - 1)
                     }
                     other => unimplemented!("unimplemented shift {other:?}"),
                 }
@@ -978,8 +982,11 @@ impl BlockTranslator<'_> {
                 match shift {
                     None => const_value,
                     Some(bad64::Shift::LSL(lsl)) => {
-                        let lsl = self.builder.ins().iconst(I32, i64::from(*lsl));
-                        self.builder.ins().ishl(const_value, lsl)
+                        self.builder.ins().ishl_imm(const_value, i64::from(*lsl))
+                    }
+                    Some(bad64::Shift::MSL(lsl)) => {
+                        let val = self.builder.ins().ishl_imm(const_value, i64::from(*lsl));
+                        self.builder.ins().bor_imm(val, 2_i64.pow(*lsl) - 1)
                     }
                     other => unimplemented!("unimplemented shift {other:?}"),
                 }
@@ -1034,8 +1041,11 @@ impl BlockTranslator<'_> {
                 let offset = match shift {
                     None => offset,
                     Some(bad64::Shift::LSL(ref lsl)) => {
-                        let lsl = self.builder.ins().iconst(I64, i64::from(*lsl));
-                        self.builder.ins().ishl(offset, lsl)
+                        self.builder.ins().ishl_imm(offset, i64::from(*lsl))
+                    }
+                    Some(bad64::Shift::MSL(ref lsl)) => {
+                        let val = self.builder.ins().ishl_imm(offset, i64::from(*lsl));
+                        self.builder.ins().bor_imm(val, 2_i64.pow(*lsl) - 1)
                     }
                     other => unimplemented!("unimplemented shift {other:?}"),
                 };
