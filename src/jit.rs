@@ -2611,7 +2611,9 @@ impl BlockTranslator<'_> {
             Op::BSL => todo!(),
             Op::BSL1N => todo!(),
             Op::BSL2N => todo!(),
-            Op::BTI => todo!(),
+            Op::BTI => {
+                // NOP
+            }
             Op::B_AL => b_cnd!(AL),
             Op::B_CC => b_cnd!(CC),
             Op::B_CS => b_cnd!(CS),
