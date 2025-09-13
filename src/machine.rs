@@ -43,11 +43,15 @@ mod entry_blocks;
 pub use entry_blocks::{EntryBlock, EntryBlocks};
 
 #[repr(C)]
+/// A resolved address for a translated block.
 pub struct ResolvedAddress<'a> {
+    /// Memory region this block resides.
     pub mem_region: &'a MemoryRegion,
+    /// The offset inside this region.
     pub address_inside_region: u64,
 }
 
+/// JIT helper function to look up translated blocks for given address.
 pub extern "C" fn address_lookup(machine: &mut Armv8AMachine, address: u64) -> ResolvedAddress<'_> {
     tracing::event!(
         target: tracing::TraceItem::AddressLookup.as_str(),
@@ -69,6 +73,7 @@ pub extern "C" fn address_lookup(machine: &mut Armv8AMachine, address: u64) -> R
     }
 }
 
+/// JIT Helper function to set [`Armv8AMachine::exit_request`] field.
 pub extern "C" fn helper_set_exit_request(machine: &mut Armv8AMachine, exit_request: u8) {
     machine.exit_request.store(exit_request, Ordering::SeqCst);
 }
@@ -76,22 +81,33 @@ pub extern "C" fn helper_set_exit_request(machine: &mut Armv8AMachine, exit_requ
 /// The state of the emulated machine.
 #[repr(C)]
 pub struct Armv8AMachine {
+    /// Next program counter.
     pub pc: u64,
+    /// Previous program counter.
     pub prev_pc: u64,
+    /// Current execution state.
     pub cpu_state: ExecutionState,
+    /// Current memory map.
     pub memory: MemoryMap,
+    /// Function to call to look up translated blocks.
     pub lookup_entry_func: Entry,
+    /// List of breakpoint addresses.
     pub hw_breakpoints: BTreeSet<Address>,
+    /// Exit request field.
     pub exit_request: Arc<AtomicU8>,
+    /// Whether we have stopped at a breakpoint.
     pub in_breakpoint: bool,
 }
 
 impl Armv8AMachine {
+    /// Returns a new machine with given memory map.
     pub fn new(memory: MemoryMap) -> Pin<Box<Self>> {
         let exit_request = Arc::new(AtomicU8::new(0));
         Self::new_with_exit_request(memory, exit_request)
     }
 
+    /// Returns a new machine with given memory map and
+    /// [`Armv8AMachine::exit_request`] field.
     pub fn new_with_exit_request(memory: MemoryMap, exit_request: Arc<AtomicU8>) -> Pin<Box<Self>> {
         Box::pin(Self {
             pc: 0,
@@ -194,12 +210,18 @@ impl Armv8AMachine {
 }
 
 #[derive(Clone, Copy, Debug)]
+/// A simple bootloader that passes the FDT blob address (if any) in `x0`
+/// register.
 pub struct Armv8ABootloader {
+    /// The entry point address to jump to.
     pub entry_point: Address,
+    /// The location of the FDT blob in memory, that will be passed in `x0`
+    /// register.
     pub fdt_address: Address,
 }
 
 impl Armv8ABootloader {
+    /// Write bootloader to memory at `destination`.
     pub fn write_to_memory(
         self,
         destination: Address,

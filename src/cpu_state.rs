@@ -35,6 +35,9 @@ use crate::{memory::Address, tracing};
 const TRUSTED_MEMFLAGS: MemFlags =
     MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
 
+/// Helper method to print register state on block entry/exit for trace items
+/// [`BlockEntry`](tracing::TraceItem::BlockEntry) and
+/// [`BlockExit`](tracing::TraceItem::BlockExit).
 pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine, is_entry: bool) {
     if is_entry {
         tracing::event!(
@@ -60,6 +63,7 @@ pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine, is_en
 /// Regular registers.
 #[derive(Default, Debug)]
 #[repr(C)]
+#[allow(missing_docs)]
 pub struct RegisterFile {
     pub x0: u64,
     pub x1: u64,
@@ -132,10 +136,14 @@ pub struct RegisterFile {
 #[derive(Copy, Clone, Default, FromBits, Debug, Eq, PartialEq)]
 /// Exception level
 pub enum ExceptionLevel {
+    /// `EL0`
     EL0 = 0b00,
     #[default]
+    /// `EL1`
     EL1 = 0b01,
+    /// `EL2`
     EL2 = 0b10,
+    /// `EL3`
     EL3 = 0b11,
 }
 
@@ -146,7 +154,9 @@ pub enum ExceptionLevel {
 /// We only support `Aarch64` mode, but add an enum for it for completeness.
 pub enum ArchMode {
     #[default]
+    /// 64-bit mode.
     _64 = 0,
+    /// 32-bit mode.
     _32 = 1,
 }
 
@@ -155,7 +165,9 @@ pub enum ArchMode {
 /// Stack register selector, part of [`PSTATE`].
 pub enum SpSel {
     #[default]
+    /// Use `EL0` stack pointer.
     SpEl0 = 0,
+    /// Use current EL's stack pointer.
     Current = 1,
 }
 
@@ -177,8 +189,11 @@ pub enum Mode {
 #[derive(Default, Copy, Clone, PartialEq, Eq, FromBits, DebugBits)]
 /// Condition flags pseudo-register
 pub struct NZCV {
+    /// Padding bits
     pub _padding2: u28,
+    /// Register fields
     pub fields: NZCVFields,
+    /// Padding bits
     pub _padding: u32,
 }
 
@@ -197,10 +212,15 @@ pub struct NZCVFields {
 
 #[bitsize(4)]
 #[derive(Default, Copy, Clone, PartialEq, Eq, FromBits, DebugBits)]
+/// `DAIF` mask bits.
 pub struct DAIFFields {
+    /// FIQ mask.
     pub F: bool,
+    /// IRQ mask.
     pub I: bool,
+    /// `SError` exception mask.
     pub A: bool,
+    /// Debug mask.
     pub D: bool,
 }
 
@@ -232,6 +252,7 @@ pub struct SavedProgramStatusRegister {
 }
 
 impl SavedProgramStatusRegister {
+    /// Returns what stack pointer to choose depending on [`Self::M`].
     pub fn SP(&self) -> SpSel {
         if self.M() as u32 & 0b1 == 0 {
             SpSel::SpEl0
@@ -258,16 +279,27 @@ impl SavedProgramStatusRegister {
 /// | `NZCV`                   | Holds the condition flags.                                                                      | `N, Z, C, V`    |
 /// | `SPSel`                  | At `EL1` or higher, this selects between the `SP` for the current Exception level and `SP_EL0`. | `SP`            |
 pub struct PSTATE {
+    /// Accessed through `SpSel` register.
     pub SP: SpSel,
+    /// Reserved bit.
     pub _res0: u1,
+    /// Current exception level.
     pub EL: ExceptionLevel,
+    /// Current architectural mode.
     pub nRW: ArchMode,
+    /// Interrupt mask bits.
     pub DAIF: DAIFFields,
+    /// Reserved bits.
     pub _res1: u10,
+    /// Illegal execution bit.
     pub IL: bool,
+    /// Single-step bit.
     pub SS: bool,
+    /// Reserved bits.
     pub _res2: u7,
+    /// Condition flag bits.
     pub NZCV: NZCVFields,
+    /// Reserved bits.
     pub _res3: u32,
 }
 
@@ -362,7 +394,9 @@ pub enum Exception {
 }
 
 #[derive(Copy, Clone, Debug)]
+/// Exit request to be serviced on main execution loop
 pub enum ExitRequest {
+    /// An architectural exception.
     Exception(Exception),
 }
 
@@ -372,17 +406,17 @@ pub enum ExitRequest {
 pub struct IDRegisterFile {
     /// Main ID Register
     pub midr_el1: u64,
-    // AArch64 Processor Feature Register 0
+    /// `AArch64` Processor Feature Register 0
     pub id_aa64pfr0_el1: u64,
-    // AArch64 Memory Model Feature Register 0
+    /// `AArch64` Memory Model Feature Register 0
     pub id_aa64mmfr0_el1: u64,
-    // AArch64 Memory Model Feature Register 1
+    /// `AArch64` Memory Model Feature Register 1
     pub id_aa64mmfr1_el1: u64,
-    // AArch64 Memory Model Feature Register 2
+    /// `AArch64` Memory Model Feature Register 2
     pub id_aa64mmfr2_el1: u64,
-    // AArch64 Memory Model Feature Register 3
+    /// `AArch64` Memory Model Feature Register 3
     pub id_aa64mmfr3_el1: u64,
-    // Data Cache Zero ID Register
+    /// Data Cache Zero ID Register
     pub dczid_el0: u64,
 }
 
@@ -429,7 +463,9 @@ pub struct MMURegisterFile {
     pub pire0_el1: u64,
     /// Permission Indirection Register 1 (EL1)
     pub pir_el1: u64,
+    /// Translation Control Register (EL1)
     pub tcr_el1: u64,
+    /// Extended Translation Control Register (EL1)
     pub tcr2_el1: u64,
     /// EL1 Translation Table Base Register 0
     pub ttbr0_el1: u64,
@@ -437,6 +473,7 @@ pub struct MMURegisterFile {
     pub ttbr1_el1: u64,
     // pub ttbr0_el2: u64,
     // pub ttbr0_el3: u64,
+    /// Virtualization Translation Table Base Register.
     pub vttbr_el2: u64,
     /// EL1 Memory Attribute Indirection Register
     pub mair_el1: u64,
@@ -444,6 +481,7 @@ pub struct MMURegisterFile {
     // pub mair_el3: u64,
 }
 
+/// All execution state of a processing element.
 #[repr(C)]
 #[derive(Default, Debug)]
 pub struct ExecutionState {
@@ -455,11 +493,14 @@ pub struct ExecutionState {
     pub id_registers: IDRegisterFile,
     /// MMU registers.
     pub mmu_registers: MMURegisterFile,
+    /// Exit request to be serviced on main execution loop.
     pub exit_request: Option<ExitRequest>,
     /// Architectural features this CPU supports.
     pub arch_features: ArchFeatures,
 }
 
+/// Helper struct to return a referenced [`PSTATE`] view of current processor
+/// state.
 pub struct PSTATERef<'a> {
     #[allow(dead_code)]
     value: &'a u64,
@@ -475,6 +516,10 @@ impl std::ops::Deref for PSTATERef<'_> {
     }
 }
 
+/// Helper struct to return a mutably referenced [`PSTATE`] view of current
+/// processor state.
+///
+/// The value is updated when the view is dropped.
 pub struct PSTATERefMut<'a> {
     value: &'a mut u64,
     view: PSTATE,
@@ -727,14 +772,17 @@ impl ExecutionState {
         }
     }
 
+    /// Whether `EL2` is enabled in this machine.
     pub const fn EL2_enabled(&self) -> bool {
         false
     }
 
+    /// Whether `el` is supported in this machine.
     pub const fn have_el(&self, el: ExceptionLevel) -> bool {
         matches!(el, ExceptionLevel::EL0 | ExceptionLevel::EL1)
     }
 
+    /// Returns a view into processor state.
     pub fn PSTATE(&'_ self) -> PSTATERef<'_> {
         let view = self.registers.pstate.into();
         PSTATERef {
@@ -743,6 +791,8 @@ impl ExecutionState {
         }
     }
 
+    /// Returns a view into processor state that updates the raw 64-bit value
+    /// when dropped.
     pub fn PSTATE_mut(&'_ mut self) -> PSTATERefMut<'_> {
         let view = self.registers.pstate.into();
         PSTATERefMut {
@@ -751,6 +801,7 @@ impl ExecutionState {
         }
     }
 
+    /// Returns `VBAR_ELx` register value depending on current exception level.
     pub fn vbar_elx(&self) -> u64 {
         match self.PSTATE().EL() {
             ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.vbar_el1,
@@ -758,6 +809,7 @@ impl ExecutionState {
         }
     }
 
+    /// Returns `ELR_ELx` register value depending on current exception level.
     pub fn elr_elx(&self) -> Address {
         match self.PSTATE().EL() {
             ExceptionLevel::EL0 | ExceptionLevel::EL1 => Address(self.registers.elr_el1),
@@ -766,6 +818,7 @@ impl ExecutionState {
         }
     }
 
+    /// Sets `ELR_ELx` register value depending on current exception level.
     pub fn set_elr_elx(&mut self, val: u64) {
         match self.PSTATE().EL() {
             ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.elr_el1 = val,
@@ -774,6 +827,7 @@ impl ExecutionState {
         }
     }
 
+    /// Generates `SPSR` value from current processor state.
     pub fn psr_from_PSTATE(&self) -> SavedProgramStatusRegister {
         let mut spsr = SavedProgramStatusRegister::from(0);
         let pstate = self.PSTATE();
@@ -786,6 +840,7 @@ impl ExecutionState {
         spsr
     }
 
+    /// Returns `SPSR` value depending on current exception level.
     pub fn spsr_elx(&self) -> SavedProgramStatusRegister {
         match self.PSTATE().EL() {
             ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.spsr_el1.into(),
@@ -794,6 +849,7 @@ impl ExecutionState {
         }
     }
 
+    /// Sets `SPSR` value depending on current exception level.
     pub fn set_spsr_elx(&mut self, val: SavedProgramStatusRegister) {
         match self.PSTATE().EL() {
             ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.spsr_el1 = val.into(),
@@ -807,6 +863,7 @@ bitflags::bitflags! {
     /// Bitflag of architectural features, currently does not affect emulation at all.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct ArchFeatures: u64 {
+        /// Large System Extensions.
         const FEAT_LSE = 0b00000001;
     }
 }

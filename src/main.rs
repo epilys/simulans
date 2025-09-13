@@ -113,7 +113,7 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
         clap::ColorChoice::Always => true,
         clap::ColorChoice::Never => false,
     };
-    let tracing_guard = simulans::tracing::init(
+    let tracing_guard = simulans::tracing::TracingGuard::init(
         log_level,
         log_output,
         ansi,

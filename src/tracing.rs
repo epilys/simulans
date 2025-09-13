@@ -20,6 +20,17 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+#![deny(missing_docs)]
+
+//! # Tracing support
+//!
+//! ## Trace items
+//!
+//! Various trace items are offerred which are disabled by default and must be
+//! individually enabled.
+//!
+//! See [`TraceItem`] variants.
+
 use std::{
     cell::Cell,
     collections::BTreeSet,
@@ -31,23 +42,38 @@ pub use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::{prelude::*, reload, Layer};
 
 #[derive(Copy, Clone, Ord, PartialOrd, PartialEq, Eq, Debug, clap::ValueEnum)]
+/// Trace item targets
 pub enum TraceItem {
+    /// Logs an address lookup.
     AddressLookup,
+    /// Logs registers when entering a translated block.
     BlockEntry,
+    /// Logs registers when exiting a translated block.
     BlockExit,
+    /// Enables `cranelift_codegen` crate tracing.
     CraneliftCodegen,
+    /// Enables `cranelift_frontend` crate tracing.
     CraneliftFrontend,
+    /// Enables `cranelift_jit` crate tracing.
     CraneliftJit,
+    /// Logs exceptions.
     Exception,
+    /// Logs gdbstub related events.
     Gdb,
+    /// Logs `aarch64` assembly of translated blocks.
     InAsm,
+    /// Logs JIT related events.
     Jit,
+    /// Logs lookup of translated blocks.
     LookupEntry,
+    /// Logs memory accesses.
     Memory,
+    /// Logs [`PL011State`](crate::devices::PL011State`) related events.
     Pl011,
 }
 
 impl TraceItem {
+    /// All [`TraceItem`] variants.
     pub const POSSIBLE_VALUES: &[Self] = &[
         Self::AddressLookup,
         Self::BlockEntry,
@@ -64,6 +90,7 @@ impl TraceItem {
         Self::Pl011,
     ];
 
+    /// Snake case representation of item.
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::AddressLookup => "address_lookup",
@@ -118,9 +145,13 @@ impl std::ops::Deref for TraceItem {
 }
 
 #[derive(Debug)]
+/// Output of trace logs.
 pub enum Output {
+    /// Standard output.
     Stdout,
+    /// Standard error.
     Stderr,
+    /// File.
     File(std::fs::File),
 }
 
@@ -154,6 +185,9 @@ impl std::io::Write for Output {
     }
 }
 
+/// Tracing guard
+///
+/// Tracing will stop when dropped.
 pub struct TracingGuard {
     current_level: Cell<LevelFilter>,
     events: Arc<Mutex<BTreeSet<TraceItem>>>,
@@ -166,14 +200,17 @@ pub struct TracingGuard {
 }
 
 impl TracingGuard {
+    /// Returns current tracing level.
     pub fn current_level(&self) -> LevelFilter {
         self.current_level.get()
     }
 
+    /// Returns current trace items.
     pub fn events(&self) -> impl std::ops::Deref<Target = BTreeSet<TraceItem>> + use<'_> {
         self.events.lock().unwrap()
     }
 
+    /// Updates trace items.
     pub fn set_events(
         &self,
         events: BTreeSet<TraceItem>,
@@ -182,6 +219,7 @@ impl TracingGuard {
         self.change_level(self.current_level())
     }
 
+    /// Updates tracing level.
     pub fn change_level(&self, value: LevelFilter) -> Result<(), Box<dyn std::error::Error>> {
         let new_filter = Self::generate_env_filter(value, &self.events.lock().unwrap());
         self.reload_handle.modify(|filter| {
@@ -190,6 +228,7 @@ impl TracingGuard {
         Ok(())
     }
 
+    /// Helper function to regenerate filter based on levels and events.
     fn generate_env_filter(
         level: LevelFilter,
         events: &BTreeSet<TraceItem>,
@@ -207,61 +246,62 @@ impl TracingGuard {
         }
         env_filter
     }
-}
 
-#[must_use]
-pub fn init(
-    log_level: LevelFilter,
-    output: Output,
-    ansi: bool,
-    events: BTreeSet<TraceItem>,
-) -> TracingGuard {
-    let env_filter = TracingGuard::generate_env_filter(log_level, &events);
-    let (env_filter, reload_handle) = reload::Layer::new(env_filter);
-    let (log_layer, worker_guard) = match output {
-        Output::File(_) => {
-            let (non_blocking, worker_guard) = tracing_appender::non_blocking(output);
-            (
-                tracing_subscriber::fmt::layer()
-                    .with_thread_ids(true)
-                    .with_thread_names(true)
-                    .with_writer(non_blocking)
-                    .with_ansi(false)
-                    .and_then(env_filter)
-                    .boxed(),
-                worker_guard,
-            )
-        }
-        Output::Stdout => {
-            let (non_blocking, worker_guard) = tracing_appender::non_blocking(output);
-            (
-                tracing_subscriber::fmt::layer()
-                    .pretty()
-                    .with_writer(non_blocking)
-                    .with_ansi(ansi)
-                    .and_then(env_filter)
-                    .boxed(),
-                worker_guard,
-            )
-        }
-        Output::Stderr => {
-            let (non_blocking, worker_guard) = tracing_appender::non_blocking(Output::Stderr);
-            (
-                tracing_subscriber::fmt::layer()
-                    .with_writer(non_blocking)
-                    .with_ansi(false)
-                    .and_then(env_filter)
-                    .boxed(),
-                worker_guard,
-            )
-        }
-    };
+    #[must_use]
+    /// Creates a new [`TracingGuard`].
+    pub fn init(
+        log_level: LevelFilter,
+        output: Output,
+        ansi: bool,
+        events: BTreeSet<TraceItem>,
+    ) -> Self {
+        let env_filter = Self::generate_env_filter(log_level, &events);
+        let (env_filter, reload_handle) = reload::Layer::new(env_filter);
+        let (log_layer, worker_guard) = match output {
+            Output::File(_) => {
+                let (non_blocking, worker_guard) = tracing_appender::non_blocking(output);
+                (
+                    tracing_subscriber::fmt::layer()
+                        .with_thread_ids(true)
+                        .with_thread_names(true)
+                        .with_writer(non_blocking)
+                        .with_ansi(false)
+                        .and_then(env_filter)
+                        .boxed(),
+                    worker_guard,
+                )
+            }
+            Output::Stdout => {
+                let (non_blocking, worker_guard) = tracing_appender::non_blocking(output);
+                (
+                    tracing_subscriber::fmt::layer()
+                        .pretty()
+                        .with_writer(non_blocking)
+                        .with_ansi(ansi)
+                        .and_then(env_filter)
+                        .boxed(),
+                    worker_guard,
+                )
+            }
+            Output::Stderr => {
+                let (non_blocking, worker_guard) = tracing_appender::non_blocking(Output::Stderr);
+                (
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(non_blocking)
+                        .with_ansi(false)
+                        .and_then(env_filter)
+                        .boxed(),
+                    worker_guard,
+                )
+            }
+        };
 
-    tracing_subscriber::registry().with(log_layer).init();
-    TracingGuard {
-        events: Arc::new(Mutex::new(events)),
-        current_level: log_level.into(),
-        worker_guard,
-        reload_handle,
+        tracing_subscriber::registry().with(log_layer).init();
+        Self {
+            events: Arc::new(Mutex::new(events)),
+            current_level: log_level.into(),
+            worker_guard,
+            reload_handle,
+        }
     }
 }

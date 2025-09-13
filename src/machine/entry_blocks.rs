@@ -27,26 +27,37 @@ use std::{collections::BTreeMap, ops::RangeInclusive};
 use crate::jit::Entry;
 
 #[must_use]
+/// A translated block of instructions.
+///
+/// Before dropped, [`EntryBlock::free`] must be called.
 pub struct EntryBlock {
+    /// First instruction address.
     pub start: u64,
+    /// Final instruction address (inclusive).
     pub end: u64,
+    /// The translated function.
     pub entry: Entry,
+    /// The JIT context, used to free the memory.
     pub ctx: cranelift_jit::JITModule,
 }
 
 impl EntryBlock {
-    fn free(self) {
+    /// Free JIT memory for this block.
+    pub fn free(self) {
         let module = self.ctx;
         // SAFETY: After we drop the block, nobody should be able to call self.entry.
         unsafe { module.free_memory() };
     }
 }
 
+/// Helper container struct for translated blocks.
 pub struct EntryBlocks {
+    /// A map from program counter entry to block.
     pub entries: BTreeMap<u64, EntryBlock>,
 }
 
 impl Drop for EntryBlocks {
+    /// Frees block memory.
     fn drop(&mut self) {
         self.clear();
     }
@@ -60,6 +71,7 @@ impl Default for EntryBlocks {
 
 impl EntryBlocks {
     #[inline]
+    /// Create an empty container.
     pub fn new() -> Self {
         Self {
             entries: BTreeMap::default(),
@@ -67,17 +79,20 @@ impl EntryBlocks {
     }
 
     #[inline]
+    /// Get a translated block for this program counter.
     pub fn get(&self, pc: &u64) -> Option<&EntryBlock> {
         self.entries.get(pc)
     }
 
     #[inline]
+    /// Insert translated block.
     pub fn insert(&mut self, block: EntryBlock) {
         let start = block.start;
         self.entries.insert(start, block);
     }
 
     #[inline]
+    /// Pop and free all blocks.
     pub fn clear(&mut self) {
         while let Some((_, b)) = self.entries.pop_first() {
             b.free();
@@ -85,6 +100,7 @@ impl EntryBlocks {
     }
 
     #[inline]
+    /// Invalidate all translated blocks that touch this program counter.
     pub fn invalidate(&mut self, pc: u64) {
         let invalidated_keys = self
             .entries
@@ -107,6 +123,8 @@ impl EntryBlocks {
     }
 
     #[inline]
+    /// Invalidate all translated blocks that touch this range of program
+    /// counters.
     pub fn invalidate_range(&mut self, range: RangeInclusive<u64>) {
         let invalidated_keys = self
             .entries

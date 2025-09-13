@@ -2860,7 +2860,7 @@ impl BlockTranslator<'_> {
                 };
                 let func = self.builder.ins().iconst(
                     I64,
-                    crate::aarch64::aarch64_exception_return as usize as u64 as i64,
+                    crate::exceptions::aarch64_exception_return as usize as u64 as i64,
                 );
                 let pc = self.builder.ins().iconst(I64, self.address as i64);
                 return self.emit_indirect_noreturn(
@@ -4031,7 +4031,7 @@ impl BlockTranslator<'_> {
                 };
                 let func = self.builder.ins().iconst(
                     I64,
-                    crate::aarch64::aarch64_undefined as usize as u64 as i64,
+                    crate::exceptions::aarch64_undefined as usize as u64 as i64,
                 );
                 let pc = self.builder.ins().iconst(I64, self.address as i64);
                 return self.emit_indirect_noreturn(

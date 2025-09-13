@@ -20,20 +20,27 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! Flattened device-tree (FDT) blob generation.
+
 use std::num::NonZero;
 
 use vm_fdt::FdtWriter;
 
 use crate::memory::{Address, MemoryMap};
 
+/// Maximum allowed size in bytes.
 pub const FDT_MAX_SIZE: u64 = 0x200000;
 
 #[derive(Clone, Debug)]
+/// A generated FDT.
 pub struct Fdt {
+    /// Blob
     pub bytes: Vec<u8>,
+    /// Address to load it into.
     pub address: Address,
 }
 
+/// A builder struct for FDT blobs.
 pub struct FdtBuilder<'a> {
     memory_map: &'a MemoryMap,
     cmdline: Option<String>,
@@ -41,6 +48,7 @@ pub struct FdtBuilder<'a> {
 }
 
 impl<'a> FdtBuilder<'a> {
+    /// Create new builder for `memory_map`.
     pub fn new(memory_map: &'a MemoryMap) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self {
             memory_map,
@@ -49,16 +57,19 @@ impl<'a> FdtBuilder<'a> {
         })
     }
 
+    /// Set number of vCPUs.
     pub const fn num_vcpus(mut self, num_vcpus: NonZero<u32>) -> Self {
         self.num_vcpus = num_vcpus;
         self
     }
 
+    /// Set `bootargs` node.
     pub fn cmdline(mut self, cmdline: Option<String>) -> Self {
         self.cmdline = cmdline;
         self
     }
 
+    /// Generate binary blob.
     pub fn build(self) -> Result<Fdt, Box<dyn std::error::Error>> {
         let mut fdt = FdtWriter::new()?;
 

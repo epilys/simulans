@@ -20,11 +20,18 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! # Emulated devices
+//!
+//! Devices must implement the [`Device`] trait.
+
 pub mod pl011;
 use crate::memory::DeviceMemoryOps;
 
+/// Trait for device operations.
 pub trait Device: std::fmt::Debug {
+    /// Returns device ID.
     fn id(&self) -> u64;
+    /// Returns device operations.
     fn ops(&self) -> Box<dyn DeviceMemoryOps>;
 }
 
@@ -39,12 +46,17 @@ pub mod tube {
     use crate::memory::Width;
 
     #[derive(Debug)]
+    /// Tube testing device (Memory mapped register) to signal shutdown for
+    /// tests.
     pub struct Tube {
+        /// Unique device ID.
         pub device_id: u64,
+        /// Atomic integer to alert machine of exit request.
         pub exit_request: Arc<AtomicU8>,
     }
 
     impl Tube {
+        /// Create a new tube device that will write to `exit_request`.
         pub const fn new(device_id: u64, exit_request: Arc<AtomicU8>) -> Self {
             Self {
                 device_id,
@@ -69,7 +81,7 @@ pub mod tube {
     #[derive(Debug)]
     struct TubeOps {
         device_id: u64,
-        pub exit_request: Arc<AtomicU8>,
+        exit_request: Arc<AtomicU8>,
     }
 
     impl crate::memory::DeviceMemoryOps for TubeOps {

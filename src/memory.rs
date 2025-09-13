@@ -20,6 +20,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! Virtual machine memory types.
+
 mod map;
 mod region;
 
@@ -31,29 +33,25 @@ pub use map::*;
 pub use region::*;
 pub use size::*;
 
-//#[repr(transparent)]
-//#[derive(Clone, Copy)]
-///// An "entry" function for a block.
-/////
-///// It can be either a JIT compiled translation block, or a special emulator
-///// function.
-//pub type Entry(pub extern "C" fn(&mut JitContext, &mut Armv8AMachine) ->
-// Entry);
-
 /// Default guest physical address to load kernel code to.
 pub const KERNEL_ADDRESS: usize = 0x40080000;
 
-// Default starting offset of DRAM inside the physical address space.
+/// Default starting offset of DRAM inside the physical address space.
 pub const PHYS_MEM_START: u64 = 0x4000_0000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd)]
 #[repr(i32)]
 /// Register/memory width in bits.
 pub enum Width {
+    /// 128-bit.
     _128 = 128,
+    /// 64-bit.
     _64 = 64,
+    /// 32-bit.
     _32 = 32,
+    /// 16-bit.
     _16 = 16,
+    /// 8-bit.
     _8 = 8,
 }
 

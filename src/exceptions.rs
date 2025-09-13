@@ -20,6 +20,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! Architectural exceptions module
+
 #![allow(non_snake_case)]
 
 use bilge::prelude::*;
@@ -35,51 +37,63 @@ use crate::{
 
 #[bitsize(49)]
 #[derive(Copy, Clone, Default, FromBits, DebugBits)]
+/// [`ExceptionRecord`] field.
 pub struct IssType {
+    /// `iss` field
     pub iss: u25,
+    /// `iss2` field
     pub iss2: u24,
 }
 
+/// [`ExceptionRecord`] field.
 pub struct FullAddress {
+    /// PA space
     pub paspace: PASpace,
-    // 56 bits
+    /// 56 bits
     pub address: u64,
 }
 
 /// Physical address spaces
 pub enum PASpace {
+    /// Unknown
     UNKNOWN = 0,
+    /// Root
     Root,
+    /// System Agent,
     SystemAgent,
+    /// Non-Secure Protected,
     NonSecureProtected,
-    // Reserved
+    /// Reserved
     NA6,
-    // Reserved
+    /// Reserved
     NA7,
+    /// Realm
     Realm,
+    /// Secure
     Secure,
+    /// Non-Secure
     NonSecure,
 }
 
-// <https://developer.arm.com/documentation/ddi0602/2024-12/Shared-Pseudocode/shared-exceptions-exceptions?lang=en#shared.exceptions.exceptions.ExceptionRecord>
+/// <https://developer.arm.com/documentation/ddi0602/2024-12/Shared-Pseudocode/shared-exceptions-exceptions?lang=en#shared.exceptions.exceptions.ExceptionRecord>
 pub struct ExceptionRecord {
-    // Exception class
+    /// Exception class
     pub exceptype: Exception,
-    // Syndrome record
+    /// Syndrome record
     pub syndrome: IssType,
-    // Physical fault address
+    /// Physical fault address
     pub paddress: FullAddress,
-    // Virtual fault address
+    /// Virtual fault address
     pub vaddress: u64,
-    // Validity of Intermediate Physical fault address
+    /// Validity of Intermediate Physical fault address
     pub ipavalid: bool,
-    // Validity of Physical fault address
+    /// Validity of Physical fault address
     pub pavalid: bool,
-    // Intermediate Physical fault address space
+    /// Intermediate Physical fault address space
     pub NS: bool,
-    // Intermediate Physical fault address (56 bits)
+    /// Intermediate Physical fault address (56 bits)
     pub ipaddress: u64,
-    // Trapped SVC or SMC instruction
+    /// Trapped SVC or SMC instruction
     pub trappedsyscallinst: bool,
 }
 
@@ -151,6 +165,8 @@ pub extern "C" fn aarch64_undefined(
     }
 }
 
+/// Prepares machine state to take an exception and updates `pc` with the
+/// appropriate exception vector entry.
 pub fn aarch64_take_exception(
     machine: &mut crate::machine::Armv8AMachine,
     target_el: ExceptionLevel,

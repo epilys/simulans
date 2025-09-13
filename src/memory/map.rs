@@ -20,6 +20,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! Virtual machine Memory map
+
 use std::{collections::BTreeMap, ops::Range};
 
 use crate::{
@@ -28,6 +30,7 @@ use crate::{
 };
 
 #[derive(Debug)]
+/// A builder struct for [`MemoryMap`].
 pub struct MemoryMapBuilder {
     interval_tree: IntervalTree<Address>,
     entries: BTreeMap<Address, MemoryRegion>,
@@ -35,14 +38,20 @@ pub struct MemoryMapBuilder {
 }
 
 #[derive(Debug)]
+/// Errors returned by [`MemoryMapBuilder`].
 pub enum MemoryMapError {
+    /// Adding `region` overflows maximum size of map.
     Overflows {
+        /// The memory region value.
         region: MemoryRegion,
-        range_end: Address,
+        /// The maximum size the map allows.
         max_size: MemorySize,
     },
+    /// `region` would overlap with other existing regions.
     Overlaps {
+        /// The memory region value.
         region: MemoryRegion,
+        /// Which regions overlap.
         overlaps_with: Vec<MemoryRegionDescription>,
     },
 }
@@ -57,6 +66,7 @@ impl std::error::Error for MemoryMapError {}
 
 impl MemoryMapBuilder {
     #[inline]
+    /// Creates a new builder.
     pub fn new() -> Self {
         const MAX_SIZE: MemorySize =
             MemorySize(std::num::NonZero::new(MemorySize::MiB.get() * 1024 * 512).unwrap());
@@ -67,12 +77,12 @@ impl MemoryMapBuilder {
         }
     }
 
+    /// Adds a memory region, takes a mutable reference to `self`.
     pub fn add_region(&mut self, new: MemoryRegion) -> Result<(), MemoryMapError> {
         let range: Range<Address> = Range::from(&new);
         if range.end.0 > self.max_size.0.get() {
             return Err(MemoryMapError::Overflows {
                 region: new,
-                range_end: range.end,
                 max_size: self.max_size,
             });
         }
@@ -102,11 +112,13 @@ impl MemoryMapBuilder {
         }
     }
 
+    /// Adds a memory region and returns a new `Self`.
     pub fn with_region(mut self, new: MemoryRegion) -> Result<Self, MemoryMapError> {
         self.add_region(new)?;
         Ok(self)
     }
 
+    /// Constructs a [`MemoryMap`].
     pub fn build(self) -> MemoryMap {
         let Self {
             entries,
@@ -162,21 +174,26 @@ pub struct MemoryMap {
 
 impl MemoryMap {
     #[inline]
+    /// Return a builder struct.
     pub fn builder() -> MemoryMapBuilder {
         MemoryMapBuilder::new()
     }
 
     #[inline]
+    /// Return the maximum size of this memory map (not necessarily covered
+    /// entirely).
     pub const fn max_size(&self) -> MemorySize {
         self.max_size
     }
 
     #[inline]
     #[allow(clippy::len_without_is_empty)]
+    /// Return how many regions this map contains.
     pub const fn len(&self) -> usize {
         self.regions.len()
     }
 
+    /// Return reference of region for given address.
     pub fn find_region(&self, addr: Address) -> Option<&MemoryRegion> {
         let index = match self.regions.binary_search_by_key(&addr, |x| x.phys_offset) {
             Ok(x) => Some(x),
@@ -187,6 +204,7 @@ impl MemoryMap {
         index.and_then(|x| self.regions.get(x))
     }
 
+    /// Return mutable reference of region for given address.
     pub fn find_region_mut(&mut self, addr: Address) -> Option<&mut MemoryRegion> {
         let index = match self.regions.binary_search_by_key(&addr, |x| x.phys_offset) {
             Ok(x) => Some(x),
@@ -197,6 +215,7 @@ impl MemoryMap {
         index.and_then(|x| self.regions.get_mut(x))
     }
 
+    /// Returns an iterator of memory regions.
     pub fn iter(&self) -> impl Iterator<Item = &MemoryRegion> {
         self.regions.iter()
     }

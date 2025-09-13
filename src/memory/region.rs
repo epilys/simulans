@@ -20,6 +20,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! Memory region types
+
 #![allow(clippy::len_without_is_empty)]
 
 use std::{cmp::Ordering, ops::Range, path::PathBuf};
@@ -43,11 +45,17 @@ mod linux {
 
     use crate::memory::{Address, MemorySize};
 
+    /// A linux mmapped region.
     pub struct MmappedMemory {
+        /// User-friendly name.
         pub name: String,
+        /// Owned file descriptor.
         pub fd: OwnedFd,
+        /// Mapping.
         pub map: memmap2::MmapMut,
+        /// Read-only status.
         pub read_only: bool,
+        /// Filesystem path.
         pub fs_path: Option<PathBuf>,
     }
 
@@ -73,6 +81,7 @@ mod linux {
     impl Eq for MmappedMemory {}
 
     impl MmappedMemory {
+        /// Returns new region from file descriptor.
         fn new_from_fd(
             name: &str,
             fd: OwnedFd,
@@ -108,6 +117,7 @@ mod linux {
             })
         }
 
+        /// Creates a new memfd-backed mmapped memory region.
         pub fn new_region(
             name: &str,
             size: MemorySize,
@@ -120,6 +130,7 @@ mod linux {
             Self::new_from_fd(name, fd, None, size, phys_offset)
         }
 
+        /// Creates a new file-backed mmapped memory region.
         pub fn new_file_region(
             name: &str,
             path: PathBuf,
@@ -145,6 +156,7 @@ mod linux {
         #[inline]
         // False positive; memmap2::MapMut::as_ptr() is not const.
         #[allow(clippy::missing_const_for_fn)]
+        /// Return mapping as byte pointer.
         pub fn as_ptr(&self) -> *const u8 {
             self.map.as_ptr().cast()
         }
@@ -152,6 +164,7 @@ mod linux {
         #[inline]
         // False positive; memmap2::MapMut::as_mut_ptr() is not const.
         #[allow(clippy::missing_const_for_fn)]
+        /// Return mapping as mutable byte pointer.
         pub fn as_mut_ptr(&mut self) -> *mut u8 {
             self.map.as_mut_ptr()
         }
@@ -297,9 +310,13 @@ mod macos {
     }
 }
 
+/// Trait for device memory operations.
 pub trait DeviceMemoryOps: std::fmt::Debug + Send + Sync {
+    /// Returns unique device ID.
     fn id(&self) -> u64;
+    /// Performs a read.
     fn read(&self, address_inside_region: u64, width: Width) -> u64;
+    /// Performs a write.
     fn write(&self, address_inside_region: u64, value: u64, width: Width);
 }
 
@@ -312,8 +329,11 @@ impl PartialEq for &dyn DeviceMemoryOps {
 impl Eq for &dyn DeviceMemoryOps {}
 
 #[derive(Debug)]
+/// Kind of memory backing.
 pub enum MemoryBacking {
+    /// A mmapped region.
     Mmap(MmappedMemory),
+    /// Device memory.
     Device(Box<dyn DeviceMemoryOps>),
 }
 
@@ -329,10 +349,13 @@ impl PartialEq for MemoryBacking {
 
 impl Eq for MemoryBacking {}
 
+/// A virtual machine memory region.
 pub struct MemoryRegion {
     /// Offset from start of physical address space.
     pub phys_offset: Address,
+    /// Size in bytes.
     pub size: MemorySize,
+    /// The backing.
     pub backing: MemoryBacking,
 }
 
@@ -390,6 +413,8 @@ impl MemoryRegion {
     }
 
     #[cfg(target_os = "macos")]
+    /// Creates a new file-backed mmapped memory region, returns `ENOTSUP` for
+    /// macos.
     pub fn new_file(
         _name: &str,
         _path: PathBuf,
@@ -400,6 +425,7 @@ impl MemoryRegion {
     }
 
     #[cfg(not(target_os = "macos"))]
+    /// Creates a new file-backed mmapped memory region.
     pub fn new_file(
         name: &str,
         path: PathBuf,
@@ -412,6 +438,7 @@ impl MemoryRegion {
         MmappedMemory::new_file_region(name, path, size, phys_offset)
     }
 
+    /// Creates a new I/O memory region.
     pub fn new_io(
         size: MemorySize,
         phys_offset: Address,
@@ -428,16 +455,19 @@ impl MemoryRegion {
     }
 
     #[inline]
+    /// Returns the size in bytes.
     pub const fn len(&self) -> usize {
         self.size.get() as usize
     }
 
     #[inline]
+    /// Returns the first address covered by this region.
     pub const fn start_addr(&self) -> Address {
         self.phys_offset
     }
 
     #[inline]
+    /// Returns the last address covered by this region.
     pub const fn last_addr(&self) -> Address {
         if cfg!(debug_assertions) {
             return Address(
@@ -451,6 +481,7 @@ impl MemoryRegion {
     }
 
     #[inline]
+    /// Returns reference to mmapped memory.
     pub const fn as_mmap(&self) -> Option<&MmappedMemory> {
         if let MemoryBacking::Mmap(ref inner) = self.backing {
             return Some(inner);
@@ -459,6 +490,7 @@ impl MemoryRegion {
     }
 
     #[inline]
+    /// Returns mutable reference to mmapped memory.
     pub const fn as_mmap_mut(&mut self) -> Option<&mut MmappedMemory> {
         if let MemoryBacking::Mmap(ref mut inner) = self.backing {
             return Some(inner);
@@ -471,7 +503,9 @@ impl MemoryRegion {
 /// but does not own its memory or holds any reference to it.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct MemoryRegionDescription {
+    /// Start offset in memory map.
     pub start_offset: Address,
+    /// Region size.
     pub size: MemorySize,
 }
 
@@ -486,6 +520,7 @@ impl From<&MemoryRegion> for MemoryRegionDescription {
 
 impl MemoryRegionDescription {
     #[inline]
+    /// Returns a [`Range<Address>`] for this description.
     pub const fn into_range(&self) -> Range<Address> {
         let start = self.start_offset;
         Range {
@@ -496,11 +531,14 @@ impl MemoryRegionDescription {
 }
 
 pub mod ops {
+    //! Helper memory I/O functions for JIT code.
+
     use super::*;
     use crate::tracing;
 
     macro_rules! def_op {
         (write $fn:ident: $size:ty) => {
+            /// Helper memory write struct called from JIT code.
             pub extern "C" fn $fn(
                 mem_region: &mut MemoryRegion,
                 address_inside_region: u64,
@@ -543,6 +581,7 @@ pub mod ops {
             }
         };
         (read $fn:ident: $size:ty) => {
+            /// Helper memory read struct called from JIT code.
             pub extern "C" fn $fn(
                 mem_region: &mut MemoryRegion,
                 address_inside_region: u64,

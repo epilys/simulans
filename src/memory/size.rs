@@ -20,22 +20,29 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! Utility structs for memory sizes.
+
 use std::num::NonZero;
 
 #[derive(Copy, Eq, PartialEq, PartialOrd, Ord, Clone)]
 #[repr(transparent)]
+/// A non-zero size in bytes.
 pub struct MemorySize(pub NonZero<u64>);
 
 #[allow(non_upper_case_globals)]
 impl MemorySize {
     // SAFETY: value is non-zero.
+    /// A KiB.
     pub const KiB: NonZero<u64> = NonZero::new(1024).unwrap();
     // SAFETY: value is non-zero.
+    /// A MiB.
     pub const MiB: NonZero<u64> = NonZero::new(Self::KiB.get() * 1024).unwrap();
     // SAFETY: value is non-zero.
+    /// A GiB.
     pub const GiB: NonZero<u64> = NonZero::new(Self::MiB.get() * 1024).unwrap();
 
     #[inline]
+    /// Constructs a new size.
     pub const fn new(value: u64) -> Option<Self> {
         if value == 0 {
             return None;
@@ -45,6 +52,7 @@ impl MemorySize {
 
     /// Get `u64` value.
     #[inline]
+    /// Unwraps the value.
     pub const fn get(self) -> u64 {
         self.0.get()
     }

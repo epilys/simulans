@@ -20,6 +20,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! Emulated PL011 UART.
+
 use std::{
     io::{Stdout, StdoutLock, Write},
     sync::{Arc, Mutex},
@@ -31,8 +33,10 @@ use crate::{memory::Width, tracing};
 // reprogrammed. When the UART is disabled in the middle of transmission or
 // reception, it completes the current character before stopping
 
+/// Max FIFO depth.
 pub const PL011_FIFO_DEPTH: u32 = 16;
 
+/// Device ID that the UART reports.
 #[derive(Clone, Copy)]
 struct DeviceId(&'static [u8; 8]);
 
@@ -44,10 +48,9 @@ impl std::ops::Index<u64> for DeviceId {
     }
 }
 
-// FIFOs use 32-bit indices instead of usize, for compatibility with
-// the migration stream produced by the C version of this device.
 #[repr(transparent)]
 #[derive(Debug, Default)]
+/// 32-bit indexed data FIFO.
 pub struct Fifo([registers::Data; PL011_FIFO_DEPTH as usize]);
 
 impl std::ops::IndexMut<u32> for Fifo {
@@ -66,14 +69,19 @@ impl std::ops::Index<u32> for Fifo {
 
 #[repr(C)]
 #[derive(Debug, Default)]
+/// Register file.
 pub struct PL011Registers {
+    /// Flag register.
     #[doc(alias = "fr")]
     pub flags: registers::Flags,
     #[doc(alias = "lcr")]
+    /// Line control register.
     pub line_control: registers::LineControl,
     #[doc(alias = "rsr")]
+    /// Receive-status-error-clear register.
     pub receive_status_error_clear: registers::ReceiveStatusErrorClear,
     #[doc(alias = "cr")]
+    /// Control register.
     pub control: registers::Control,
     pub dmacr: u32,
     pub int_enabled: u32,
@@ -91,7 +99,9 @@ pub struct PL011Registers {
 #[derive(Debug)]
 /// PL011 Device Model
 pub struct PL011State {
+    /// Device ID.
     pub device_id: u64,
+    /// Register file.
     pub regs: Arc<Mutex<PL011Registers>>,
 }
 

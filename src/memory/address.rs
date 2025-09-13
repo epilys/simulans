@@ -20,12 +20,15 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
+//! Utility structs for memory addresses.
+
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 use crate::memory::MemorySize;
 
 #[derive(Copy, Clone, Ord, Eq, PartialEq, PartialOrd)]
 #[repr(transparent)]
+/// Type wrapper for 64-bit addresses with hex formatted debugging.
 pub struct Address(pub u64);
 
 impl std::fmt::Display for Address {

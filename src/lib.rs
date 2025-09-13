@@ -116,9 +116,9 @@ core::compile_error!("Can only be compiled on targets with 64bit address support
 
 use std::sync::atomic::Ordering;
 
-pub mod aarch64;
 pub mod cpu_state;
 pub mod devices;
+pub mod exceptions;
 pub mod fdt;
 pub mod gdb;
 pub mod interval_tree;
@@ -160,6 +160,7 @@ pub fn disas(input: &[u8], starting_address: u64) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
+/// Execute machine continuously until it requests shutdown.
 pub fn main_loop(
     machine: &mut machine::Armv8AMachine,
     start_address: memory::Address,
@@ -178,6 +179,12 @@ pub fn main_loop(
 }
 
 #[macro_export]
+/// Create a bitmask starting at LSB offset `off` of bit length `len`.
+///
+/// ```rust
+/// # use simulans::bit_mask;
+/// assert_eq!(bit_mask!(off = 5, len = 3), 0b111 << 5);
+/// ```
 macro_rules! bit_mask {
     (off = $off:expr, len = $len:expr) => {
         ((1 << $len) - 1) << $off
@@ -185,6 +192,12 @@ macro_rules! bit_mask {
 }
 
 #[macro_export]
+/// Extract bitfield from `val`.
+///
+/// ```rust
+/// # use simulans::get_bits;
+/// assert_eq!(get_bits!(0b1011_0000, off = 4, len = 4), 0b1011);
+/// ```
 macro_rules! get_bits {
     ($val:expr, off = $off:expr, len = $len:expr) => {
         ($val & $crate::bit_mask!(off = $off, len = $len)) >> $off
@@ -192,6 +205,15 @@ macro_rules! get_bits {
 }
 
 #[macro_export]
+/// Insert bitfield from `val` to `var`.
+///
+/// ```rust
+/// # use simulans::set_bits;
+/// assert_eq!(
+///     set_bits!(0b1011_0000, off = 2, len = 2, val = 0b01),
+///     0b1011_0100
+/// );
+/// ```
 macro_rules! set_bits {
     ($var:expr, off = $off:expr, len = $len:expr, val = $val:expr) => {
         ($var & !$crate::bit_mask!(off = $off, len = $len))
