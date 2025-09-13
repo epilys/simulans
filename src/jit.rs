@@ -1079,6 +1079,7 @@ impl BlockTranslator<'_> {
             (reg_no - (Reg::D0 as u32), Width::_64)
         } else if ((Reg::S0 as u32)..=(Reg::S31 as u32)).contains(&reg_no) {
             // 32 bits
+            // [ref:FIXME]: even Sd and odd Sd+1 refer to different things
             (reg_no - (Reg::S0 as u32), Width::_32)
         } else if ((Reg::H0 as u32)..=(Reg::H31 as u32)).contains(&reg_no) {
             // 16 bits
