@@ -49,8 +49,8 @@ fn test_exception_levels() {
     assert_eq!(stack_post, stack_pre);
     assert_eq!(machine.cpu_state.registers.hcr_el2, 0x80000018);
     assert_eq!(machine.cpu_state.registers.scr_el3, 0xd0f);
-    assert_hex_eq!(machine.cpu_state.registers.elr_el1, 0x60);
-    assert_hex_eq!(machine.cpu_state.registers.x0, 0x60);
+    assert_hex_eq!(machine.cpu_state.registers.elr_el1, 0x58);
+    assert_hex_eq!(machine.cpu_state.registers.x0, 0x58);
 }
 
 /// Test ERET from EL1 to EL0

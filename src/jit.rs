@@ -45,6 +45,8 @@ use crate::{
 
 mod sysregs;
 
+use sysregs::SysRegEncoding;
+
 const MEMFLAG_LITTLE_ENDIAN: MemFlags = MemFlags::new().with_endianness(Endianness::Little);
 
 enum BlockExit {
@@ -618,38 +620,6 @@ impl BlockTranslator<'_> {
         self.builder.inst_results(call)[0]
     }
 
-    #[allow(non_snake_case)]
-    /// Return [`Value`] for special registers.
-    fn translate_o0_op1_CRn_CRm_op2(&mut self, o0: u8, o1: u8, cm: u8, cn: u8, o2: u8) -> Value {
-        match (o0, o1, cm, cn, o2) {
-            (0b11, 0, 0, 0b111, 0) => {
-                // [ref:FIXME]: ID_AA64MMFR0_EL1
-                self.builder.ins().iconst(I64, 0)
-            }
-            (3, 0, 0, 7, 2) => {
-                // [ref:FIXME]: ID_AA64MMFR2_EL1
-                self.builder.ins().iconst(I64, 0)
-            }
-            (0b11, 0, 0, 0, 0) => {
-                // [ref:FIXME]: MIDR_EL1
-                self.builder.ins().iconst(I64, 0)
-            }
-            (3, 0, 0, 0, 5) => {
-                // [ref:FIXME]: MPIDR_EL1
-                self.builder.ins().iconst(I64, 0)
-            }
-            (3, 3, 0, 0, 1) => {
-                // [ref:FIXME]: CTR_EL0
-                self.builder.ins().iconst(I64, 0xb444c004)
-            }
-            _other => unimplemented!(
-                "unimplemented sysreg encoding: {:?} pc =0x{:x?}",
-                bad64::Operand::ImplSpec { o0, o1, cm, cn, o2 },
-                self.address,
-            ),
-        }
-    }
-
     /// Perform `AddWithCarry` operation.
     ///
     /// Integer addition with carry input, returning result and NZCV flags
@@ -1050,7 +1020,8 @@ impl BlockTranslator<'_> {
             Operand::Label(Imm::Unsigned(imm)) => self.builder.ins().iconst(I64, *imm as i64),
             Operand::Label(Imm::Signed(imm)) => self.builder.ins().iconst(I64, *imm),
             Operand::ImplSpec { o0, o1, cm, cn, o2 } => {
-                self.translate_o0_op1_CRn_CRm_op2(*o0, *o1, *cm, *cn, *o2)
+                let (o0, o1, cm, cn, o2) = (*o0, *o1, *cm, *cn, *o2);
+                self.read_sysreg_o0_op1_CRn_CRm_op2(SysRegEncoding { o0, o1, cm, cn, o2 })
             }
             Operand::SysReg(reg) => self.read_sysreg(reg),
             Operand::MemExt {
@@ -1599,6 +1570,11 @@ impl BlockTranslator<'_> {
                 }
                 match instruction.operands()[0] {
                     bad64::Operand::SysReg(ref reg) => self.write_sysreg(reg, value),
+                    bad64::Operand::ImplSpec { o0, o1, cm, cn, o2 } => self
+                        .write_sysreg_o0_op1_CRn_CRm_op2(
+                            SysRegEncoding { o0, o1, cm, cn, o2 },
+                            value,
+                        ),
                     other => unexpected_operand!(other),
                 }
             }

@@ -13,9 +13,7 @@
   orr x0, x0, #0x80000000
   msr hcr_el2, x0
   mrs x0, midr_el1
-  msr vpidr_el2, x0
   mrs x0, mpidr_el1
-  msr vmpidr_el2, x0
   msr vttbr_el2, xzr
   msr sctlr_el2, xzr
   msr sctlr_el1, xzr

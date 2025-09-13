@@ -361,10 +361,16 @@ impl GdbStubRunner {
             AArch64RegId::SP_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.sp_el1),
             AArch64RegId::SP_EL2 => read_64bit_reg!(self.machine.cpu_state.registers.sp_el2),
             // AArch64RegId::SP_EL3 => read_64bit_reg!(self.machine.cpu_state.registers.sp_el3),
-            AArch64RegId::TTBR0_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.ttbr0_el1),
-            AArch64RegId::VTTBR_EL2 => read_64bit_reg!(self.machine.cpu_state.registers.vttbr_el2),
-            AArch64RegId::MAIR_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.mair_el1),
-            AArch64RegId::TCR_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.tcr_el1),
+            AArch64RegId::TTBR0_EL1 => {
+                read_64bit_reg!(self.machine.cpu_state.mmu_registers.ttbr0_el1)
+            }
+            AArch64RegId::VTTBR_EL2 => {
+                read_64bit_reg!(self.machine.cpu_state.mmu_registers.vttbr_el2)
+            }
+            AArch64RegId::MAIR_EL1 => {
+                read_64bit_reg!(self.machine.cpu_state.mmu_registers.mair_el1)
+            }
+            AArch64RegId::TCR_EL1 => read_64bit_reg!(self.machine.cpu_state.mmu_registers.tcr_el1),
             AArch64RegId::SCTLR_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.sctlr_el1),
             AArch64RegId::SCTLR_EL2 => read_64bit_reg!(self.machine.cpu_state.registers.sctlr_el2),
             AArch64RegId::SCTLR_EL3 => read_64bit_reg!(self.machine.cpu_state.registers.sctlr_el3),
@@ -372,9 +378,8 @@ impl GdbStubRunner {
             AArch64RegId::VBAR_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.vbar_el1),
             AArch64RegId::HCR_EL2 => read_64bit_reg!(self.machine.cpu_state.registers.hcr_el2),
             AArch64RegId::SCR_EL3 => read_64bit_reg!(self.machine.cpu_state.registers.scr_el3),
-            AArch64RegId::VPIDR_EL2 => read_64bit_reg!(self.machine.cpu_state.registers.vpidr_el2),
-            AArch64RegId::VMPIDR_EL2 => {
-                read_64bit_reg!(self.machine.cpu_state.registers.vmpidr_el2)
+            AArch64RegId::VPIDR_EL2 => {
+                read_64bit_reg!(self.machine.cpu_state.id_registers.midr_el1)
             }
             AArch64RegId::SPSR_EL3 => {
                 read_64bit_reg!(self.machine.cpu_state.registers.spsr_el3)
@@ -459,10 +464,16 @@ impl GdbStubRunner {
             AArch64RegId::SP_EL1 => write_64bit_reg!(self.machine.cpu_state.registers.sp_el1),
             AArch64RegId::SP_EL2 => write_64bit_reg!(self.machine.cpu_state.registers.sp_el2),
             // AArch64RegId::SP_EL3 => write_64bit_reg!(self.machine.cpu_state.registers.sp_el3),
-            AArch64RegId::TTBR0_EL1 => write_64bit_reg!(self.machine.cpu_state.registers.ttbr0_el1),
-            AArch64RegId::VTTBR_EL2 => write_64bit_reg!(self.machine.cpu_state.registers.vttbr_el2),
-            AArch64RegId::MAIR_EL1 => write_64bit_reg!(self.machine.cpu_state.registers.mair_el1),
-            AArch64RegId::TCR_EL1 => write_64bit_reg!(self.machine.cpu_state.registers.tcr_el1),
+            AArch64RegId::TTBR0_EL1 => {
+                write_64bit_reg!(self.machine.cpu_state.mmu_registers.ttbr0_el1)
+            }
+            AArch64RegId::VTTBR_EL2 => {
+                write_64bit_reg!(self.machine.cpu_state.mmu_registers.vttbr_el2)
+            }
+            AArch64RegId::MAIR_EL1 => {
+                write_64bit_reg!(self.machine.cpu_state.mmu_registers.mair_el1)
+            }
+            AArch64RegId::TCR_EL1 => write_64bit_reg!(self.machine.cpu_state.mmu_registers.tcr_el1),
             AArch64RegId::SCTLR_EL1 => write_64bit_reg!(self.machine.cpu_state.registers.sctlr_el1),
             AArch64RegId::SCTLR_EL2 => write_64bit_reg!(self.machine.cpu_state.registers.sctlr_el2),
             AArch64RegId::SCTLR_EL3 => write_64bit_reg!(self.machine.cpu_state.registers.sctlr_el3),
@@ -470,9 +481,8 @@ impl GdbStubRunner {
             AArch64RegId::VBAR_EL1 => write_64bit_reg!(self.machine.cpu_state.registers.vbar_el1),
             AArch64RegId::HCR_EL2 => write_64bit_reg!(self.machine.cpu_state.registers.hcr_el2),
             AArch64RegId::SCR_EL3 => write_64bit_reg!(self.machine.cpu_state.registers.scr_el3),
-            AArch64RegId::VPIDR_EL2 => write_64bit_reg!(self.machine.cpu_state.registers.vpidr_el2),
-            AArch64RegId::VMPIDR_EL2 => {
-                write_64bit_reg!(self.machine.cpu_state.registers.vmpidr_el2)
+            AArch64RegId::VPIDR_EL2 => {
+                write_64bit_reg!(self.machine.cpu_state.id_registers.midr_el1)
             }
             AArch64RegId::SPSR_EL3 => {
                 self.machine.cpu_state.registers.spsr_el3 = u64::from_ne_bytes(val_64);

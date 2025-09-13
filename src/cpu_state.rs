@@ -100,25 +100,6 @@ pub struct RegisterFile {
     pub sp_el1: u64,
     pub sp_el2: u64,
     pub sp_el3: u64,
-    // Translation Table Base Register 0: Holds the base address of translation table 0, and
-    // information about the memory it occupies. This is one of the translation tables for the
-    // stage 1 translation of memory accesses at ELn.
-    /// EL1 Translation Table Base Register 0
-    pub ttbr0_el1: u64,
-    // pub ttbr0_el2: u64,
-    // pub ttbr0_el3: u64,
-    pub vttbr_el2: u64,
-    // Memory Attribute Indirection Register: Provides the memory attribute encodings corresponding
-    // to the possible values in a Long- descriptor format translation table entry for stage 1
-    // translations at ELn.
-    /// EL1 Memory Attribute Indirection Register
-    pub mair_el1: u64,
-    // pub mair_el2: u64,
-    // pub mair_el3: u64,
-    pub vpidr_el2: u64,
-    pub vmpidr_el2: u64,
-    pub id_aa64mmfr0_el1: u64,
-    pub tcr_el1: u64,
     pub sctlr_el1: u64,
     pub sctlr_el2: u64,
     pub sctlr_el3: u64,
@@ -385,6 +366,84 @@ pub enum ExitRequest {
     Exception(Exception),
 }
 
+/// ID registers
+#[derive(Debug)]
+#[repr(C)]
+pub struct IDRegisterFile {
+    /// Main ID Register
+    pub midr_el1: u64,
+    // AArch64 Processor Feature Register 0
+    pub id_aa64pfr0_el1: u64,
+    // AArch64 Memory Model Feature Register 0
+    pub id_aa64mmfr0_el1: u64,
+    // AArch64 Memory Model Feature Register 1
+    pub id_aa64mmfr1_el1: u64,
+    // AArch64 Memory Model Feature Register 2
+    pub id_aa64mmfr2_el1: u64,
+    // AArch64 Memory Model Feature Register 3
+    pub id_aa64mmfr3_el1: u64,
+    // Data Cache Zero ID Register
+    pub dczid_el0: u64,
+}
+
+impl Default for IDRegisterFile {
+    fn default() -> Self {
+        let mut id_aa64pfr0_el1 = 0;
+        // EL0, bits [3:0] EL0 Exception level handling.
+        id_aa64pfr0_el1 = crate::set_bits!(id_aa64pfr0_el1, off = 0, len = 4, val = 0b0001); // EL0 can be executed in AArch64 state only.
+                                                                                             // EL1, bits [7:4] EL1 Exception level handling.
+        id_aa64pfr0_el1 = crate::set_bits!(id_aa64pfr0_el1, off = 4, len = 4, val = 0b0001); // EL1 can be executed in AArch64 state only.
+
+        // EL2, bits [11:8] EL2 is not implemented.
+
+        // EL3, bits [15:12] ditto.
+
+        // FP, bits [19:16]
+        id_aa64pfr0_el1 = crate::set_bits!(id_aa64pfr0_el1, off = 16, len = 4, val = 0b1111); // Floating-point is not implemented.
+
+        // AdvSIMD, bits [23:20]
+        id_aa64pfr0_el1 = crate::set_bits!(id_aa64pfr0_el1, off = 20, len = 4, val = 0b1111); // Advanced SIMD is not implemented.
+
+        // GIC, bits [27:24]
+        id_aa64pfr0_el1 = crate::set_bits!(id_aa64pfr0_el1, off = 24, len = 4, val = 0b0000); // No GIC
+
+        let dczid_el0 = 0b1000;
+        Self {
+            midr_el1: (0b1111) << 16,
+            // vpidr_el2: (0b1111) << 16,
+            id_aa64pfr0_el1,
+            id_aa64mmfr0_el1: 0,
+            id_aa64mmfr1_el1: 0,
+            id_aa64mmfr2_el1: 0,
+            id_aa64mmfr3_el1: 0,
+            dczid_el0,
+        }
+    }
+}
+
+/// MMU registers
+#[derive(Default, Debug)]
+#[repr(C)]
+pub struct MMURegisterFile {
+    /// Permission Indirection Register 0 (EL1)
+    pub pire0_el1: u64,
+    /// Permission Indirection Register 1 (EL1)
+    pub pir_el1: u64,
+    pub tcr_el1: u64,
+    pub tcr2_el1: u64,
+    /// EL1 Translation Table Base Register 0
+    pub ttbr0_el1: u64,
+    /// EL1 Translation Table Base Register 1
+    pub ttbr1_el1: u64,
+    // pub ttbr0_el2: u64,
+    // pub ttbr0_el3: u64,
+    pub vttbr_el2: u64,
+    /// EL1 Memory Attribute Indirection Register
+    pub mair_el1: u64,
+    // pub mair_el2: u64,
+    // pub mair_el3: u64,
+}
+
 #[repr(C)]
 #[derive(Default, Debug)]
 pub struct ExecutionState {
@@ -392,6 +451,10 @@ pub struct ExecutionState {
     pub registers: RegisterFile,
     /// Vector (SIMD) registers.
     pub vector_registers: [u128; 32],
+    /// ID registers.
+    pub id_registers: IDRegisterFile,
+    /// MMU registers.
+    pub mmu_registers: MMURegisterFile,
     pub exit_request: Option<ExitRequest>,
     /// Architectural features this CPU supports.
     pub arch_features: ArchFeatures,
@@ -479,16 +542,11 @@ impl ExecutionState {
             }};
         }
         reg_field! { sys
-            ttbr0_el1 => SysReg::TTBR0_EL1,
-            vttbr_el2 => SysReg::VTTBR_EL2,
-            mair_el1 => SysReg::MAIR_EL1,
-            //reg_field! { sys id_aa64mmfr0_el1 => SysReg::ID_AA64MMFR0_EL1 };
             sp_el0 => SysReg::SP_EL0,
             sp_el1 => SysReg::SP_EL1,
             sp_el2 => SysReg::SP_EL2,
-            // sp_el3 => SysReg::SP_EL3,
             // [ref:FIXME]: bad64 doesn't have an SP_EL3 variant.
-            tcr_el1 => SysReg::TCR_EL1,
+            // sp_el3 => SysReg::SP_EL3,
             sctlr_el1 => SysReg::SCTLR_EL1,
             sctlr_el2 => SysReg::SCTLR_EL2,
             sctlr_el3 => SysReg::SCTLR_EL3,
@@ -496,8 +554,6 @@ impl ExecutionState {
             vbar_el1 => SysReg::VBAR_EL1,
             hcr_el2 => SysReg::HCR_EL2,
             scr_el3 => SysReg::SCR_EL3,
-            vpidr_el2 => SysReg::VPIDR_EL2,
-            vmpidr_el2 => SysReg::VMPIDR_EL2,
             spsr_el3 =>  SysReg::SPSR_EL3,
             elr_el1 => SysReg::ELR_EL1,
             elr_el2 => SysReg::ELR_EL2,
@@ -599,16 +655,11 @@ impl ExecutionState {
 
         if write_to_sysreg {
             reg_field! { sys
-                ttbr0_el1 => SysReg::TTBR0_EL1,
-                vttbr_el2 => SysReg::VTTBR_EL2,
-                mair_el1 => SysReg::MAIR_EL1,
-                // id_aa64mmfr0_el1 => SysReg::ID_AA64MMFR0_EL1,
                 sp_el0 => SysReg::SP_EL0,
                 sp_el1 => SysReg::SP_EL1,
                 sp_el2 => SysReg::SP_EL2,
                 // sp_el3 => SysReg::SP_EL3,
                 // [ref:FIXME]: bad64 doesn't have an SP_EL3 variant.
-                tcr_el1 => SysReg::TCR_EL1,
                 sctlr_el1 => SysReg::SCTLR_EL1,
                 sctlr_el2 => SysReg::SCTLR_EL2,
                 sctlr_el3 => SysReg::SCTLR_EL3,
@@ -616,8 +667,6 @@ impl ExecutionState {
                 vbar_el1 => SysReg::VBAR_EL1,
                 hcr_el2 => SysReg::HCR_EL2,
                 scr_el3 => SysReg::SCR_EL3,
-                vpidr_el2 => SysReg::VPIDR_EL2,
-                vmpidr_el2 => SysReg::VMPIDR_EL2,
                 spsr_el3 =>  SysReg::SPSR_EL3,
                 elr_el1 => SysReg::ELR_EL1,
                 elr_el2 => SysReg::ELR_EL2,
