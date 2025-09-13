@@ -2033,7 +2033,10 @@ impl BlockTranslator<'_> {
                 return self.unconditional_jump_epilogue(next_pc);
             }
             Op::RET => {
-                let next_pc = self.reg_to_value(&bad64::Reg::X30, None);
+                let next_pc = match instruction.operands().first() {
+                    Some(reg) => self.translate_operand(reg),
+                    None => self.reg_to_value(&bad64::Reg::X30, None),
+                };
                 return self.unconditional_jump_epilogue(next_pc);
             }
             // Compares
