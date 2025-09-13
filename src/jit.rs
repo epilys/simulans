@@ -27,7 +27,7 @@ use std::ops::ControlFlow;
 use bad64::ArrSpec;
 use codegen::ir::{
     instructions::BlockArg,
-    types::{I128, I16, I32, I64, I64X2, I8},
+    types::{I128, I16, I16X8, I32, I32X4, I64, I64X2, I8, I8X16},
     Endianness,
 };
 use cranelift::prelude::*;
@@ -3206,7 +3206,48 @@ impl BlockTranslator<'_> {
             Op::MLS => todo!(),
             Op::MNEG => todo!(),
             Op::MOVA => todo!(),
-            Op::MOVI => todo!(),
+            Op::MOVI => {
+                // Move Immediate (vector). This instruction places an immediate constant into
+                // every vector element of the destination SIMD&FP register.
+                let target = get_destination_register!();
+                let value = self.translate_operand(&instruction.operands()[1]);
+                // [ref:FIXME]: Cranelift ICEs with "should be implemented in ISLE:" error when
+                // using 64-bit vector types, so use 128-bit types and reduce them to I64 type
+                // manually.
+                let (reduce, vector_type, value) = match target.element {
+                    Some(ArrSpec::TwoDoubles(None)) => (false, I64X2, value),
+                    Some(ArrSpec::EightBytes(None)) => {
+                        (true, I8X16, self.builder.ins().ireduce(I8, value))
+                    }
+                    Some(ArrSpec::SixteenBytes(None)) => {
+                        (false, I8X16, self.builder.ins().ireduce(I8, value))
+                    }
+                    Some(ArrSpec::FourHalves(None)) => {
+                        (true, I16X8, self.builder.ins().ireduce(I16, value))
+                    }
+                    Some(ArrSpec::EightHalves(None)) => {
+                        (false, I16X8, self.builder.ins().ireduce(I16, value))
+                    }
+                    Some(ArrSpec::TwoSingles(None)) => (true, I32X4, value),
+                    other => unimplemented!("{other:?}"),
+                };
+                let value = self.builder.ins().splat(vector_type, value);
+                let value = self
+                    .builder
+                    .ins()
+                    .bitcast(I128, MEMFLAG_LITTLE_ENDIAN, value);
+                let value = self
+                    .builder
+                    .ins()
+                    .bitcast(I128, MEMFLAG_LITTLE_ENDIAN, value);
+                let (value, width) = if reduce {
+                    let value = self.builder.ins().ireduce(I64, value);
+                    (value, Width::_64)
+                } else {
+                    (value, Width::_128)
+                };
+                write_to_register!(target, TypedValue { value, width });
+            }
             Op::MOVN => todo!(),
             Op::MOVPRFX => todo!(),
             Op::MOVS => todo!(),

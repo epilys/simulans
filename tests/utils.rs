@@ -47,6 +47,20 @@ macro_rules! assert_hex_eq {
             right = right,
         );
     }};
+    (128 $left: expr, $right: expr$(,)?) => {{
+        let left: u128 = $left;
+        let right: u128 = $right.into();
+        assert_eq!(
+            left,
+            right,
+            "Comparing {left_s} with {right_s} failed:\n0x{left:032x} {left_s}\n0x{right:032x} \
+             {right_s}\n0b{left:064b} {left_s}\n0b{right:064b} {right_s}",
+            left_s = stringify!($left),
+            right_s = stringify!($right),
+            left = left,
+            right = right,
+        );
+    }};
 }
 
 #[allow(dead_code)]

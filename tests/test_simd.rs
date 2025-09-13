@@ -45,3 +45,21 @@ fn test_simd_rev() {
     assert_hex_eq!(machine.cpu_state.registers.x2, 0xefbeadde);
     assert_hex_eq!(machine.cpu_state.registers.x3, 0xefbeaddeefbeadde);
 }
+
+#[test_log::test]
+fn test_simd_mov() {
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_simd_mov.bin");
+    // _ = simulans::disas(TEST_INPUT, 0x40080000);
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[0], 0x80808080_80808080u64);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[1], 0x0001000100010001_u64);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[2], 0x0100010001000100_u64);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[3], 0x01000100010001000100010001000100_u128);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[4], 0x0100000001000000_u128);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[5], 0x0001ffff0001ffff_u128);
+}
