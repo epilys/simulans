@@ -176,3 +176,25 @@ pub fn main_loop(
     }
     Ok(())
 }
+
+#[macro_export]
+macro_rules! bit_mask {
+    (off = $off:expr, len = $len:expr) => {
+        ((1 << $len) - 1) << $off
+    };
+}
+
+#[macro_export]
+macro_rules! get_bits {
+    ($val:expr, off = $off:expr, len = $len:expr) => {
+        ($val & $crate::bit_mask!(off = $off, len = $len)) >> $off
+    };
+}
+
+#[macro_export]
+macro_rules! set_bits {
+    ($var:expr, off = $off:expr, len = $len:expr, val = $val:expr) => {
+        ($var & !$crate::bit_mask!(off = $off, len = $len))
+            | (($val << $off) & $crate::bit_mask!(off = $off, len = $len))
+    };
+}

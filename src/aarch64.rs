@@ -28,27 +28,10 @@ use crate::{
     cpu_state::{
         ArchMode, DAIFFields, Exception, ExceptionLevel, Mode, SavedProgramStatusRegister, SpSel,
     },
+    get_bits,
     memory::Address,
-    tracing,
+    set_bits, tracing,
 };
-
-macro_rules! bitmask {
-    ( $off: expr, $len: expr ) => {
-        ((1 << $len) - 1) << $off
-    };
-}
-
-macro_rules! getbits {
-    ( $val: expr, $off: expr, $len: expr ) => {
-        ($val & bitmask!($off, $len)) >> $off
-    };
-}
-
-macro_rules! setbits {
-    ( $var: expr, $off: expr, $len: expr, $val: expr ) => {
-        ($var & !bitmask!($off, $len)) | (($val << $off) & bitmask!($off, $len))
-    };
-}
 
 #[bitsize(49)]
 #[derive(Copy, Clone, Default, FromBits, DebugBits)]
@@ -244,7 +227,12 @@ pub fn aarch64_take_exception(
     let vbar_elx = machine.cpu_state.vbar_elx();
 
     // VBAR_ELx[]<63:11>:vect_offset<10:0>
-    machine.pc = setbits!(vbar_elx, 0, 11, getbits!(vect_offset.0, 0, 11));
+    machine.pc = set_bits!(
+        vbar_elx,
+        off = 0,
+        len = 11,
+        val = get_bits!(vect_offset.0, off = 0, len = 11)
+    );
 }
 
 /// Convert an SPSR value encoding to an Exception level.
