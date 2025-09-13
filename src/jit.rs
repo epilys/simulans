@@ -1919,26 +1919,11 @@ impl BlockTranslator<'_> {
                 write_to_register!(destination, TypedValue { value, width });
             }
             Op::SDIV => {
-                // [ref:verify_implementation]
-
-                // constant bits(datasize) operand1 = X[n, datasize];
-                // constant bits(datasize) operand2 = X[m, datasize];
-                // constant integer dividend = SInt(operand1);
-                // constant integer divisor  = SInt(operand2);
-                // integer result;
-                // if divisor == 0 then
-                // result = 0;
-                // elsif (dividend < 0) == (divisor < 0) then
-                // result = Abs(dividend) DIV Abs(divisor);    // same signs - positive result
-                // else
-                // result = -(Abs(dividend) DIV Abs(divisor)); // different signs - negative
-                // result X[d, datasize] = result<datasize-1:0>;
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let dividend = self.translate_operand(&instruction.operands()[1]);
                 let divisor = self.translate_operand(&instruction.operands()[2]);
-                // if divisor == 0 then
-                // result = 0;
+                // if divisor == 0 then result = 0;
                 let first_condition_value =
                     self.builder
                         .ins()
@@ -1950,14 +1935,13 @@ impl BlockTranslator<'_> {
 
                 self.builder.append_block_param(merge_block, width.into());
 
-                // Test the if condition and conditionally branch.
                 self.builder
                     .ins()
                     .brif(first_condition_value, zero_block, &[], else_block, &[]);
 
                 self.builder.switch_to_block(zero_block);
                 self.builder.seal_block(zero_block);
-                // Jump to the merge block, passing it the block return value.
+
                 let zero = self.builder.ins().iconst(width.into(), 0);
                 self.builder
                     .ins()
@@ -1966,19 +1950,15 @@ impl BlockTranslator<'_> {
                 self.builder.switch_to_block(else_block);
                 self.builder.seal_block(else_block);
                 let else_return = self.builder.ins().sdiv(dividend, divisor);
-                // Jump to the merge block, passing it the block return value.
+
                 self.builder
                     .ins()
                     .jump(merge_block, &[BlockArg::from(else_return)]);
 
-                // Switch to the merge block for subsequent statements.
                 self.builder.switch_to_block(merge_block);
 
-                // We've now seen all the predecessors of the merge block.
                 self.builder.seal_block(merge_block);
 
-                // Read the value of the if-else by reading the merge block
-                // parameter.
                 let phi = self.builder.block_params(merge_block)[0];
 
                 write_to_register!(target, TypedValue { value: phi, width });
@@ -1988,8 +1968,7 @@ impl BlockTranslator<'_> {
                 let width = self.operand_width(&instruction.operands()[0]);
                 let dividend = self.translate_operand(&instruction.operands()[1]);
                 let divisor = self.translate_operand(&instruction.operands()[2]);
-                // if divisor == 0 then
-                // result = 0;
+                // if divisor == 0 then result = 0;
                 let first_condition_value =
                     self.builder
                         .ins()
@@ -2001,14 +1980,13 @@ impl BlockTranslator<'_> {
 
                 self.builder.append_block_param(merge_block, width.into());
 
-                // Test the if condition and conditionally branch.
                 self.builder
                     .ins()
                     .brif(first_condition_value, zero_block, &[], else_block, &[]);
 
                 self.builder.switch_to_block(zero_block);
                 self.builder.seal_block(zero_block);
-                // Jump to the merge block, passing it the block return value.
+
                 let width = self.operand_width(&instruction.operands()[0]);
                 let zero = self.builder.ins().iconst(width.into(), 0);
                 self.builder
@@ -2018,19 +1996,15 @@ impl BlockTranslator<'_> {
                 self.builder.switch_to_block(else_block);
                 self.builder.seal_block(else_block);
                 let else_return = self.builder.ins().udiv(dividend, divisor);
-                // Jump to the merge block, passing it the block return value.
+
                 self.builder
                     .ins()
                     .jump(merge_block, &[BlockArg::from(else_return)]);
 
-                // Switch to the merge block for subsequent statements.
                 self.builder.switch_to_block(merge_block);
 
-                // We've now seen all the predecessors of the merge block.
                 self.builder.seal_block(merge_block);
 
-                // Read the value of the if-else by reading the merge block
-                // parameter.
                 let phi = self.builder.block_params(merge_block)[0];
 
                 write_to_register!(target, TypedValue { value: phi, width });
@@ -2096,34 +2070,6 @@ impl BlockTranslator<'_> {
             // Bit-ops
             Op::BFI => {
                 // Bitfield insert
-                // [ref:verify_implementation]
-
-                // This instruction copies a bitfield of <width> bits from the least significant
-                // bits of the source register to bit position <lsb> of the destination
-                // register, leaving the other destination bits unchanged.
-
-                // if sf == '1' && N != '1' then EndOfDecode(Decode_UNDEF);
-                //  if sf == '0' && (N != '0' || immr<5> != '0' || imms<5> != '0') then
-                // EndOfDecode(Decode_UNDEF);
-
-                //  constant integer d = UInt(Rd);
-                //  constant integer n = UInt(Rn);
-                //  constant integer datasize = 32 << UInt(sf);
-                //  constant integer s = UInt(imms);
-                //  constant integer r = UInt(immr);
-
-                //  bits(datasize) wmask;
-                //  bits(datasize) tmask;
-                //  (wmask, tmask) = DecodeBitMasks(N, imms, immr, FALSE, datasize);
-                // constant bits(datasize) dst = X[d, datasize];
-                // constant bits(datasize) src = X[n, datasize];
-
-                // // Perform bitfield move on low bits
-                // constant bits(datasize) bot = (dst AND NOT(wmask)) OR (ROR(src, r) AND
-                // wmask);
-
-                // // Combine extension bits and result bits
-                // X[d, datasize] = (dst AND NOT(tmask)) OR (bot AND tmask);
                 let dst = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let dst_value = self.translate_operand(&instruction.operands()[0]);
@@ -2494,7 +2440,6 @@ impl BlockTranslator<'_> {
             Op::CASPL => todo!(),
             Op::CCMN => todo!(),
             Op::CCMP => {
-                // [ref:verify_implementation]
                 // Conditional compare; set NZCV to immediate value if condition doesn't hold.
                 let cnd = match instruction.operands()[3] {
                     bad64::Operand::Cond(cnd) => cnd,
@@ -2552,7 +2497,6 @@ impl BlockTranslator<'_> {
                 let target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[1]);
-                // [ref:verify_implementation]
                 let value = self.builder.ins().cls(value);
                 write_to_register!(target, TypedValue { value, width });
             }

@@ -45,23 +45,7 @@ fn test_square() {
     //  }
     // ```
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_square.bin");
-
     // _ = simulans::disas(TEST_INPUT, 0);
-    // Capstone disassembly:
-    //
-    // Capstone output:
-    // 0x0: bl #8
-    // 0x4: b #0x24
-    // 0x8: sub sp, sp, #0x10
-    // 0xc: str w0, [sp, #0xc]
-    // 0x10: ldr w8, [sp, #0xc]
-    // 0x14: ldr w9, [sp, #0xc]
-    // 0x18: mul w0, w8, w9
-    // 0x1c: add sp, sp, #0x10
-    // 0x20: ret
-    // 0x24: nop
-    // ```
-
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -72,22 +56,18 @@ fn test_square() {
     // Pass "25" as `num`
     machine.cpu_state.registers.x0 = 25;
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-    assert_eq!(machine.cpu_state.registers.x0, 625);
-    assert_eq!(machine.cpu_state.registers.x8, 25);
-    assert_eq!(machine.cpu_state.registers.x9, 25);
+    assert_hex_eq!(machine.cpu_state.registers.x0, 625);
+    assert_hex_eq!(machine.cpu_state.registers.x8, 25);
+    assert_hex_eq!(machine.cpu_state.registers.x9, 25);
     let stack_post = machine.cpu_state.registers.sp;
-    assert_eq!(stack_post, stack_pre);
+    assert_hex_eq!(stack_post, stack_pre);
 }
 
 /// Test a str and a load from the stack
 #[test_log::test]
 fn test_load_stores() {
-    // Capstone output:
-    // 0x40080000: str x0, [sp, #-0x10]!
-    // 0x40080004: ldr x1, [sp], #0x10
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_load_stores.bin");
     // _ = simulans::disas(TEST_INPUT, 0);
-
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -115,22 +95,15 @@ fn test_load_stores() {
         mem.as_ref()[stack_post as usize - phys_offset - 0x10 + 3],
         0x0b
     );
-    assert_eq!(machine.cpu_state.registers.x0, 0xbadbeef);
-    assert_eq!(machine.cpu_state.registers.x1, 0xbadbeef);
+    assert_hex_eq!(machine.cpu_state.registers.x0, 0xbadbeef);
+    assert_hex_eq!(machine.cpu_state.registers.x1, 0xbadbeef);
 }
 
 /// Test a load stores adds and moves in the stack
 #[test_log::test]
 fn test_load_stores_2() {
-    // Capstone output:
-    // 0x40080000: mov x0, #0x1234
-    // 0x40080004: str x0, [sp, #-0x10]!
-    // 0x40080008: ldr x1, [sp], #0x10
-    // 0x4008000c: add x0, x0, x1
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_load_stores_2.bin");
-
     // _ = simulans::disas(TEST_INPUT, 0);
-
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -142,8 +115,8 @@ fn test_load_stores_2() {
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
     let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre);
-    assert_eq!(machine.cpu_state.registers.x0, 2 * 0x1234);
-    assert_eq!(machine.cpu_state.registers.x1, 0x1234);
+    assert_hex_eq!(machine.cpu_state.registers.x0, 2 * 0x1234);
+    assert_hex_eq!(machine.cpu_state.registers.x1, 0x1234);
     let mem = machine.memory.find_region(entry_point).unwrap();
     let phys_offset = mem.phys_offset.0 as usize;
     let mem = mem.as_mmap().unwrap();
@@ -160,8 +133,7 @@ fn test_uart_write_str() {
 
     const DRAM_MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new(4 * TEST_INPUT.len() as u64).unwrap());
-
-    _ = simulans::disas(TEST_INPUT, 0);
+    // _ = simulans::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     let pl011_addr = Address(4 * TEST_INPUT.len() as u64);
     let exit_request = Arc::new(AtomicU8::new(0));

@@ -35,8 +35,7 @@ mod utils;
 #[test_log::test]
 fn test_exception_levels() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_exception_levels.bin");
-    _ = simulans::disas(TEST_INPUT, 0x40080000);
-
+    // _ = simulans::disas(TEST_INPUT, 0x40080000);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -57,8 +56,7 @@ fn test_exception_levels() {
 #[test_log::test]
 fn test_eret_to_el0() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_eret_to_el0.bin");
-    _ = simulans::disas(TEST_INPUT, 0x40080000);
-
+    // _ = simulans::disas(TEST_INPUT, 0x40080000);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -76,8 +74,7 @@ fn test_eret_to_el0() {
 #[test_log::test]
 fn test_pstate_pseudoregisters() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_pstate_pseudoregisters.bin");
-    _ = simulans::disas(TEST_INPUT, 0x40080000);
-
+    // _ = simulans::disas(TEST_INPUT, 0x40080000);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);

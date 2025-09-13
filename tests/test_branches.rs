@@ -28,56 +28,8 @@ mod utils;
 
 #[test_log::test]
 fn test_simple_if() {
-    // This code was compiled from this C function:
-    // ```c
-    // int foobar(int num) {
-    //    if ((num % 2) == 0 ) {
-    //        return 2 * num;
-    //    }
-    //    return num * num;
-    //}
-    // ```
-    // Unoptimized (`-O0`) armv8-a clang assembly:
-    // ```asm
-    // foobar:
-    //         sub     sp, sp, #16
-    //         str     w0, [sp, #8]
-    //         ldr     w8, [sp, #8]
-    //         mov     w10, #2
-    //         sdiv    w9, w8, w10
-    //         mul     w9, w9, w10
-    //         subs    w8, w8, w9
-    //         cbnz    w8, .LBB0_2
-    //         b       .LBB0_1
-    // .LBB0_1:
-    //         ldr     w9, [sp, #8]
-    //         mov     w8, #2
-    //         mul     w8, w8, w9
-    //         str     w8, [sp, #12]
-    //         b       .LBB0_3
-    // .LBB0_2:
-    //         ldr     w8, [sp, #8]
-    //         ldr     w9, [sp, #8]
-    //         mul     w8, w8, w9
-    //         str     w8, [sp, #12]
-    //         b       .LBB0_3
-    // .LBB0_3:
-    //         ldr     w0, [sp, #12]
-    //         add     sp, sp, #16
-    //         ret
-    // ```
-
-    // Optimized (`-O1` or greater):
-    // ```asm
-    // foobar:
-    //     mul     w8, w0, w0
-    //     lsl     w9, w0, #1
-    //     tst     w0, #0x1
-    //     csel    w0, w9, w8, eq
-    //     ret
-    // ```
     const FOOBAR: &[u8] = include_bytes!("./inputs/test_simple_if_opt.bin");
-    // _ = simulans::disas(FOOBAR, 0);
+    _ = simulans::disas(FOOBAR, 0);
     const FOOBAR_UNOPT: &[u8] = include_bytes!("./inputs/test_simple_if.bin");
     // _ = simulans::disas(FOOBAR_UNOPT, 0);
 
@@ -92,7 +44,7 @@ fn test_simple_if() {
             machine.cpu_state.registers.x0 = 10;
             machine.cpu_state.registers.sp = 4 * FOOBAR_UNOPT.len() as u64 - 4;
             main_loop(&mut machine, entry_point, FOOBAR_UNOPT).unwrap();
-            assert_eq!(machine.cpu_state.registers.x0, 20);
+            assert_hex_eq!(machine.cpu_state.registers.x0, 20);
         }
         {
             let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
@@ -101,12 +53,7 @@ fn test_simple_if() {
             machine.cpu_state.registers.x0 = 11;
             machine.cpu_state.registers.sp = 4 * FOOBAR_UNOPT.len() as u64 - 4;
             main_loop(&mut machine, entry_point, FOOBAR_UNOPT).unwrap();
-            assert_eq!(
-                machine.cpu_state.registers.x0,
-                11 * 11,
-                "{:?}",
-                machine.cpu_state.registers
-            );
+            assert_hex_eq!(machine.cpu_state.registers.x0, 11 * 11,);
         }
     }
     // Optimized version
@@ -120,7 +67,7 @@ fn test_simple_if() {
             machine.cpu_state.registers.x0 = 10;
             machine.cpu_state.registers.sp = 4 * FOOBAR.len() as u64 - 4;
             main_loop(&mut machine, entry_point, FOOBAR).unwrap();
-            assert_eq!(machine.cpu_state.registers.x0, 20);
+            assert_hex_eq!(machine.cpu_state.registers.x0, 20);
         }
         {
             let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
@@ -129,12 +76,7 @@ fn test_simple_if() {
             machine.cpu_state.registers.x0 = 11;
             machine.cpu_state.registers.sp = 4 * FOOBAR.len() as u64 - 4;
             main_loop(&mut machine, entry_point, FOOBAR).unwrap();
-            assert_eq!(
-                machine.cpu_state.registers.x0,
-                11 * 11,
-                "{:?}",
-                machine.cpu_state.registers
-            );
+            assert_hex_eq!(machine.cpu_state.registers.x0, 11 * 11,);
         }
     }
 }

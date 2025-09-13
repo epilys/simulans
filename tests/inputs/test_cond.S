@@ -3,14 +3,14 @@
 // Set and Clear NZCV field macros, equivalent C code:
 // ```c
 // #include <stdint.h>
-// 
+//
 // enum NZCVBit {
 //   N = 31,
 //   Z = 30,
 //   C = 29,
 //   V = 28,
 // };
-// 
+//
 // #define CLEAR(field)                                                           \
 //   void clear##field(void) {                                                    \
 //     uint64_t nzcv;                                                             \
@@ -18,7 +18,7 @@
 //     nzcv &= ~(1 << (field));                                                   \
 //     __asm volatile("msr NZCV, %0" ::"r"(nzcv) :);                              \
 //   }
-// 
+//
 // #define SET(field)                                                             \
 //   void set##field(void) {                                                      \
 //     uint64_t nzcv;                                                             \
@@ -26,18 +26,18 @@
 //     nzcv |= 1 << (field);                                                      \
 //     __asm volatile("msr NZCV, %0" ::"r"(nzcv) :);                              \
 //   }
-// 
+//
 // #define DEF(field)                                                             \
 //   CLEAR(field);                                                                \
 //   SET(field);
-// 
+//
 // DEF(N);
 // DEF(Z);
 // DEF(C);
 // DEF(V);
 //```
 
-.macro clearN 
+.macro clearN
   mrs     x30, NZCV
   and     x30, x30, #0x7fffffff
   msr     NZCV, x30
