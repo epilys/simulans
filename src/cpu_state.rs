@@ -104,18 +104,6 @@ pub struct RegisterFile {
     pub sp_el1: u64,
     pub sp_el2: u64,
     pub sp_el3: u64,
-    pub sctlr_el1: u64,
-    pub sctlr_el2: u64,
-    pub sctlr_el3: u64,
-    pub cpacr_el1: u64,
-    /// Hypervisor Configuration Register
-    ///
-    /// Controls virtualization settings and trapping of exceptions to EL2.
-    pub hcr_el2: u64,
-    /// Secure Configuration Register
-    ///
-    /// Controls Secure state and trapping of exceptions to EL3
-    pub scr_el3: u64,
     pub spsr_el1: u64,
     pub spsr_el2: u64,
     pub spsr_el3: u64,
@@ -526,6 +514,24 @@ pub struct ExceptionRegisterFile {
     pub vbar_el3: u64,
 }
 
+/// Misc control registers.
+#[derive(Default, Debug)]
+#[repr(C)]
+pub struct ControlRegisterFile {
+    pub sctlr_el1: u64,
+    pub sctlr_el2: u64,
+    pub sctlr_el3: u64,
+    pub cpacr_el1: u64,
+    /// Hypervisor Configuration Register
+    ///
+    /// Controls virtualization settings and trapping of exceptions to EL2.
+    pub hcr_el2: u64,
+    /// Secure Configuration Register
+    ///
+    /// Controls Secure state and trapping of exceptions to EL3
+    pub scr_el3: u64,
+}
+
 /// All execution state of a processing element.
 #[repr(C)]
 #[derive(Default, Debug)]
@@ -540,6 +546,8 @@ pub struct ExecutionState {
     pub mmu_registers: MMURegisterFile,
     /// Exception handling registers
     pub exception_registers: ExceptionRegisterFile,
+    /// Control registers
+    pub control_registers: ControlRegisterFile,
     /// Exit request to be serviced on main execution loop.
     pub exit_request: Option<ExitRequest>,
     /// Architectural features this CPU supports.
@@ -639,12 +647,6 @@ impl ExecutionState {
             sp_el2 => SysReg::SP_EL2,
             // [ref:FIXME]: bad64 doesn't have an SP_EL3 variant.
             // sp_el3 => SysReg::SP_EL3,
-            sctlr_el1 => SysReg::SCTLR_EL1,
-            sctlr_el2 => SysReg::SCTLR_EL2,
-            sctlr_el3 => SysReg::SCTLR_EL3,
-            cpacr_el1 => SysReg::CPACR_EL1,
-            hcr_el2 => SysReg::HCR_EL2,
-            scr_el3 => SysReg::SCR_EL3,
             spsr_el3 =>  SysReg::SPSR_EL3,
             spsr_el1 => SysReg::SPSR_EL1,
         }
@@ -747,12 +749,6 @@ impl ExecutionState {
                 sp_el2 => SysReg::SP_EL2,
                 // sp_el3 => SysReg::SP_EL3,
                 // [ref:FIXME]: bad64 doesn't have an SP_EL3 variant.
-                sctlr_el1 => SysReg::SCTLR_EL1,
-                sctlr_el2 => SysReg::SCTLR_EL2,
-                sctlr_el3 => SysReg::SCTLR_EL3,
-                cpacr_el1 => SysReg::CPACR_EL1,
-                hcr_el2 => SysReg::HCR_EL2,
-                scr_el3 => SysReg::SCR_EL3,
                 spsr_el3 =>  SysReg::SPSR_EL3,
                 spsr_el1 => SysReg::SPSR_EL1,
             };

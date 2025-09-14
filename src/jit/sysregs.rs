@@ -89,6 +89,12 @@ impl BlockTranslator<'_> {
             SysReg::ELR_EL1 => register_field!(read self, exception_registers.elr_el1),
             SysReg::ELR_EL2 => register_field!(read self, exception_registers.elr_el2),
             SysReg::ELR_EL3 => register_field!(read self, exception_registers.elr_el3),
+            SysReg::SCTLR_EL1 => register_field!(read self, control_registers.sctlr_el1),
+            SysReg::SCTLR_EL2 => register_field!(read self, control_registers.sctlr_el2),
+            SysReg::SCTLR_EL3 => register_field!(read self, control_registers.sctlr_el3),
+            SysReg::CPACR_EL1 => register_field!(read self, control_registers.cpacr_el1),
+            SysReg::HCR_EL2 => register_field!(read self, control_registers.hcr_el2),
+            SysReg::SCR_EL3 => register_field!(read self, control_registers.scr_el3),
             _ => {
                 let var = *self.sysreg_to_var(reg, false);
                 self.builder.use_var(var)
@@ -125,6 +131,12 @@ impl BlockTranslator<'_> {
             SysReg::ELR_EL1 => register_field!(write self, value, exception_registers.elr_el1),
             SysReg::ELR_EL2 => register_field!(write self, value, exception_registers.elr_el2),
             SysReg::ELR_EL3 => register_field!(write self, value, exception_registers.elr_el3),
+            SysReg::SCTLR_EL1 => register_field!(write self, value, control_registers.sctlr_el1),
+            SysReg::SCTLR_EL2 => register_field!(write self, value, control_registers.sctlr_el2),
+            SysReg::SCTLR_EL3 => register_field!(write self, value, control_registers.sctlr_el3),
+            SysReg::CPACR_EL1 => register_field!(write self, value, control_registers.cpacr_el1),
+            SysReg::HCR_EL2 => register_field!(write self, value, control_registers.hcr_el2),
+            SysReg::SCR_EL3 => register_field!(write self, value, control_registers.scr_el3),
             _ => {
                 let target = *self.sysreg_to_var(reg, true);
                 self.builder.def_var(target, value);

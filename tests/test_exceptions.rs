@@ -46,8 +46,8 @@ fn test_exception_levels() {
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
     let stack_post = machine.cpu_state.registers.sp;
     assert_eq!(stack_post, stack_pre);
-    assert_eq!(machine.cpu_state.registers.hcr_el2, 0x80000018);
-    assert_eq!(machine.cpu_state.registers.scr_el3, 0xd0f);
+    assert_eq!(machine.cpu_state.control_registers.hcr_el2, 0x80000018);
+    assert_eq!(machine.cpu_state.control_registers.scr_el3, 0xd0f);
     assert_hex_eq!(machine.cpu_state.exception_registers.elr_el1, 0x58);
     assert_hex_eq!(machine.cpu_state.registers.x0, 0x58);
 }

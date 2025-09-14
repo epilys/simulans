@@ -133,7 +133,7 @@ pub extern "C" fn aarch64_undefined(
     let route_to_el2 =
         matches!(current_el, ExceptionLevel::EL0) && machine.cpu_state.EL2_enabled() && {
             // HCR_EL2.TGE == '1';
-            machine.cpu_state.registers.hcr_el2 & (1 << 27) > 0
+            machine.cpu_state.control_registers.hcr_el2 & (1 << 27) > 0
         };
     let vect_offset = Address(0x0);
     let except = ExceptionRecord::exception_syndrome(Exception::Uncategorized);
