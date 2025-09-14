@@ -553,6 +553,7 @@ struct BlockTranslator<'a> {
 struct TypedRegisterView {
     var: Variable,
     width: Width,
+    shift: Option<Width>,
     extend_to: Option<Width>,
     element: Option<ArrSpec>,
 }
@@ -1070,29 +1071,32 @@ impl BlockTranslator<'_> {
         self.write_to_simd |= write;
 
         let reg_no = *reg as u32;
-        let (i, width) = if ((Reg::V0 as u32)..=(Reg::V31 as u32)).contains(&reg_no) {
-            (reg_no - (Reg::V0 as u32), Width::_128)
+        let (i, width, shift) = if ((Reg::V0 as u32)..=(Reg::V31 as u32)).contains(&reg_no) {
+            (reg_no - (Reg::V0 as u32), Width::_128, None)
         } else if ((Reg::Q0 as u32)..=(Reg::Q31 as u32)).contains(&reg_no) {
             // Registers Q0-Q31 map directly to registers V0-V31.
-            (reg_no - (Reg::Q0 as u32), Width::_128)
+            (reg_no - (Reg::Q0 as u32), Width::_128, None)
         } else if ((Reg::D0 as u32)..=(Reg::D31 as u32)).contains(&reg_no) {
-            (reg_no - (Reg::D0 as u32), Width::_64)
+            (reg_no - (Reg::D0 as u32), Width::_64, None)
         } else if ((Reg::S0 as u32)..=(Reg::S31 as u32)).contains(&reg_no) {
             // 32 bits
-            // [ref:FIXME]: even Sd and odd Sd+1 refer to different things
-            (reg_no - (Reg::S0 as u32), Width::_32)
+            let no = reg_no - (Reg::S0 as u32);
+            let shift = if no % 2 == 0 { Some(Width::_32) } else { None };
+            let reg_no = no / 2;
+            (reg_no, Width::_32, shift)
         } else if ((Reg::H0 as u32)..=(Reg::H31 as u32)).contains(&reg_no) {
             // 16 bits
-            (reg_no - (Reg::H0 as u32), Width::_16)
+            (reg_no - (Reg::H0 as u32), Width::_16, None)
         } else {
             // 8 bits
             assert!(((Reg::B0 as u32)..=(Reg::B31 as u32)).contains(&reg_no));
-            (reg_no - (Reg::B0 as u32), Width::_8)
+            (reg_no - (Reg::B0 as u32), Width::_8, None)
         };
         let reg = Reg::from_u32(i + Reg::V0 as u32).unwrap();
         TypedRegisterView {
             var: self.registers[&reg],
             width,
+            shift,
             extend_to: if matches!(width, Width::_128) {
                 None
             } else {
@@ -1161,6 +1165,7 @@ impl BlockTranslator<'_> {
                 return TypedRegisterView {
                     var: self.registers[&Reg::XZR],
                     width: Width::_32,
+                    shift: None,
                     extend_to: Some(Width::_64),
                     element,
                 }
@@ -1169,6 +1174,7 @@ impl BlockTranslator<'_> {
                 return TypedRegisterView {
                     var: self.registers[reg],
                     width: Width::_64,
+                    shift: None,
                     extend_to: None,
                     element,
                 };
@@ -1185,6 +1191,7 @@ impl BlockTranslator<'_> {
         TypedRegisterView {
             var: self.registers[&reg_64],
             width: Width::_32,
+            shift: None,
             extend_to: Some(Width::_64),
             element,
         }
@@ -1210,6 +1217,19 @@ impl BlockTranslator<'_> {
                 }
                 Some(ArrSpec::EightBytes(None)) => value,
                 Some(ArrSpec::TwoDoubles(None)) => value,
+                Some(ArrSpec::OneSingle(Some(lane))) => {
+                    // I32X2 would be more appropriate but cranelift ICEs with
+                    // Compilation(Unsupported("should be implemented in ISLE: inst = `v164 =
+                    // extractlane.i32x2 v163, 0`, type = `Some(types::I32)`"))
+                    value = self
+                        .builder
+                        .ins()
+                        .bitcast(I32X4, MEMFLAG_LITTLE_ENDIAN, value);
+                    value = self.builder.ins().extractlane(value, lane as u8);
+                    self.builder
+                        .ins()
+                        .bitcast(I32, MEMFLAG_LITTLE_ENDIAN, value)
+                }
                 Some(ArrSpec::SixteenBytes(None)) => value,
                 other => unreachable!("{other:?}"),
             },
@@ -1363,11 +1383,14 @@ impl BlockTranslator<'_> {
         macro_rules! write_to_register {
             ($target:expr, $val:expr$(,)?) => {{
                 let val: TypedValue = $val;
-                let target: TypedRegisterView = $target;
+                let TypedRegisterView {
+                    var,
+                    width,
+                    shift,
+                    extend_to,
+                    element: _,
+                } = $target;
 
-                let width = target.width;
-                let extend_to = target.extend_to;
-                let var = target.var;
                 let mut value = val.value;
 
                 let mut current_width = val.width;
@@ -1378,6 +1401,9 @@ impl BlockTranslator<'_> {
                         current_width = extend_to;
                     }
                 }
+                if let Some(shift) = shift {
+                    value = self.builder.ins().ishl_imm(value, shift as i64);
+                }
                 if width > current_width {
                     value = self.builder.ins().uextend(width.into(), value);
                 }
@@ -1385,11 +1411,14 @@ impl BlockTranslator<'_> {
             }};
             (signed $target:expr, $val:expr$(,)?) => {{
                 let val: TypedValue = $val;
-                let target: TypedRegisterView = $target;
+                let TypedRegisterView {
+                    var,
+                    width,
+                    extend_to,
+                    shift,
+                    element: _,
+                } = $target;
 
-                let width = target.width;
-                let extend_to = target.extend_to;
-                let var = target.var;
                 let mut value = val.value;
 
                 let mut current_width = val.width;
@@ -1399,6 +1428,9 @@ impl BlockTranslator<'_> {
                         value = self.builder.ins().sextend(extend_to.into(), value);
                         current_width = extend_to;
                     }
+                }
+                if let Some(shift) = shift {
+                    value = self.builder.ins().ishl_imm(value, shift as i64);
                 }
                 if width > current_width {
                     value = self.builder.ins().sextend(width.into(), value);

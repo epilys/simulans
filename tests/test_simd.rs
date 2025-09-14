@@ -62,4 +62,6 @@ fn test_simd_mov() {
     assert_hex_eq!(128 machine.cpu_state.vector_registers[3], 0x01000100010001000100010001000100_u128);
     assert_hex_eq!(128 machine.cpu_state.vector_registers[4], 0x0100000001000000_u128);
     assert_hex_eq!(128 machine.cpu_state.vector_registers[5], 0x0001ffff0001ffff_u128);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[13], 0x80808080u64 << 32);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[14], 0x80808080u64);
 }
