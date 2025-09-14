@@ -1218,7 +1218,7 @@ impl BlockTranslator<'_> {
                 Some(ArrSpec::EightBytes(None)) => value,
                 Some(ArrSpec::TwoDoubles(None)) => value,
                 Some(ArrSpec::OneSingle(Some(lane))) => {
-                    // I32X2 would be more appropriate but cranelift ICEs with
+                    // [ref:cranelift_ice]: I32X2 would be more appropriate but cranelift ICEs with
                     // Compilation(Unsupported("should be implemented in ISLE: inst = `v164 =
                     // extractlane.i32x2 v163, 0`, type = `Some(types::I32)`"))
                     value = self
@@ -2535,10 +2535,12 @@ impl BlockTranslator<'_> {
                 // [ref:atomics]: We don't model exclusive access (yet).
             }
             Op::CLS => {
-                // Count leading sign bits.
+                // Count leading sign bits. (broken in cranelift)
+                // [ref:needs_unit_test]
                 let target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[1]);
+                // [ref:cranelift_ice]: should be implemented in ISLE: inst = `v194 = cls.i32 v193`, type = `Some(types::I32)`
                 let value = self.builder.ins().cls(value);
                 write_to_register!(target, TypedValue { value, width });
             }
@@ -2614,10 +2616,9 @@ impl BlockTranslator<'_> {
             Op::CMTST => todo!(),
             Op::CNOT => todo!(),
             Op::CNT => {
-                // Count bits
-                // This instruction counts the number of binary one bits in the value of the
-                // source register, and writes the result to the destination
-                // register. [ref:needs_unit_test]
+                // Count bits that are one
+                // [ref:FEAT_CSSC]
+                // [ref:needs_unit_test]
                 let target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[1]);
@@ -3251,7 +3252,7 @@ impl BlockTranslator<'_> {
                 // every vector element of the destination SIMD&FP register.
                 let target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
-                // [ref:FIXME]: Cranelift ICEs with "should be implemented in ISLE:" error when
+                // [ref:cranelift_ice]: Cranelift ICEs with "should be implemented in ISLE:" error when
                 // using 64-bit vector types, so use 128-bit types and reduce them to I64 type
                 // manually.
                 let (reduce, vector_type, value) = match target.element {

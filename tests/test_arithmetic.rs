@@ -170,3 +170,23 @@ fn test_mul() {
         ((x0 as u128 * x2 as u128) >> 64) as u64
     );
 }
+
+#[test_log::test]
+fn test_bit_counts() {
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_bit_counts.bin");
+    // _ = simulans::disas(TEST_INPUT, 0);
+
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+
+    let entry_point = Address(0);
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+
+    assert_hex_eq!(machine.cpu_state.registers.x2, 64);
+    assert_hex_eq!(machine.cpu_state.registers.x3, 48);
+
+    assert_hex_eq!(machine.cpu_state.registers.x4, 32);
+    assert_hex_eq!(machine.cpu_state.registers.x5, 16);
+}

@@ -48,6 +48,8 @@
 //!   implemented correctly.`
 //! - `[tag:verify_implementation]: Code that we should look back at with fresh
 //!   eyes.`
+//! - `[tag:cranelift_ice]: Cranelift throws internal error such as "should be
+//!   implemented in ISLE"`
 //!
 //! ### Architectural feature tags
 //!
