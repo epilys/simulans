@@ -375,7 +375,9 @@ impl GdbStubRunner {
             AArch64RegId::SCTLR_EL2 => read_64bit_reg!(self.machine.cpu_state.registers.sctlr_el2),
             AArch64RegId::SCTLR_EL3 => read_64bit_reg!(self.machine.cpu_state.registers.sctlr_el3),
             AArch64RegId::CPACR_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.cpacr_el1),
-            AArch64RegId::VBAR_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.vbar_el1),
+            AArch64RegId::VBAR_EL1 => {
+                read_64bit_reg!(self.machine.cpu_state.exception_registers.vbar_el1)
+            }
             AArch64RegId::HCR_EL2 => read_64bit_reg!(self.machine.cpu_state.registers.hcr_el2),
             AArch64RegId::SCR_EL3 => read_64bit_reg!(self.machine.cpu_state.registers.scr_el3),
             AArch64RegId::VPIDR_EL2 => {
@@ -384,9 +386,15 @@ impl GdbStubRunner {
             AArch64RegId::SPSR_EL3 => {
                 read_64bit_reg!(self.machine.cpu_state.registers.spsr_el3)
             }
-            AArch64RegId::ELR_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.elr_el1),
-            AArch64RegId::ELR_EL2 => read_64bit_reg!(self.machine.cpu_state.registers.elr_el2),
-            AArch64RegId::ELR_EL3 => read_64bit_reg!(self.machine.cpu_state.registers.elr_el3),
+            AArch64RegId::ELR_EL1 => {
+                read_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el1)
+            }
+            AArch64RegId::ELR_EL2 => {
+                read_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el2)
+            }
+            AArch64RegId::ELR_EL3 => {
+                read_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el3)
+            }
             // AArch64RegId::OSDTRRX_EL1 => Ok(0),
             // AArch64RegId::DBGBVR0_EL1 => Ok(0),
             // AArch64RegId::DBGBCR0_EL1 => Ok(0),
@@ -478,7 +486,9 @@ impl GdbStubRunner {
             AArch64RegId::SCTLR_EL2 => write_64bit_reg!(self.machine.cpu_state.registers.sctlr_el2),
             AArch64RegId::SCTLR_EL3 => write_64bit_reg!(self.machine.cpu_state.registers.sctlr_el3),
             AArch64RegId::CPACR_EL1 => write_64bit_reg!(self.machine.cpu_state.registers.cpacr_el1),
-            AArch64RegId::VBAR_EL1 => write_64bit_reg!(self.machine.cpu_state.registers.vbar_el1),
+            AArch64RegId::VBAR_EL1 => {
+                write_64bit_reg!(self.machine.cpu_state.exception_registers.vbar_el1)
+            }
             AArch64RegId::HCR_EL2 => write_64bit_reg!(self.machine.cpu_state.registers.hcr_el2),
             AArch64RegId::SCR_EL3 => write_64bit_reg!(self.machine.cpu_state.registers.scr_el3),
             AArch64RegId::VPIDR_EL2 => {
@@ -487,9 +497,15 @@ impl GdbStubRunner {
             AArch64RegId::SPSR_EL3 => {
                 self.machine.cpu_state.registers.spsr_el3 = u64::from_ne_bytes(val_64);
             }
-            AArch64RegId::ELR_EL1 => write_64bit_reg!(self.machine.cpu_state.registers.elr_el1),
-            AArch64RegId::ELR_EL2 => write_64bit_reg!(self.machine.cpu_state.registers.elr_el2),
-            AArch64RegId::ELR_EL3 => write_64bit_reg!(self.machine.cpu_state.registers.elr_el3),
+            AArch64RegId::ELR_EL1 => {
+                write_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el1)
+            }
+            AArch64RegId::ELR_EL2 => {
+                write_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el2)
+            }
+            AArch64RegId::ELR_EL3 => {
+                write_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el3)
+            }
             _ => return Err(TargetError::NonFatal),
         }
         Ok(())

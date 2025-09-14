@@ -48,7 +48,7 @@ fn test_exception_levels() {
     assert_eq!(stack_post, stack_pre);
     assert_eq!(machine.cpu_state.registers.hcr_el2, 0x80000018);
     assert_eq!(machine.cpu_state.registers.scr_el3, 0xd0f);
-    assert_hex_eq!(machine.cpu_state.registers.elr_el1, 0x58);
+    assert_hex_eq!(machine.cpu_state.exception_registers.elr_el1, 0x58);
     assert_hex_eq!(machine.cpu_state.registers.x0, 0x58);
 }
 
@@ -66,7 +66,7 @@ fn test_eret_to_el0() {
     machine.cpu_state.registers.spsr_el1 = spsr_el1.into();
 
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-    assert_hex_eq!(machine.cpu_state.registers.elr_el1, 0x14);
+    assert_hex_eq!(machine.cpu_state.exception_registers.elr_el1, 0x14);
     assert_eq!(machine.cpu_state.PSTATE().EL(), ExceptionLevel::EL0);
 }
 

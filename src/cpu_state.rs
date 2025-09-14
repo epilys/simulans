@@ -108,12 +108,6 @@ pub struct RegisterFile {
     pub sctlr_el2: u64,
     pub sctlr_el3: u64,
     pub cpacr_el1: u64,
-    // Vector Based Address Register Holds the exception base address for any exception that is
-    // taken to ELn.
-    /// EL1 Vector Based Address Register
-    pub vbar_el1: u64,
-    // pub vbar_el2: u64,
-    // pub vbar_el3: u64,
     /// Hypervisor Configuration Register
     ///
     /// Controls virtualization settings and trapping of exceptions to EL2.
@@ -125,10 +119,6 @@ pub struct RegisterFile {
     pub spsr_el1: u64,
     pub spsr_el2: u64,
     pub spsr_el3: u64,
-    pub elr_el1: u64,
-    pub elr_el2: u64,
-    pub elr_el3: u64,
-    pub esr_el1: u64,
     pub pstate: u64,
 }
 
@@ -488,6 +478,54 @@ pub struct MMURegisterFile {
     pub contextidr_el1: u64,
 }
 
+/// Exception handling registers
+#[derive(Default, Debug)]
+#[repr(C)]
+pub struct ExceptionRegisterFile {
+    /// Exception return register, EL1
+    pub elr_el1: u64,
+    /// Exception return register, EL2
+    pub elr_el2: u64,
+    /// Exception return register, EL3
+    pub elr_el3: u64,
+    /// Auxiliary Fault Status Register 0, EL1, EL2, and EL3 (32-bit)
+    pub afsr0_el1: u64,
+    /// Auxiliary Fault Status Register 1, EL1, EL2, and EL3 (32-bit)
+    pub afsr1_el1: u64,
+    /// Exception Syndrome Register, EL1 (32-bit)
+    pub esr_el1: u64,
+    /// Instruction Fault Status Register, EL2 (32-bit)
+    pub ifsr32_el2: u64,
+    /// Auxiliary Fault Status Register 0, EL1, EL2, and EL3 (32-bit)
+    pub afsr0_el2: u64,
+    /// Auxiliary Fault Status Register 1, EL1, EL2, and EL3 (32-bit)
+    pub afsr1_el2: u64,
+    /// Exception Syndrome Register, EL2 (32-bit)
+    pub esr_el2: u64,
+    /// Auxiliary Fault Status Register 0, EL1, EL2, and EL3 (32-bit)
+    pub afsr0_el3: u64,
+    /// Auxiliary Fault Status Register 1, EL1, EL2, and EL3 (32-bit)
+    pub afsr1_el3: u64,
+    /// Exception Syndrome Register, EL3 (32-bit)
+    pub esr_el3: u64,
+    /// Fault Address Register, EL1
+    pub far_el1: u64,
+    /// Fault Address Register, EL2
+    pub far_el2: u64,
+    /// Hypervisor IPA Fault Address Register, EL2
+    pub hpfar_el2: u64,
+    /// Fault Address Register, EL3
+    pub far_el3: u64,
+    /// Vector Base Address Register, EL1
+    pub vbar_el1: u64,
+    /// Interrupt Status Register, EL1
+    pub isr_el1: u64,
+    /// Vector Base Address Register, EL2
+    pub vbar_el2: u64,
+    /// Vector Base Address Register, EL3
+    pub vbar_el3: u64,
+}
+
 /// All execution state of a processing element.
 #[repr(C)]
 #[derive(Default, Debug)]
@@ -500,6 +538,8 @@ pub struct ExecutionState {
     pub id_registers: IDRegisterFile,
     /// MMU registers.
     pub mmu_registers: MMURegisterFile,
+    /// Exception handling registers
+    pub exception_registers: ExceptionRegisterFile,
     /// Exit request to be serviced on main execution loop.
     pub exit_request: Option<ExitRequest>,
     /// Architectural features this CPU supports.
@@ -603,15 +643,10 @@ impl ExecutionState {
             sctlr_el2 => SysReg::SCTLR_EL2,
             sctlr_el3 => SysReg::SCTLR_EL3,
             cpacr_el1 => SysReg::CPACR_EL1,
-            vbar_el1 => SysReg::VBAR_EL1,
             hcr_el2 => SysReg::HCR_EL2,
             scr_el3 => SysReg::SCR_EL3,
             spsr_el3 =>  SysReg::SPSR_EL3,
-            elr_el1 => SysReg::ELR_EL1,
-            elr_el2 => SysReg::ELR_EL2,
-            elr_el3 => SysReg::ELR_EL3,
             spsr_el1 => SysReg::SPSR_EL1,
-            esr_el1 => SysReg::ESR_EL1,
         }
         reg_field! {
             x0 => Reg::X0,
@@ -716,15 +751,10 @@ impl ExecutionState {
                 sctlr_el2 => SysReg::SCTLR_EL2,
                 sctlr_el3 => SysReg::SCTLR_EL3,
                 cpacr_el1 => SysReg::CPACR_EL1,
-                vbar_el1 => SysReg::VBAR_EL1,
                 hcr_el2 => SysReg::HCR_EL2,
                 scr_el3 => SysReg::SCR_EL3,
                 spsr_el3 =>  SysReg::SPSR_EL3,
-                elr_el1 => SysReg::ELR_EL1,
-                elr_el2 => SysReg::ELR_EL2,
-                elr_el3 => SysReg::ELR_EL3,
                 spsr_el1 => SysReg::SPSR_EL1,
-                esr_el1 => SysReg::ESR_EL1,
             };
         }
         reg_field! {
@@ -811,7 +841,7 @@ impl ExecutionState {
     /// Returns `VBAR_ELx` register value depending on current exception level.
     pub fn vbar_elx(&self) -> u64 {
         match self.PSTATE().EL() {
-            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.vbar_el1,
+            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.exception_registers.vbar_el1,
             other => unimplemented!("other vbar for {other:?}"),
         }
     }
@@ -819,18 +849,18 @@ impl ExecutionState {
     /// Returns `ELR_ELx` register value depending on current exception level.
     pub fn elr_elx(&self) -> Address {
         match self.PSTATE().EL() {
-            ExceptionLevel::EL0 | ExceptionLevel::EL1 => Address(self.registers.elr_el1),
-            ExceptionLevel::EL2 => Address(self.registers.elr_el2),
-            ExceptionLevel::EL3 => Address(self.registers.elr_el3),
+            ExceptionLevel::EL0 | ExceptionLevel::EL1 => Address(self.exception_registers.elr_el1),
+            ExceptionLevel::EL2 => Address(self.exception_registers.elr_el2),
+            ExceptionLevel::EL3 => Address(self.exception_registers.elr_el3),
         }
     }
 
     /// Sets `ELR_ELx` register value depending on current exception level.
     pub fn set_elr_elx(&mut self, val: u64) {
         match self.PSTATE().EL() {
-            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.registers.elr_el1 = val,
-            ExceptionLevel::EL2 => self.registers.elr_el2 = val,
-            ExceptionLevel::EL3 => self.registers.elr_el3 = val,
+            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.exception_registers.elr_el1 = val,
+            ExceptionLevel::EL2 => self.exception_registers.elr_el2 = val,
+            ExceptionLevel::EL3 => self.exception_registers.elr_el3 = val,
         }
     }
 
