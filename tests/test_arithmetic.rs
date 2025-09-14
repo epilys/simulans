@@ -139,3 +139,34 @@ fn test_bitfields_signed() {
         machine.cpu_state.registers.x3,
     );
 }
+
+#[test_log::test]
+fn test_mul() {
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_mul.bin");
+    // _ = simulans::disas(TEST_INPUT, 0);
+
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+
+    let entry_point = Address(0);
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+    let x0 = machine.cpu_state.registers.x0;
+    let x1 = machine.cpu_state.registers.x1;
+    let x2 = machine.cpu_state.registers.x2;
+    assert_hex_eq!(
+        machine.cpu_state.registers.x3,
+        ((x2 as u32) - (x0 as u32 * x1 as u32)) as u64
+    );
+    assert_hex_eq!(machine.cpu_state.registers.x4, x2 - (x0 * x1));
+    assert_hex_eq!(machine.cpu_state.registers.x5, (-((x0 * x1) as i64)) as u64);
+    assert_hex_eq!(
+        machine.cpu_state.registers.x5,
+        machine.cpu_state.registers.x6
+    );
+    assert_hex_eq!(
+        machine.cpu_state.registers.x7,
+        ((x0 as u128 * x2 as u128) >> 64) as u64
+    );
+}

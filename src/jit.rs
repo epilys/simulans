@@ -1950,7 +1950,6 @@ impl BlockTranslator<'_> {
                 write_to_register!(target, TypedValue { value, width });
             }
             Op::MSUB => {
-                // [ref:needs_unit_test]
                 // Multiply-subtract
                 let destination = get_destination_register!();
                 let n = self.translate_operand(&instruction.operands()[1]);
@@ -3236,7 +3235,16 @@ impl BlockTranslator<'_> {
             Op::MATCH => todo!(),
             Op::MLA => todo!(),
             Op::MLS => todo!(),
-            Op::MNEG => todo!(),
+            Op::MNEG => {
+                // Alias of MSUB
+                let destination = get_destination_register!();
+                let n = self.translate_operand(&instruction.operands()[1]);
+                let m = self.translate_operand(&instruction.operands()[2]);
+                let value = self.builder.ins().imul(n, m);
+                let value = self.builder.ins().ineg(value);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(destination, TypedValue { value, width });
+            }
             Op::MOVA => todo!(),
             Op::MOVI => {
                 // Move Immediate (vector). This instruction places an immediate constant into
@@ -4096,7 +4104,6 @@ impl BlockTranslator<'_> {
             Op::UMOV => todo!(),
             Op::UMSUBL => todo!(),
             Op::UMULH => {
-                // [ref:needs_unit_test]
                 let target = get_destination_register!();
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
