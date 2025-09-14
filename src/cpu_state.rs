@@ -479,6 +479,13 @@ pub struct MMURegisterFile {
     pub mair_el1: u64,
     // pub mair_el2: u64,
     // pub mair_el3: u64,
+    /// Auxiliary Memory Attribute Indirection Register (EL1)
+    ///
+    /// Register contents are implementation defined and not assigned any
+    /// meaning by the spec.
+    pub amair_el1: u64,
+    /// Context ID Register (EL1)
+    pub contextidr_el1: u64,
 }
 
 /// All execution state of a processing element.

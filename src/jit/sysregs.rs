@@ -82,6 +82,8 @@ impl BlockTranslator<'_> {
             SysReg::TTBR1_EL1 => register_field!(read self, mmu_registers.ttbr1_el1),
             SysReg::VTTBR_EL2 => register_field!(read self, mmu_registers.vttbr_el2),
             SysReg::MAIR_EL1 => register_field!(read self, mmu_registers.mair_el1),
+            SysReg::AMAIR_EL1 => register_field!(read self, mmu_registers.amair_el1),
+            SysReg::CONTEXTIDR_EL1 => register_field!(read self, mmu_registers.contextidr_el1),
             _ => {
                 let var = *self.sysreg_to_var(reg, false);
                 self.builder.use_var(var)
@@ -109,6 +111,10 @@ impl BlockTranslator<'_> {
             SysReg::TTBR1_EL1 => register_field!(write self, value, mmu_registers.ttbr1_el1),
             SysReg::VTTBR_EL2 => register_field!(write self, value, mmu_registers.vttbr_el2),
             SysReg::MAIR_EL1 => register_field!(write self, value, mmu_registers.mair_el1),
+            SysReg::AMAIR_EL1 => register_field!(write self, value, mmu_registers.amair_el1),
+            SysReg::CONTEXTIDR_EL1 => {
+                register_field!(write self, value, mmu_registers.contextidr_el1)
+            }
             _ => {
                 let target = *self.sysreg_to_var(reg, true);
                 self.builder.def_var(target, value);
