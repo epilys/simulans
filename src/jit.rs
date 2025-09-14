@@ -375,12 +375,6 @@ impl JitContext {
             )
             .into());
         };
-        let mut decoded_iter = bad64::disasm(
-            &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
-                .try_into()
-                .unwrap()..],
-            program_counter,
-        );
 
         let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
 
@@ -446,11 +440,60 @@ impl JitContext {
             module: &self.module,
             registers,
             sys_registers,
+            loopback_blocks: IndexMap::default(),
         };
+        if !self.single_step {
+            for ins in bad64::disasm(
+                &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
+                    .try_into()
+                    .unwrap()..],
+                program_counter,
+            ) {
+                let ins = ins.map_err(|err| format!("Error decoding instruction: {}", err))?;
+                use bad64::Op;
+                let label_idx = match ins.op() {
+                    Op::CBNZ | Op::CBZ => 1,
+                    Op::TBNZ | Op::TBZ => 2,
+                    Op::B_AL
+                    | Op::B_CC
+                    | Op::B_CS
+                    | Op::B_EQ
+                    | Op::B_GE
+                    | Op::B_GT
+                    | Op::B_HI
+                    | Op::B_LE
+                    | Op::B_LS
+                    | Op::B_LT
+                    | Op::B_MI
+                    | Op::B_NE
+                    | Op::B_NV
+                    | Op::B_PL
+                    | Op::B_VC
+                    | Op::B_VS => 0,
+                    Op::B | Op::BR | Op::BL | Op::BLR | Op::RET | Op::UDF | Op::ERET => break,
+                    _ => continue,
+                };
+
+                let label = match ins.operands()[label_idx] {
+                    bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
+                    _ => unreachable!(),
+                };
+                if label >= program_counter && label < ins.address() {
+                    let ins_block = trans.builder.create_block();
+                    trans.loopback_blocks.insert(label, ins_block);
+                }
+            }
+        }
         let mut next_pc = None;
         let mut prev_pc = program_counter;
         let mut last_pc = program_counter;
         // Translate each decoded instruction
+        let mut decoded_iter = bad64::disasm(
+            &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
+                .try_into()
+                .unwrap()..],
+            program_counter,
+        );
         if let Some(first) = decoded_iter.next() {
             let first = first.map_err(|err| format!("Error decoding instruction: {}", err))?;
             last_pc = first.address();
@@ -523,7 +566,14 @@ impl JitContext {
                 trans.emit_halt();
             }
         }
-        let BlockTranslator { builder, .. } = trans;
+        let BlockTranslator {
+            mut builder,
+            loopback_blocks,
+            ..
+        } = trans;
+        for (_, block) in loopback_blocks.into_iter() {
+            builder.seal_block(block);
+        }
 
         // Tell the builder we're done with this block (function in Cranelift terms).
         builder.finalize();
@@ -547,6 +597,7 @@ struct BlockTranslator<'a> {
     address_lookup_sigref: codegen::ir::SigRef,
     registers: IndexMap<bad64::Reg, Variable>,
     sys_registers: IndexMap<bad64::SysReg, Variable>,
+    loopback_blocks: IndexMap<u64, Block>,
 }
 
 #[derive(Debug)]
@@ -803,7 +854,7 @@ impl BlockTranslator<'_> {
         self.write_sysreg(&bad64::SysReg::NZCV, value);
     }
 
-    fn branch_if_non_zero(&mut self, test_value: Value, label_value: Value) {
+    fn branch_if_non_zero(&mut self, test_value: Value, label: u64) {
         let branch_not_taken_block = self.builder.create_block();
         let branch_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
@@ -812,7 +863,12 @@ impl BlockTranslator<'_> {
             .brif(test_value, branch_block, &[], branch_not_taken_block, &[]);
         self.builder.switch_to_block(branch_block);
         self.builder.seal_block(branch_block);
-        self.emit_jump(self.address, label_value);
+        if let Some(loopback_block) = self.loopback_blocks.get(&label).copied() {
+            self.builder.ins().jump(loopback_block, &[]);
+        } else {
+            let label_value = self.builder.ins().iconst(I64, label as i64);
+            self.emit_jump(self.address, label_value);
+        }
         self.builder.switch_to_block(branch_not_taken_block);
         self.builder.seal_block(branch_not_taken_block);
         self.builder.ins().nop();
@@ -1366,6 +1422,10 @@ impl BlockTranslator<'_> {
         use bad64::Op;
 
         self.address = instruction.address();
+        if let Some(loopback_block) = self.loopback_blocks.get(&instruction.address()).copied() {
+            self.builder.ins().jump(loopback_block, &[]);
+            self.builder.switch_to_block(loopback_block);
+        }
         if cfg!(feature = "accurate-pc") {
             let pc_value = self
                 .builder
@@ -1450,8 +1510,7 @@ impl BlockTranslator<'_> {
                         other
                     ),
                 };
-                let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(result, label_value);
+                self.branch_if_non_zero(result, label);
             }};
         }
         macro_rules! ands {
@@ -2092,8 +2151,7 @@ impl BlockTranslator<'_> {
                         .ins()
                         .icmp_imm(cranelift::prelude::IntCC::NotEqual, operand1, 0);
                 let is_zero_value = self.builder.ins().uextend(I64, is_zero_value);
-                let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(is_zero_value, label_value);
+                self.branch_if_non_zero(is_zero_value, label);
             }
             Op::CBZ => {
                 let operand1 = self.translate_operand(&instruction.operands()[0]);
@@ -2106,8 +2164,7 @@ impl BlockTranslator<'_> {
                         .ins()
                         .icmp_imm(cranelift::prelude::IntCC::Equal, operand1, 0);
                 let is_not_zero_value = self.builder.ins().uextend(I64, is_not_zero_value);
-                let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(is_not_zero_value, label_value);
+                self.branch_if_non_zero(is_not_zero_value, label);
             }
             // Bit-ops
             Op::BFI => {
@@ -3927,8 +3984,7 @@ impl BlockTranslator<'_> {
                         .ins()
                         .icmp_imm(cranelift::prelude::IntCC::NotEqual, result, 0);
                 let is_not_zero_value = self.builder.ins().uextend(I64, is_not_zero_value);
-                let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(is_not_zero_value, label_value);
+                self.branch_if_non_zero(is_not_zero_value, label);
             }
             Op::TBX => todo!(),
             Op::TBZ => {
@@ -3954,8 +4010,7 @@ impl BlockTranslator<'_> {
                         .ins()
                         .icmp_imm(cranelift::prelude::IntCC::Equal, result, 0);
                 let is_zero_value = self.builder.ins().uextend(I64, is_zero_value);
-                let label_value = self.builder.ins().iconst(I64, label as i64);
-                self.branch_if_non_zero(is_zero_value, label_value);
+                self.branch_if_non_zero(is_zero_value, label);
             }
             Op::TCANCEL => todo!(),
             Op::TCOMMIT => todo!(),
