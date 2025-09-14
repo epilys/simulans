@@ -97,7 +97,6 @@ pub struct RegisterFile {
     pub x29: u64,
     // Link Register can be referred to as LR
     pub x30: u64,
-    pub xzr: u64,
     /// Selected `SP` based on current Exception Level and PSTATE's [`SpSel`].
     pub sp: u64,
     pub sp_el0: u64,
@@ -682,8 +681,15 @@ impl ExecutionState {
             x28 => Reg::X28,
             x29 => Reg::X29,
             x30 => Reg::X30,
-            xzr => Reg::XZR,
             sp => Reg::SP,
+        }
+        {
+            let zero = builder.ins().iconst(I64, 0);
+            let var = Variable::new(registers.len() + sys_registers.len());
+            debug_assert!(!registers.contains_key(&Reg::XZR));
+            registers.insert(Reg::XZR, var);
+            builder.declare_var(var, I64);
+            builder.def_var(var, zero);
         }
         let vector_addr = builder
             .ins()
