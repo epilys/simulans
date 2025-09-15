@@ -333,16 +333,13 @@ impl JitContext {
         // SAFETY: the function signature has been defined to take two pointers as
         // parameters and return a pointer. This is safe to transmute as long as
         // we hold the contract that the generated function has this type.
-        let code = unsafe {
-            std::mem::transmute::<
-                *const u8,
-                for<'a, 'b> extern "C" fn(&'a mut Jit, &'b mut Armv8AMachine) -> Entry,
-            >(self.module.get_finalized_function(id))
+        let entry = unsafe {
+            std::mem::transmute::<*const u8, Entry>(self.module.get_finalized_function(id))
         };
         Ok(EntryBlock {
             start: program_counter,
             end: last_pc,
-            entry: Entry(code),
+            entry,
             ctx: self.module,
         })
     }
