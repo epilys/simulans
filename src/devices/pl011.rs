@@ -473,7 +473,6 @@ impl crate::memory::DeviceMemoryOps for PL011MemoryOps {
                 // ??? Check if transmitter is enabled.
                 let ch: [u8; 1] = [value as u8];
                 char_backend.write_all(&ch).unwrap();
-                char_backend.flush().unwrap();
             }
 
             let mut regs = self.regs.lock().unwrap();
