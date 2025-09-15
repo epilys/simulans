@@ -69,34 +69,29 @@ pub struct Entry(
 #[no_mangle]
 pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> Entry {
     let pc: u64 = machine.pc;
-    if jit.single_step {
-        // Do not cache single step blocks
-        jit.translation_blocks.invalidate(pc);
-        let context = JitContext::new(true);
-        let block = context.compile(machine, pc).unwrap();
-        let next_entry = block.entry;
-        jit.translation_blocks.insert(block);
-        return next_entry;
-    }
     if tracing::event_enabled!(target: tracing::TraceItem::BlockEntry.as_str(), tracing::Level::TRACE)
     {
         crate::cpu_state::print_registers(machine);
     }
     if let Some(tb) = jit.translation_blocks.get(&pc) {
-        tracing::event!(
-            target: tracing::TraceItem::LookupBlock.as_str(),
-            tracing::Level::TRACE,
-            pc = ?Address(pc),
-            "re-using cached block for 0x{:x}-0x{:x}",
-            pc,
-            tb.start
-        );
-        // let mem_region = machine.memory.find_region(Address(pc)).unwrap();
-        // let mmapped_region = mem_region.as_mmap().unwrap();
-        // let input = &mmapped_region.as_ref()[(pc -
-        // mem_region.phys_offset.0).try_into().unwrap()..]     [..(tb.start as
-        // usize - pc as usize + 4)]; _ = crate::disas(input, pc);
-        return tb.entry;
+        if jit.single_step != tb.single_step {
+            jit.translation_blocks.invalidate(pc);
+        } else {
+            tracing::event!(
+                target: tracing::TraceItem::LookupBlock.as_str(),
+                tracing::Level::TRACE,
+                pc = ?Address(pc),
+                "re-using cached block for 0x{:x}-0x{:x}",
+                pc,
+                tb.start
+            );
+            // let mem_region = machine.memory.find_region(Address(pc)).unwrap();
+            // let mmapped_region = mem_region.as_mmap().unwrap();
+            // let input = &mmapped_region.as_ref()[(pc -
+            // mem_region.phys_offset.0).try_into().unwrap()..]     [..(tb.start as
+            // usize - pc as usize + 4)]; _ = crate::disas(input, pc);
+            return tb.entry;
+        }
     }
     tracing::event!(
         target: tracing::TraceItem::LookupBlock.as_str(),
@@ -105,7 +100,7 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
         "generating block",
     );
 
-    let new_ctx = JitContext::new(false);
+    let new_ctx = JitContext::new(jit.single_step);
     let block = new_ctx.compile(machine, pc).unwrap();
     let next_entry = block.entry;
     jit.translation_blocks.insert(block);
@@ -358,6 +353,7 @@ impl JitContext {
             start: program_counter,
             end: last_pc,
             entry,
+            single_step: self.single_step,
             ctx: self.module,
         })
     }

@@ -37,6 +37,8 @@ pub struct TranslationBlock {
     pub end: u64,
     /// The translated function entry.
     pub entry: Entry,
+    /// Compiled for single step execution.
+    pub single_step: bool,
     /// The JIT context, used to free the memory.
     pub ctx: cranelift_jit::JITModule,
 }
