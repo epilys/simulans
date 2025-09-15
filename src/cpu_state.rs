@@ -35,29 +35,17 @@ use crate::{memory::Address, tracing};
 const TRUSTED_MEMFLAGS: MemFlags =
     MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
 
-/// Helper method to print register state on block entry/exit for trace items
-/// [`BlockEntry`](tracing::TraceItem::BlockEntry) and
-/// [`BlockExit`](tracing::TraceItem::BlockExit).
-pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine, is_entry: bool) {
-    if is_entry {
-        tracing::event!(
-            target: tracing::TraceItem::BlockEntry.as_str(),
-            tracing::Level::TRACE,
-            "entering block pc = 0x{:x}, prev_pc = 0x{:x} with registers:\n{:#?}",
-            machine.pc,
-            machine.prev_pc,
-            machine.cpu_state.registers
-        );
-    } else {
-        tracing::event!(
-            target: tracing::TraceItem::BlockExit.as_str(),
-            tracing::Level::TRACE,
-            "exiting block from 0x{:x} to pc 0x{:x} with registers:\n{:#?}",
-            machine.prev_pc,
-            machine.pc,
-            machine.cpu_state.registers
-        );
-    }
+/// Helper method to print register state on block entry/exit for trace item
+/// [`BlockEntry`](tracing::TraceItem::BlockEntry)
+pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine) {
+    tracing::event!(
+        target: tracing::TraceItem::BlockEntry.as_str(),
+        tracing::Level::TRACE,
+        "entering block pc = 0x{:x}, prev_pc = 0x{:x} with registers:\n{:#?}",
+        machine.pc,
+        machine.prev_pc,
+        machine.cpu_state.registers
+    );
 }
 
 /// Regular registers.

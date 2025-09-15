@@ -78,6 +78,10 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
         jit.translation_blocks.insert(block);
         return next_entry;
     }
+    if tracing::event_enabled!(target: tracing::TraceItem::BlockEntry.as_str(), tracing::Level::TRACE)
+    {
+        crate::cpu_state::print_registers(machine);
+    }
     if let Some(tb) = jit.translation_blocks.get(&pc) {
         tracing::event!(
             target: tracing::TraceItem::LookupBlock.as_str(),
@@ -394,17 +398,6 @@ impl JitContext {
         let mut registers = IndexMap::new();
         let mut sys_registers = IndexMap::new();
 
-        let registers_sigref = {
-            let mut sig = self.module.make_signature();
-            sig.params
-                .push(AbiParam::new(self.module.target_config().pointer_type()));
-            sig.params.push(AbiParam::new(I8));
-            builder.import_signature(sig)
-        };
-        let registers_print_func = builder.ins().iconst(
-            I64,
-            crate::cpu_state::print_registers as usize as u64 as i64,
-        );
         // Declare variables for each register.
         // Emit code to load register values into variables.
         cpu_state.load_cpu_state(&mut builder, &mut registers, &mut sys_registers);
@@ -432,8 +425,6 @@ impl JitContext {
             memops_table,
             cpu_state,
             machine_ptr,
-            registers_print_func,
-            registers_sigref,
             address_lookup_sigref,
             builder,
             module: &self.module,
@@ -590,8 +581,6 @@ struct BlockTranslator<'a> {
     cpu_state: &'a mut ExecutionState,
     machine_ptr: Value,
     pointer_type: Type,
-    registers_print_func: Value,
-    registers_sigref: codegen::ir::SigRef,
     memops_table: MemOpsTable,
     address_lookup_sigref: codegen::ir::SigRef,
     registers: IndexMap<bad64::Reg, Variable>,
@@ -4325,15 +4314,6 @@ impl BlockTranslator<'_> {
             //     self.machine_ptr,
             //     std::mem::offset_of!(Armv8AMachine, lookup_block_func) as i32,
             // );
-            {
-                let false_value = self.builder.ins().iconst(I8, 0);
-                let call = self.builder.ins().call_indirect(
-                    self.registers_sigref,
-                    self.registers_print_func,
-                    &[self.machine_ptr, false_value],
-                );
-                self.builder.inst_results(call);
-            }
             let translate_func = self
                 .builder
                 .ins()

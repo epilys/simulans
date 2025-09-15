@@ -48,8 +48,6 @@ pub enum TraceItem {
     AddressLookup,
     /// Logs registers when entering a translated block.
     BlockEntry,
-    /// Logs registers when exiting a translated block.
-    BlockExit,
     /// Enables `cranelift_codegen` crate tracing.
     CraneliftCodegen,
     /// Enables `cranelift_frontend` crate tracing.
@@ -77,7 +75,6 @@ impl TraceItem {
     pub const POSSIBLE_VALUES: &[Self] = &[
         Self::AddressLookup,
         Self::BlockEntry,
-        Self::BlockExit,
         Self::CraneliftCodegen,
         Self::CraneliftFrontend,
         Self::CraneliftJit,
@@ -95,7 +92,6 @@ impl TraceItem {
         match self {
             Self::AddressLookup => "address_lookup",
             Self::BlockEntry => "block_entry",
-            Self::BlockExit => "block_exit",
             Self::CraneliftCodegen => "cranelift_codegen",
             Self::CraneliftFrontend => "cranelift_frontend",
             Self::CraneliftJit => "cranelift_jit",
