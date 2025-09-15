@@ -56,8 +56,10 @@ pub enum TraceItem {
     CraneliftJit,
     /// Logs exceptions.
     Exception,
-    /// Logs gdbstub related events.
+    /// Logs gdb related events.
     Gdb,
+    /// Logs `gdbstub` crate tracing.
+    Gdbstub,
     /// Logs `aarch64` assembly of translated blocks.
     InAsm,
     /// Logs JIT related events.
@@ -80,6 +82,7 @@ impl TraceItem {
         Self::CraneliftJit,
         Self::Exception,
         Self::Gdb,
+        Self::Gdbstub,
         Self::InAsm,
         Self::Jit,
         Self::LookupBlock,
@@ -87,8 +90,27 @@ impl TraceItem {
         Self::Pl011,
     ];
 
-    /// Snake case representation of item.
+    /// Target path of item.
     pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AddressLookup => "simulans::address_lookup",
+            Self::BlockEntry => "simulans::block_entry",
+            Self::CraneliftCodegen => "cranelift_codegen",
+            Self::CraneliftFrontend => "cranelift_frontend",
+            Self::CraneliftJit => "cranelift_jit",
+            Self::Exception => "simulans::exception",
+            Self::Gdb => "simulans::gdb",
+            Self::Gdbstub => "gdbstub",
+            Self::InAsm => "simulans::in_asm",
+            Self::Jit => "simulans::jit",
+            Self::LookupBlock => "simulans::lookup_block",
+            Self::Memory => "simulans::memory",
+            Self::Pl011 => "simulans::pl011",
+        }
+    }
+
+    /// Snake case representation of item.
+    pub const fn name(&self) -> &'static str {
         match self {
             Self::AddressLookup => "address_lookup",
             Self::BlockEntry => "block_entry",
@@ -97,6 +119,7 @@ impl TraceItem {
             Self::CraneliftJit => "cranelift_jit",
             Self::Exception => "exception",
             Self::Gdb => "gdb",
+            Self::Gdbstub => "gdbstub",
             Self::InAsm => "in_asm",
             Self::Jit => "jit",
             Self::LookupBlock => "lookup_block",
@@ -108,7 +131,7 @@ impl TraceItem {
 
 impl std::fmt::Display for TraceItem {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(fmt, "{}", self.as_str())
+        write!(fmt, "{}", self.name())
     }
 }
 
@@ -235,9 +258,9 @@ impl TracingGuard {
             .unwrap_or_default();
         for item in TraceItem::POSSIBLE_VALUES {
             env_filter = if events.contains(item) {
-                env_filter.add_directive(format!("{item}=trace").parse().unwrap())
+                env_filter.add_directive(format!("{}=trace", item.as_str()).parse().unwrap())
             } else {
-                env_filter.add_directive(format!("{item}=off").parse().unwrap())
+                env_filter.add_directive(format!("{}=off", item.as_str()).parse().unwrap())
             };
         }
         env_filter
