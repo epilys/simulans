@@ -253,7 +253,13 @@ impl GdbStubRunner {
         max_bytes: usize,
     ) -> TargetResult<Box<[u8]>, GdbStub> {
         let start_address = Address(start_address);
-        tracing::info!("reading memory from {}", start_address);
+        tracing::event!(
+            target: tracing::TraceItem::Gdb.as_str(),
+            tracing::Level::TRACE,
+            start_address = ?start_address,
+            max_bytes = max_bytes,
+            "reading memory",
+        );
         let Some(mem_region) = self.machine.memory.find_region(start_address) else {
             tracing::error!(
                 "Cannot read from address {} which is not covered by a RAM memory region.",
@@ -281,7 +287,13 @@ impl GdbStubRunner {
         value: &[u8],
     ) -> TargetResult<(), GdbStub> {
         let start_address = Address(start_address);
-        tracing::info!("writing to {} in memory", start_address);
+        tracing::event!(
+            target: tracing::TraceItem::Gdb.as_str(),
+            tracing::Level::TRACE,
+            start_address = ?start_address,
+            value = ?value,
+            "writing memory",
+        );
         let Some(mem_region) = self.machine.memory.find_region_mut(start_address) else {
             tracing::error!(
                 "Cannot write to address {} which is not covered by a RAM memory region.",
@@ -1032,7 +1044,11 @@ impl SingleRegisterAccess<()> for GdbStub {
 impl SingleThreadResume for GdbStub {
     #[inline(always)]
     fn resume(&mut self, _signal: Option<Signal>) -> Result<(), Self::Error> {
-        tracing::info!("resume/continue called");
+        tracing::event!(
+            target: tracing::TraceItem::Gdb.as_str(),
+            tracing::Level::TRACE,
+            "resume/continue called",
+        );
         // self.jit.single_step = false;
         self.send_request(GdbStubRequest::Resume);
         Ok(())
@@ -1047,7 +1063,11 @@ impl SingleThreadResume for GdbStub {
 impl SingleThreadSingleStep for GdbStub {
     #[inline(always)]
     fn step(&mut self, _signal: Option<Signal>) -> Result<(), Self::Error> {
-        tracing::info!("step called");
+        tracing::event!(
+            target: tracing::TraceItem::Gdb.as_str(),
+            tracing::Level::TRACE,
+            "single step",
+        );
         self.send_request(GdbStubRequest::SingleStep);
         Ok(())
     }
