@@ -65,7 +65,7 @@ pub enum TraceItem {
     /// Logs JIT related events.
     Jit,
     /// Logs lookup of translated blocks.
-    LookupEntry,
+    LookupBlock,
     /// Logs memory accesses.
     Memory,
     /// Logs [`PL011State`](crate::devices::PL011State`) related events.
@@ -85,7 +85,7 @@ impl TraceItem {
         Self::Gdb,
         Self::InAsm,
         Self::Jit,
-        Self::LookupEntry,
+        Self::LookupBlock,
         Self::Memory,
         Self::Pl011,
     ];
@@ -103,7 +103,7 @@ impl TraceItem {
             Self::Gdb => "gdb",
             Self::InAsm => "in_asm",
             Self::Jit => "jit",
-            Self::LookupEntry => "lookup_entry",
+            Self::LookupBlock => "lookup_block",
             Self::Memory => "memory",
             Self::Pl011 => "pl011",
         }

@@ -34,13 +34,13 @@ use std::{
 
 use crate::{
     cpu_state::*,
-    jit::{lookup_entry, Entry},
+    jit::{lookup_block, Entry},
     memory::*,
     tracing,
 };
 
-mod entry_blocks;
-pub use entry_blocks::{EntryBlock, EntryBlocks};
+mod translation_blocks;
+pub use translation_blocks::{TranslationBlock, TranslationBlocks};
 
 #[repr(C)]
 /// A resolved address for a translated block.
@@ -90,7 +90,7 @@ pub struct Armv8AMachine {
     /// Current memory map.
     pub memory: MemoryMap,
     /// Function to call to look up translated blocks.
-    pub lookup_entry_func: Entry,
+    pub lookup_block_func: Entry,
     /// List of breakpoint addresses.
     pub hw_breakpoints: BTreeSet<Address>,
     /// Exit request field.
@@ -114,7 +114,7 @@ impl Armv8AMachine {
             prev_pc: 0,
             cpu_state: ExecutionState::default(),
             memory,
-            lookup_entry_func: Entry(lookup_entry),
+            lookup_block_func: Entry(lookup_block),
             hw_breakpoints: BTreeSet::new(),
             exit_request,
             in_breakpoint: false,

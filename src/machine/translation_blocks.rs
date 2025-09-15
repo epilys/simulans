@@ -20,7 +20,7 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-//! Translated entry block cache
+//! Translation block cache
 
 use std::{collections::BTreeMap, ops::RangeInclusive};
 
@@ -29,19 +29,19 @@ use crate::jit::Entry;
 #[must_use]
 /// A translated block of instructions.
 ///
-/// Before dropped, [`EntryBlock::free`] must be called.
-pub struct EntryBlock {
+/// Before dropped, [`TranslationBlock::free`] must be called.
+pub struct TranslationBlock {
     /// First instruction address.
     pub start: u64,
     /// Final instruction address (inclusive).
     pub end: u64,
-    /// The translated function.
+    /// The translated function entry.
     pub entry: Entry,
     /// The JIT context, used to free the memory.
     pub ctx: cranelift_jit::JITModule,
 }
 
-impl EntryBlock {
+impl TranslationBlock {
     /// Free JIT memory for this block.
     pub fn free(self) {
         let module = self.ctx;
@@ -51,25 +51,25 @@ impl EntryBlock {
 }
 
 /// Helper container struct for translated blocks.
-pub struct EntryBlocks {
-    /// A map from program counter entry to block.
-    pub entries: BTreeMap<u64, EntryBlock>,
+pub struct TranslationBlocks {
+    /// A map from program counter to block.
+    pub entries: BTreeMap<u64, TranslationBlock>,
 }
 
-impl Drop for EntryBlocks {
+impl Drop for TranslationBlocks {
     /// Frees block memory.
     fn drop(&mut self) {
         self.clear();
     }
 }
 
-impl Default for EntryBlocks {
+impl Default for TranslationBlocks {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl EntryBlocks {
+impl TranslationBlocks {
     #[inline]
     /// Create an empty container.
     pub fn new() -> Self {
@@ -80,13 +80,13 @@ impl EntryBlocks {
 
     #[inline]
     /// Get a translated block for this program counter.
-    pub fn get(&self, pc: &u64) -> Option<&EntryBlock> {
+    pub fn get(&self, pc: &u64) -> Option<&TranslationBlock> {
         self.entries.get(pc)
     }
 
     #[inline]
     /// Insert translated block.
-    pub fn insert(&mut self, block: EntryBlock) {
+    pub fn insert(&mut self, block: TranslationBlock) {
         let start = block.start;
         self.entries.insert(start, block);
     }
@@ -109,7 +109,7 @@ impl EntryBlocks {
             .collect::<Vec<_>>();
         if !invalidated_keys.is_empty() {
             tracing::trace!(
-                "Invalidating {} entry block{} at address 0x{:x}",
+                "Invalidating {} translation block{} at address 0x{:x}",
                 invalidated_keys.len(),
                 if invalidated_keys.len() == 1 { "" } else { "s" },
                 pc
@@ -133,7 +133,7 @@ impl EntryBlocks {
             .collect::<Vec<_>>();
         if !invalidated_keys.is_empty() {
             tracing::trace!(
-                "Invalidating {} entry block{} at address range 0x{:x}-0x{:x}",
+                "Invalidating {} translation block{} at address range 0x{:x}-0x{:x}",
                 invalidated_keys.len(),
                 if invalidated_keys.len() == 1 { "" } else { "s" },
                 range.start(),

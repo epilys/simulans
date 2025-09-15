@@ -92,7 +92,7 @@ define hook-stop
 end
 ```
 
-To inspect `machine` state, you can start the process by issuing a temporary break on the function that looks up or creates translation blocks, `lookup_entry`, to get the pointer of the `machine::Armv8AMachine` instance which is pinned in memory.
+To inspect `machine` state, you can start the process by issuing a temporary break on the function that looks up or creates translation blocks, `lookup_block`, to get the pointer of the `machine::Armv8AMachine` instance which is pinned in memory.
 
 Then, when stepping through JITed code, you can use the address to inspect its state.
 
@@ -101,11 +101,11 @@ Note that registers are only updated in the translation block epilogue.
 Example gdb session to demonstrate this:
 
 ```text
-(gdb) tbreak lookup_entry
+(gdb) tbreak lookup_block
 Temporary breakpoint 1 at 0x970aca: file src/jit.rs, line 41.
 (gdb) run
 Starting program: target/debug/simulans -vvv ./test_kernel/target/aarch64-unknown-none/release/test_kernel.bin
-Temporary breakpoint 1, simulans::jit::lookup_entry (context=0x5555568c1290, machine=0x5555568b2bd0) at src/jit.rs:41
+Temporary breakpoint 1, simulans::jit::lookup_block (context=0x5555568c1290, machine=0x5555568b2bd0) at src/jit.rs:41
 41          let pc: u64 = machine.pc;
 (gdb) print machine
 $1 = (*mut simulans::machine::Armv8AMachine) 0x5555568b2bd0

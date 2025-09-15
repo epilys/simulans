@@ -644,7 +644,7 @@ impl GdbStubRunner {
             addr
         );
         self.machine.hw_breakpoints.insert(Address(addr));
-        self.jit.entry_blocks.invalidate(addr);
+        self.jit.translation_blocks.invalidate(addr);
     }
 
     #[inline(always)]
@@ -657,7 +657,7 @@ impl GdbStubRunner {
         if !self.machine.hw_breakpoints.remove(&Address(addr)) {
             return false;
         }
-        self.jit.entry_blocks.invalidate(addr);
+        self.jit.translation_blocks.invalidate(addr);
         true
     }
 
@@ -715,8 +715,8 @@ impl GdbStubRunner {
                 GdbStubRequest::SingleStep => {
                     self_.jit.single_step = true;
                     let pc = self_.machine.pc;
-                    self_.jit.entry_blocks.invalidate(pc);
-                    let entry = crate::jit::lookup_entry(&mut self_.jit, &mut self_.machine);
+                    self_.jit.translation_blocks.invalidate(pc);
+                    let entry = crate::jit::lookup_block(&mut self_.jit, &mut self_.machine);
                     (entry.0)(&mut self_.jit, &mut self_.machine);
                     // self_.jit.single_step = false;
                     self_
@@ -766,7 +766,7 @@ impl GdbStubRunner {
                         }
                         if self.jit.single_step {
                             let pc = self.machine.pc;
-                            self.jit.entry_blocks.invalidate(pc);
+                            self.jit.translation_blocks.invalidate(pc);
                         }
                         if self
                             .machine
@@ -779,7 +779,7 @@ impl GdbStubRunner {
                             } else {
                                 let pc = self.machine.pc;
                                 self.machine.in_breakpoint = true;
-                                self.jit.entry_blocks.invalidate(pc);
+                                self.jit.translation_blocks.invalidate(pc);
                                 self.stop_sender
                                     .send(SingleThreadStopReason::HwBreak(()))
                                     .unwrap();
@@ -787,7 +787,7 @@ impl GdbStubRunner {
                                 continue 'main_loop;
                             }
                         }
-                        let entry = crate::jit::lookup_entry(&mut self.jit, &mut self.machine);
+                        let entry = crate::jit::lookup_block(&mut self.jit, &mut self.machine);
                         (entry.0)(&mut self.jit, &mut self.machine);
                         if self.jit.single_step {
                             // self.jit.single_step = false;
@@ -804,7 +804,7 @@ impl GdbStubRunner {
                         {
                             let pc = self.machine.pc;
                             self.machine.in_breakpoint = true;
-                            self.jit.entry_blocks.invalidate(pc);
+                            self.jit.translation_blocks.invalidate(pc);
                             self.stop_sender
                                 .send(SingleThreadStopReason::HwBreak(()))
                                 .unwrap();

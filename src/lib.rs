@@ -173,7 +173,7 @@ pub fn main_loop(
     if machine.pc == 0 {
         machine.pc = start_address.0;
     }
-    let mut func = machine.lookup_entry_func;
+    let mut func = machine.lookup_block_func;
     while machine.exit_request.load(Ordering::SeqCst) == 0 {
         func = (func.0)(&mut jit, machine);
     }

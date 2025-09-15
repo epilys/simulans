@@ -38,7 +38,7 @@ use num_traits::cast::FromPrimitive;
 
 use crate::{
     cpu_state::ExecutionState,
-    machine::{Armv8AMachine, EntryBlock, EntryBlocks},
+    machine::{Armv8AMachine, TranslationBlock, TranslationBlocks},
     memory::{Address, Width},
     tracing,
 };
@@ -64,26 +64,26 @@ pub struct Entry(
     pub for<'a, 'b> extern "C" fn(jit: &'a mut Jit, machine: &'b mut Armv8AMachine) -> Entry,
 );
 
-/// Lookup [`machine.pc`] in cached entry blocks
-/// ([`Armv8AMachine::entry_blocks`]).
+/// Lookup [`machine.pc`] in cached translation blocks
+/// ([`Armv8AMachine::translation_blocks`]).
 #[no_mangle]
-pub extern "C" fn lookup_entry(jit: &mut Jit, machine: &mut Armv8AMachine) -> Entry {
+pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> Entry {
     let pc: u64 = machine.pc;
     if jit.single_step {
         // Do not cache single step blocks
-        jit.entry_blocks.invalidate(pc);
+        jit.translation_blocks.invalidate(pc);
         let context = JitContext::new(true);
         let block = context.compile(machine, pc).unwrap();
         let next_entry = block.entry;
-        jit.entry_blocks.insert(block);
+        jit.translation_blocks.insert(block);
         return next_entry;
     }
-    if let Some(tb) = jit.entry_blocks.get(&pc) {
+    if let Some(tb) = jit.translation_blocks.get(&pc) {
         tracing::event!(
-            target: tracing::TraceItem::LookupEntry.as_str(),
+            target: tracing::TraceItem::LookupBlock.as_str(),
             tracing::Level::TRACE,
             pc = ?Address(pc),
-            "re-using cached entry for 0x{:x}-0x{:x}",
+            "re-using cached block for 0x{:x}-0x{:x}",
             pc,
             tb.start
         );
@@ -95,35 +95,35 @@ pub extern "C" fn lookup_entry(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
         return tb.entry;
     }
     tracing::event!(
-        target: tracing::TraceItem::LookupEntry.as_str(),
+        target: tracing::TraceItem::LookupBlock.as_str(),
         tracing::Level::TRACE,
         pc = ?Address(pc),
-        "generating entry",
+        "generating block",
     );
 
     let new_ctx = JitContext::new(false);
     let block = new_ctx.compile(machine, pc).unwrap();
     let next_entry = block.entry;
-    jit.entry_blocks.insert(block);
+    jit.translation_blocks.insert(block);
 
     tracing::event!(
-        target: tracing::TraceItem::LookupEntry.as_str(),
+        target: tracing::TraceItem::LookupBlock.as_str(),
         tracing::Level::TRACE,
         pc = ?Address(pc),
-        "returning generated entry",
+        "returning generated block",
     );
     next_entry
 }
 
 pub struct Jit {
-    pub entry_blocks: EntryBlocks,
+    pub translation_blocks: TranslationBlocks,
     pub single_step: bool,
 }
 
 impl Jit {
     pub fn new() -> Self {
         Self {
-            entry_blocks: EntryBlocks::new(),
+            translation_blocks: TranslationBlocks::new(),
             single_step: false,
         }
     }
@@ -282,7 +282,7 @@ impl JitContext {
         mut self,
         machine: &mut Armv8AMachine,
         program_counter: u64,
-    ) -> Result<EntryBlock, Box<dyn std::error::Error>> {
+    ) -> Result<TranslationBlock, Box<dyn std::error::Error>> {
         tracing::event!(
             target: tracing::TraceItem::Jit.as_str(),
             tracing::Level::TRACE,
@@ -338,7 +338,7 @@ impl JitContext {
         let entry = unsafe {
             std::mem::transmute::<*const u8, Entry>(self.module.get_finalized_function(id))
         };
-        Ok(EntryBlock {
+        Ok(TranslationBlock {
             start: program_counter,
             end: last_pc,
             entry,
@@ -4316,14 +4316,14 @@ impl BlockTranslator<'_> {
                 self.machine_ptr,
                 std::mem::offset_of!(Armv8AMachine, pc) as i32,
             );
-            // We don't change the lookup_entry_func so just use the function pointer of
-            // `lookup_entry` directly.
+            // We don't change the lookup_block_func so just use the function pointer of
+            // `lookup_block` directly.
             //
             // let translate_func = self.builder.ins().load(
             //     self.pointer_type,
             //     MemFlags::trusted(),
             //     self.machine_ptr,
-            //     std::mem::offset_of!(Armv8AMachine, lookup_entry_func) as i32,
+            //     std::mem::offset_of!(Armv8AMachine, lookup_block_func) as i32,
             // );
             {
                 let false_value = self.builder.ins().iconst(I8, 0);
@@ -4337,7 +4337,7 @@ impl BlockTranslator<'_> {
             let translate_func = self
                 .builder
                 .ins()
-                .iconst(I64, lookup_entry as usize as u64 as i64);
+                .iconst(I64, lookup_block as usize as u64 as i64);
             self.builder.ins().return_(&[translate_func]);
         }
     }
@@ -4385,7 +4385,7 @@ impl BlockTranslator<'_> {
             self.pointer_type,
             MemFlags::trusted(),
             self.machine_ptr,
-            std::mem::offset_of!(Armv8AMachine, lookup_entry_func) as i32,
+            std::mem::offset_of!(Armv8AMachine, lookup_block_func) as i32,
         );
         self.builder.ins().return_(&[translate_func]);
     }
@@ -4422,7 +4422,7 @@ impl BlockTranslator<'_> {
         let translate_func = self
             .builder
             .ins()
-            .iconst(I64, lookup_entry as usize as u64 as i64);
+            .iconst(I64, lookup_block as usize as u64 as i64);
         self.builder.ins().return_(&[translate_func]);
         ControlFlow::Break(Some(BlockExit::Exception))
     }
