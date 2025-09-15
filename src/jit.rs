@@ -4302,7 +4302,7 @@ impl BlockTranslator<'_> {
                     *write_to_simd,
                 );
             }
-            if cfg!(feature = "accurate-pc") {
+            {
                 let prev_pc = self.builder.ins().iconst(I64, prev_pc as i64);
                 self.builder.ins().store(
                     MemFlags::trusted(),
@@ -4393,7 +4393,7 @@ impl BlockTranslator<'_> {
 
     fn unconditional_jump_epilogue(&mut self, dest_label: Value) -> ControlFlow<Option<BlockExit>> {
         // [ref:can_trap]: Check `dest_label` alignment.
-        if cfg!(feature = "accurate-pc") {
+        {
             let pc = self.builder.ins().iconst(I64, self.address as i64);
             self.builder.ins().store(
                 MemFlags::trusted(),
@@ -4455,14 +4455,12 @@ impl BlockTranslator<'_> {
             );
         }
         let pc = self.builder.ins().iconst(I64, pc as i64);
-        if cfg!(feature = "accurate-pc") {
-            self.builder.ins().store(
-                MemFlags::trusted(),
-                pc,
-                self.machine_ptr,
-                std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
-            );
-        }
+        self.builder.ins().store(
+            MemFlags::trusted(),
+            pc,
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
+        );
         self.builder.ins().store(
             MemFlags::trusted(),
             pc,
