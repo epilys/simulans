@@ -608,10 +608,9 @@ impl ExecutionState {
                     let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
                     let offset = core::mem::offset_of!(RegisterFile, $field) $(+ $index * std::mem::size_of::<u128>())*;
                     let value = builder.ins().load(I64, TRUSTED_MEMFLAGS, addr, i32::try_from(offset).unwrap());
-                    let var = Variable::new(registers.len() + sys_registers.len());
                     assert!(!registers.contains_key(&$bad_reg));
+                    let var = builder.declare_var(I64);
                     registers.insert($bad_reg, var);
-                    builder.declare_var(var, I64);
                     builder.def_var(var, value);
                 )*
             }};
@@ -620,10 +619,9 @@ impl ExecutionState {
                     let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
                     let offset = core::mem::offset_of!(RegisterFile, $field);
                     let value = builder.ins().load(I64, TRUSTED_MEMFLAGS, addr, i32::try_from(offset).unwrap());
-                    let var = Variable::new(registers.len() + sys_registers.len());
                     assert!(!sys_registers.contains_key(&$bad_sys_reg));
+                    let var = builder.declare_var(I64);
                     sys_registers.insert($bad_sys_reg, var);
-                    builder.declare_var(var, I64);
                     builder.def_var(var, value);
                 )*
             }};
@@ -673,10 +671,9 @@ impl ExecutionState {
         }
         {
             let zero = builder.ins().iconst(I64, 0);
-            let var = Variable::new(registers.len() + sys_registers.len());
             debug_assert!(!registers.contains_key(&Reg::XZR));
+            let var = builder.declare_var(I64);
             registers.insert(Reg::XZR, var);
-            builder.declare_var(var, I64);
             builder.def_var(var, zero);
         }
         let vector_addr = builder
@@ -687,15 +684,11 @@ impl ExecutionState {
             assert!(!registers.contains_key(&v_reg));
             let offset = i * std::mem::size_of::<u128>() as u32;
             let offset = i32::try_from(offset).unwrap();
-            let v_value = builder.ins().load(
-                I128,
-                TRUSTED_MEMFLAGS,
-                vector_addr,
-                offset + std::mem::size_of::<u128>() as i32,
-            );
-            let v_var = Variable::new(registers.len() + sys_registers.len());
+            let v_value = builder
+                .ins()
+                .load(I128, TRUSTED_MEMFLAGS, vector_addr, offset as i32);
+            let v_var = builder.declare_var(I128);
             registers.insert(v_reg, v_var);
-            builder.declare_var(v_var, I128);
             builder.def_var(v_var, v_value);
         }
     }
