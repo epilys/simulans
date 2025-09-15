@@ -258,6 +258,18 @@ impl JitContext {
     /// Returns a new [`JitContext`].
     pub fn new(single_step: bool) -> Self {
         let mut flag_builder = settings::builder();
+        flag_builder.set("opt_level", "speed").unwrap();
+        flag_builder.set("regalloc_checker", "false").unwrap();
+        flag_builder
+            .set(
+                "enable_verifier",
+                if cfg!(debug_assertions) {
+                    "true"
+                } else {
+                    "false"
+                },
+            )
+            .unwrap();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
         flag_builder
             .set("enable_llvm_abi_extensions", "true")
