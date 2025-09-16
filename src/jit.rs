@@ -43,8 +43,10 @@ use crate::{
     tracing,
 };
 
+mod memory;
 mod sysregs;
 
+use memory::MemOpsTable;
 use sysregs::SysRegEncoding;
 
 const MEMFLAG_LITTLE_ENDIAN: MemFlags = MemFlags::new().with_endianness(Endianness::Little);
@@ -158,106 +160,6 @@ pub struct JitContext {
     /// functions.
     module: JITModule,
     single_step: bool,
-}
-
-struct MemOpsTable {
-    write_sigrefs: [codegen::ir::SigRef; 5],
-    read_sigrefs: [codegen::ir::SigRef; 5],
-}
-
-impl MemOpsTable {
-    fn write(&self, width: Width) -> (i64, &codegen::ir::SigRef) {
-        match width {
-            Width::_8 => (
-                crate::memory::ops::memory_region_write_8 as usize as u64 as i64,
-                &self.write_sigrefs[0],
-            ),
-            Width::_16 => (
-                crate::memory::ops::memory_region_write_16 as usize as u64 as i64,
-                &self.write_sigrefs[1],
-            ),
-            Width::_32 => (
-                crate::memory::ops::memory_region_write_32 as usize as u64 as i64,
-                &self.write_sigrefs[2],
-            ),
-            Width::_64 => (
-                crate::memory::ops::memory_region_write_64 as usize as u64 as i64,
-                &self.write_sigrefs[3],
-            ),
-            Width::_128 => (
-                crate::memory::ops::memory_region_write_128 as usize as u64 as i64,
-                &self.write_sigrefs[4],
-            ),
-        }
-    }
-
-    fn read(&self, width: Width) -> (i64, &codegen::ir::SigRef) {
-        match width {
-            Width::_8 => (
-                crate::memory::ops::memory_region_read_8 as usize as u64 as i64,
-                &self.read_sigrefs[0],
-            ),
-            Width::_16 => (
-                crate::memory::ops::memory_region_read_16 as usize as u64 as i64,
-                &self.read_sigrefs[1],
-            ),
-            Width::_32 => (
-                crate::memory::ops::memory_region_read_32 as usize as u64 as i64,
-                &self.read_sigrefs[2],
-            ),
-            Width::_64 => (
-                crate::memory::ops::memory_region_read_64 as usize as u64 as i64,
-                &self.read_sigrefs[3],
-            ),
-            Width::_128 => (
-                crate::memory::ops::memory_region_read_128 as usize as u64 as i64,
-                &self.read_sigrefs[4],
-            ),
-        }
-    }
-
-    fn new(module: &JITModule, builder: &mut FunctionBuilder<'_>) -> Self {
-        macro_rules! sigref {
-            (write $t:expr) => {{
-                let mut sig = module.make_signature();
-                sig.params
-                    .push(AbiParam::new(module.target_config().pointer_type()));
-                sig.params
-                    .push(AbiParam::new(module.target_config().pointer_type()));
-                sig.params.push(AbiParam::new($t));
-                builder.import_signature(sig)
-            }};
-            (read $t:expr) => {{
-                let mut sig = module.make_signature();
-                sig.params
-                    .push(AbiParam::new(module.target_config().pointer_type()));
-                sig.params
-                    .push(AbiParam::new(module.target_config().pointer_type()));
-                sig.returns.push(AbiParam::new($t));
-                builder.import_signature(sig)
-            }};
-        }
-        let write_sigrefs = [
-            sigref! { write I8 },
-            sigref! { write I16 },
-            sigref! { write I32 },
-            sigref! { write I64 },
-            sigref! { write I128 },
-        ];
-
-        let read_sigrefs = [
-            sigref! { read I8 },
-            sigref! { read I16 },
-            sigref! { read I32 },
-            sigref! { read I64 },
-            sigref! { read I128 },
-        ];
-
-        Self {
-            write_sigrefs,
-            read_sigrefs,
-        }
-    }
 }
 
 impl JitContext {
@@ -638,55 +540,6 @@ fn is_vector(reg: &bad64::Reg) -> bool {
 }
 
 impl BlockTranslator<'_> {
-    #[inline]
-    fn generate_write(&mut self, target_address: Value, value: Value, width: Width) {
-        let (write_func, sigref) = self.memops_table.write(width);
-        let address_lookup_func = self
-            .builder
-            .ins()
-            .iconst(I64, crate::machine::address_lookup as usize as u64 as i64);
-        let call = self.builder.ins().call_indirect(
-            self.address_lookup_sigref,
-            address_lookup_func,
-            &[self.machine_ptr, target_address],
-        );
-        let (memory_region_ptr, address_inside_region) = {
-            let results = self.builder.inst_results(call);
-            (results[0], results[1])
-        };
-        let write_func = self.builder.ins().iconst(I64, write_func);
-        let call = self.builder.ins().call_indirect(
-            *sigref,
-            write_func,
-            &[memory_region_ptr, address_inside_region, value],
-        );
-        self.builder.inst_results(call);
-    }
-
-    #[inline]
-    fn generate_read(&mut self, target_address: Value, width: Width) -> Value {
-        let (read_func, sigref) = self.memops_table.read(width);
-        let address_lookup_func = self
-            .builder
-            .ins()
-            .iconst(I64, crate::machine::address_lookup as usize as u64 as i64);
-        let call = self.builder.ins().call_indirect(
-            self.address_lookup_sigref,
-            address_lookup_func,
-            &[self.machine_ptr, target_address],
-        );
-        let resolved = {
-            let results = self.builder.inst_results(call);
-            [results[0], results[1]]
-        };
-        let read_func = self.builder.ins().iconst(I64, read_func);
-        let call = self
-            .builder
-            .ins()
-            .call_indirect(*sigref, read_func, &resolved);
-        self.builder.inst_results(call)[0]
-    }
-
     /// Perform `AddWithCarry` operation.
     ///
     /// Integer addition with carry input, returning result and NZCV flags
