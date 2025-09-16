@@ -71,7 +71,7 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
     let pc: u64 = machine.pc;
     if tracing::event_enabled!(target: tracing::TraceItem::BlockEntry.as_str(), tracing::Level::TRACE)
     {
-        crate::cpu_state::print_registers(machine);
+        crate::tracing::print_registers(machine);
     }
     if let Some(tb) = jit.translation_blocks.get(&pc) {
         if jit.single_step != tb.single_step {

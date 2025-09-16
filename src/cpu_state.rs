@@ -30,23 +30,10 @@ use cranelift::prelude::*;
 use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
-use crate::{memory::Address, tracing};
+use crate::memory::Address;
 
 const TRUSTED_MEMFLAGS: MemFlags =
     MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
-
-/// Helper method to print register state on block entry/exit for trace item
-/// [`BlockEntry`](tracing::TraceItem::BlockEntry)
-pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine) {
-    tracing::event!(
-        target: tracing::TraceItem::BlockEntry.as_str(),
-        tracing::Level::TRACE,
-        "entering block pc = 0x{:x}, prev_pc = 0x{:x} with registers:\n{:#?}",
-        machine.pc,
-        machine.prev_pc,
-        machine.cpu_state.registers
-    );
-}
 
 /// Regular registers.
 #[derive(Default, Debug)]

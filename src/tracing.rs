@@ -41,6 +41,39 @@ pub use ::tracing::{error, event, event_enabled, info, trace, warn, Level};
 pub use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::{prelude::*, reload, Layer};
 
+mod helpers {
+    /// Helper method to print register state on block entry/exit for trace item
+    /// [`BlockEntry`](tracing::TraceItem::BlockEntry)
+    pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine) {
+        tracing::event!(
+            target: crate::tracing::TraceItem::BlockEntry.as_str(),
+            tracing::Level::TRACE,
+            "entering block pc = 0x{:x}, prev_pc = 0x{:x} with registers: {:?}",
+            machine.pc,
+            machine.prev_pc,
+            RegisterFileDebug(&machine.cpu_state.registers)
+        );
+    }
+
+    struct RegisterFileDebug<'a>(&'a crate::cpu_state::RegisterFile);
+
+    impl<'a> std::fmt::Debug for RegisterFileDebug<'a> {
+        fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+            let mut f = fmt.debug_struct("RegisterFile");
+            macro_rules! print_reg {
+                ($($reg:ident),*$(,)?) => {{
+                    $(f.field(stringify!($reg), &format_args!("0x{:x}", self.0.$reg));)*
+                }};
+            }
+            print_reg! {x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30, sp, pstate};
+            let pstate: crate::cpu_state::PSTATE = self.0.pstate.into();
+            f.field("PSTATE", &pstate);
+            f.finish()
+        }
+    }
+}
+pub use helpers::*;
+
 #[derive(Copy, Clone, Ord, PartialOrd, PartialEq, Eq, Debug, clap::ValueEnum)]
 /// Trace item targets
 pub enum TraceItem {
