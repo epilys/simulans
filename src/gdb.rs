@@ -193,7 +193,7 @@ impl GdbStubRunner {
         regs.sp = self.machine.cpu_state.registers.sp;
         regs.pc = self.machine.pc;
         regs.cpsr = self.machine.cpu_state.registers.pstate as u32;
-        regs.v.fill(0);
+        regs.v = self.machine.cpu_state.vector_registers;
         regs.fpcr = 0;
         regs.fpsr = 0;
     }
@@ -368,7 +368,9 @@ impl GdbStubRunner {
             AArch64RegId::Pstate => {
                 read_64bit_reg!(self.machine.cpu_state.registers.pstate)
             }
-            AArch64RegId::V(_) => Ok(Box::new([0; 16])),
+            AArch64RegId::V(i) => {
+                read_64bit_reg!(self.machine.cpu_state.vector_registers[i as usize])
+            }
             AArch64RegId::SP_EL0 => read_64bit_reg!(self.machine.cpu_state.registers.sp_el0),
             AArch64RegId::SP_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.sp_el1),
             AArch64RegId::SP_EL2 => read_64bit_reg!(self.machine.cpu_state.registers.sp_el2),
