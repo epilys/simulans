@@ -549,8 +549,8 @@ pub mod ops {
                     tracing::Level::TRACE,
                     kind = "write",
                     size = stringify!($size),
-                    value,
-                    address = ?Address(address_inside_region)
+                    address = ?Address(address_inside_region),
+                    "value {value}=0x{value:x}=0b{value:b}",
                 );
                 match mem_region.backing {
                     MemoryBacking::Mmap(ref mut map @ MmappedMemory { .. }) => {
