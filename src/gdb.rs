@@ -322,104 +322,113 @@ impl GdbStubRunner {
     fn read_register(&self, reg_id: <AArch64 as Arch>::RegId) -> TargetResult<Box<[u8]>, GdbStub> {
         use gdbstub_arch::aarch64::reg::id::AArch64RegId;
 
-        macro_rules! read_64bit_reg {
+        macro_rules! read_reg {
             ($value:expr) => {{
                 Ok($value.to_le_bytes().into())
             }};
         }
         match reg_id {
-            AArch64RegId::X(0) => read_64bit_reg!(self.machine.cpu_state.registers.x0),
-            AArch64RegId::X(1) => read_64bit_reg!(self.machine.cpu_state.registers.x1),
-            AArch64RegId::X(2) => read_64bit_reg!(self.machine.cpu_state.registers.x2),
-            AArch64RegId::X(3) => read_64bit_reg!(self.machine.cpu_state.registers.x3),
-            AArch64RegId::X(4) => read_64bit_reg!(self.machine.cpu_state.registers.x4),
-            AArch64RegId::X(5) => read_64bit_reg!(self.machine.cpu_state.registers.x5),
-            AArch64RegId::X(6) => read_64bit_reg!(self.machine.cpu_state.registers.x6),
-            AArch64RegId::X(7) => read_64bit_reg!(self.machine.cpu_state.registers.x7),
-            AArch64RegId::X(8) => read_64bit_reg!(self.machine.cpu_state.registers.x8),
-            AArch64RegId::X(9) => read_64bit_reg!(self.machine.cpu_state.registers.x9),
-            AArch64RegId::X(10) => read_64bit_reg!(self.machine.cpu_state.registers.x10),
-            AArch64RegId::X(11) => read_64bit_reg!(self.machine.cpu_state.registers.x11),
-            AArch64RegId::X(12) => read_64bit_reg!(self.machine.cpu_state.registers.x12),
-            AArch64RegId::X(13) => read_64bit_reg!(self.machine.cpu_state.registers.x13),
-            AArch64RegId::X(14) => read_64bit_reg!(self.machine.cpu_state.registers.x14),
-            AArch64RegId::X(15) => read_64bit_reg!(self.machine.cpu_state.registers.x15),
-            AArch64RegId::X(16) => read_64bit_reg!(self.machine.cpu_state.registers.x16),
-            AArch64RegId::X(17) => read_64bit_reg!(self.machine.cpu_state.registers.x17),
-            AArch64RegId::X(18) => read_64bit_reg!(self.machine.cpu_state.registers.x18),
-            AArch64RegId::X(19) => read_64bit_reg!(self.machine.cpu_state.registers.x19),
-            AArch64RegId::X(20) => read_64bit_reg!(self.machine.cpu_state.registers.x20),
-            AArch64RegId::X(21) => read_64bit_reg!(self.machine.cpu_state.registers.x21),
-            AArch64RegId::X(22) => read_64bit_reg!(self.machine.cpu_state.registers.x22),
-            AArch64RegId::X(23) => read_64bit_reg!(self.machine.cpu_state.registers.x23),
-            AArch64RegId::X(24) => read_64bit_reg!(self.machine.cpu_state.registers.x24),
-            AArch64RegId::X(25) => read_64bit_reg!(self.machine.cpu_state.registers.x25),
-            AArch64RegId::X(26) => read_64bit_reg!(self.machine.cpu_state.registers.x26),
-            AArch64RegId::X(27) => read_64bit_reg!(self.machine.cpu_state.registers.x27),
-            AArch64RegId::X(28) => read_64bit_reg!(self.machine.cpu_state.registers.x28),
-            AArch64RegId::X(29) => read_64bit_reg!(self.machine.cpu_state.registers.x29),
-            AArch64RegId::X(30) => read_64bit_reg!(self.machine.cpu_state.registers.x30),
+            AArch64RegId::X(0) => read_reg!(self.machine.cpu_state.registers.x0),
+            AArch64RegId::X(1) => read_reg!(self.machine.cpu_state.registers.x1),
+            AArch64RegId::X(2) => read_reg!(self.machine.cpu_state.registers.x2),
+            AArch64RegId::X(3) => read_reg!(self.machine.cpu_state.registers.x3),
+            AArch64RegId::X(4) => read_reg!(self.machine.cpu_state.registers.x4),
+            AArch64RegId::X(5) => read_reg!(self.machine.cpu_state.registers.x5),
+            AArch64RegId::X(6) => read_reg!(self.machine.cpu_state.registers.x6),
+            AArch64RegId::X(7) => read_reg!(self.machine.cpu_state.registers.x7),
+            AArch64RegId::X(8) => read_reg!(self.machine.cpu_state.registers.x8),
+            AArch64RegId::X(9) => read_reg!(self.machine.cpu_state.registers.x9),
+            AArch64RegId::X(10) => read_reg!(self.machine.cpu_state.registers.x10),
+            AArch64RegId::X(11) => read_reg!(self.machine.cpu_state.registers.x11),
+            AArch64RegId::X(12) => read_reg!(self.machine.cpu_state.registers.x12),
+            AArch64RegId::X(13) => read_reg!(self.machine.cpu_state.registers.x13),
+            AArch64RegId::X(14) => read_reg!(self.machine.cpu_state.registers.x14),
+            AArch64RegId::X(15) => read_reg!(self.machine.cpu_state.registers.x15),
+            AArch64RegId::X(16) => read_reg!(self.machine.cpu_state.registers.x16),
+            AArch64RegId::X(17) => read_reg!(self.machine.cpu_state.registers.x17),
+            AArch64RegId::X(18) => read_reg!(self.machine.cpu_state.registers.x18),
+            AArch64RegId::X(19) => read_reg!(self.machine.cpu_state.registers.x19),
+            AArch64RegId::X(20) => read_reg!(self.machine.cpu_state.registers.x20),
+            AArch64RegId::X(21) => read_reg!(self.machine.cpu_state.registers.x21),
+            AArch64RegId::X(22) => read_reg!(self.machine.cpu_state.registers.x22),
+            AArch64RegId::X(23) => read_reg!(self.machine.cpu_state.registers.x23),
+            AArch64RegId::X(24) => read_reg!(self.machine.cpu_state.registers.x24),
+            AArch64RegId::X(25) => read_reg!(self.machine.cpu_state.registers.x25),
+            AArch64RegId::X(26) => read_reg!(self.machine.cpu_state.registers.x26),
+            AArch64RegId::X(27) => read_reg!(self.machine.cpu_state.registers.x27),
+            AArch64RegId::X(28) => read_reg!(self.machine.cpu_state.registers.x28),
+            AArch64RegId::X(29) => read_reg!(self.machine.cpu_state.registers.x29),
+            AArch64RegId::X(30) => read_reg!(self.machine.cpu_state.registers.x30),
             AArch64RegId::X(other) => {
                 tracing::error!("GDB requested read of invalid register x{other}");
                 Err(TargetError::NonFatal)
             }
-            AArch64RegId::Sp => read_64bit_reg!(self.machine.cpu_state.registers.sp),
-            AArch64RegId::Pc => read_64bit_reg!(self.machine.pc),
+            AArch64RegId::Sp => read_reg!(self.machine.cpu_state.registers.sp),
+            AArch64RegId::Pc => read_reg!(self.machine.pc),
             AArch64RegId::Pstate => {
-                read_64bit_reg!(self.machine.cpu_state.registers.pstate)
+                read_reg!(self.machine.cpu_state.registers.pstate)
             }
-            AArch64RegId::V(i) => {
-                read_64bit_reg!(self.machine.cpu_state.vector_registers[i as usize])
-            }
-            AArch64RegId::SP_EL0 => read_64bit_reg!(self.machine.cpu_state.registers.sp_el0),
-            AArch64RegId::SP_EL1 => read_64bit_reg!(self.machine.cpu_state.registers.sp_el1),
-            AArch64RegId::SP_EL2 => read_64bit_reg!(self.machine.cpu_state.registers.sp_el2),
-            // AArch64RegId::SP_EL3 => read_64bit_reg!(self.machine.cpu_state.registers.sp_el3),
+            AArch64RegId::V(i) => self
+                .machine
+                .cpu_state
+                .vector_registers
+                .get(i as usize)
+                .map_or_else(
+                    || {
+                        tracing::error!("GDB requested read of invalid register v{i}");
+                        Err(TargetError::NonFatal)
+                    },
+                    |v| read_reg!(v),
+                ),
+            AArch64RegId::SP_EL0 => read_reg!(self.machine.cpu_state.registers.sp_el0),
+            AArch64RegId::SP_EL1 => read_reg!(self.machine.cpu_state.registers.sp_el1),
+            AArch64RegId::SP_EL2 => read_reg!(self.machine.cpu_state.registers.sp_el2),
+            // AArch64RegId::SP_EL3 => read_reg!(self.machine.cpu_state.registers.sp_el3),
             AArch64RegId::TTBR0_EL1 => {
-                read_64bit_reg!(self.machine.cpu_state.mmu_registers.ttbr0_el1)
+                read_reg!(self.machine.cpu_state.mmu_registers.ttbr0_el1)
             }
             AArch64RegId::VTTBR_EL2 => {
-                read_64bit_reg!(self.machine.cpu_state.mmu_registers.vttbr_el2)
+                read_reg!(self.machine.cpu_state.mmu_registers.vttbr_el2)
             }
             AArch64RegId::MAIR_EL1 => {
-                read_64bit_reg!(self.machine.cpu_state.mmu_registers.mair_el1)
+                read_reg!(self.machine.cpu_state.mmu_registers.mair_el1)
             }
-            AArch64RegId::TCR_EL1 => read_64bit_reg!(self.machine.cpu_state.mmu_registers.tcr_el1),
+            AArch64RegId::TCR_EL1 => read_reg!(self.machine.cpu_state.mmu_registers.tcr_el1),
             AArch64RegId::SCTLR_EL1 => {
-                read_64bit_reg!(self.machine.cpu_state.control_registers.sctlr_el1)
+                read_reg!(self.machine.cpu_state.control_registers.sctlr_el1)
             }
             AArch64RegId::SCTLR_EL2 => {
-                read_64bit_reg!(self.machine.cpu_state.control_registers.sctlr_el2)
+                read_reg!(self.machine.cpu_state.control_registers.sctlr_el2)
             }
             AArch64RegId::SCTLR_EL3 => {
-                read_64bit_reg!(self.machine.cpu_state.control_registers.sctlr_el3)
+                read_reg!(self.machine.cpu_state.control_registers.sctlr_el3)
             }
             AArch64RegId::CPACR_EL1 => {
-                read_64bit_reg!(self.machine.cpu_state.control_registers.cpacr_el1)
+                read_reg!(self.machine.cpu_state.control_registers.cpacr_el1)
             }
             AArch64RegId::VBAR_EL1 => {
-                read_64bit_reg!(self.machine.cpu_state.exception_registers.vbar_el1)
+                read_reg!(self.machine.cpu_state.exception_registers.vbar_el1)
             }
             AArch64RegId::HCR_EL2 => {
-                read_64bit_reg!(self.machine.cpu_state.control_registers.hcr_el2)
+                read_reg!(self.machine.cpu_state.control_registers.hcr_el2)
             }
             AArch64RegId::SCR_EL3 => {
-                read_64bit_reg!(self.machine.cpu_state.control_registers.scr_el3)
+                read_reg!(self.machine.cpu_state.control_registers.scr_el3)
             }
             AArch64RegId::VPIDR_EL2 => {
-                read_64bit_reg!(self.machine.cpu_state.id_registers.midr_el1)
+                read_reg!(self.machine.cpu_state.id_registers.midr_el1)
             }
             AArch64RegId::SPSR_EL3 => {
-                read_64bit_reg!(self.machine.cpu_state.registers.spsr_el3)
+                read_reg!(self.machine.cpu_state.registers.spsr_el3)
             }
             AArch64RegId::ELR_EL1 => {
-                read_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el1)
+                read_reg!(self.machine.cpu_state.exception_registers.elr_el1)
             }
             AArch64RegId::ELR_EL2 => {
-                read_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el2)
+                read_reg!(self.machine.cpu_state.exception_registers.elr_el2)
             }
             AArch64RegId::ELR_EL3 => {
-                read_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el3)
+                read_reg!(self.machine.cpu_state.exception_registers.elr_el3)
             }
             // AArch64RegId::OSDTRRX_EL1 => Ok(0),
             // AArch64RegId::DBGBVR0_EL1 => Ok(0),
@@ -438,111 +447,129 @@ impl GdbStubRunner {
     ) -> TargetResult<(), GdbStub> {
         use gdbstub_arch::aarch64::reg::id::AArch64RegId;
 
-        let Some(val_64): Option<[u8; 8]> =
-            val.get(..8).and_then(|val| <[u8; 8]>::try_from(val).ok())
-        else {
-            return Err(TargetError::NonFatal);
-        };
-
-        macro_rules! write_64bit_reg {
+        macro_rules! write_reg {
             ($dest:expr) => {{
+                let Some(val_64): Option<[u8; 8]> =
+                    val.get(..8).and_then(|val| <[u8; 8]>::try_from(val).ok())
+                else {
+                    return Err(TargetError::NonFatal);
+                };
                 $dest = u64::from_ne_bytes(val_64);
+            }};
+            (128 $dest:expr) => {{
+                let Some(val_128): Option<[u8; 16]> =
+                    val.get(..16).and_then(|val| <[u8; 16]>::try_from(val).ok())
+                else {
+                    return Err(TargetError::NonFatal);
+                };
+                *$dest = u128::from_ne_bytes(val_128);
             }};
         }
         match reg_id {
-            AArch64RegId::X(0) => write_64bit_reg!(self.machine.cpu_state.registers.x0),
-            AArch64RegId::X(1) => write_64bit_reg!(self.machine.cpu_state.registers.x1),
-            AArch64RegId::X(2) => write_64bit_reg!(self.machine.cpu_state.registers.x2),
-            AArch64RegId::X(3) => write_64bit_reg!(self.machine.cpu_state.registers.x3),
-            AArch64RegId::X(4) => write_64bit_reg!(self.machine.cpu_state.registers.x4),
-            AArch64RegId::X(5) => write_64bit_reg!(self.machine.cpu_state.registers.x5),
-            AArch64RegId::X(6) => write_64bit_reg!(self.machine.cpu_state.registers.x6),
-            AArch64RegId::X(7) => write_64bit_reg!(self.machine.cpu_state.registers.x7),
-            AArch64RegId::X(8) => write_64bit_reg!(self.machine.cpu_state.registers.x8),
-            AArch64RegId::X(9) => write_64bit_reg!(self.machine.cpu_state.registers.x9),
-            AArch64RegId::X(10) => write_64bit_reg!(self.machine.cpu_state.registers.x10),
-            AArch64RegId::X(11) => write_64bit_reg!(self.machine.cpu_state.registers.x11),
-            AArch64RegId::X(12) => write_64bit_reg!(self.machine.cpu_state.registers.x12),
-            AArch64RegId::X(13) => write_64bit_reg!(self.machine.cpu_state.registers.x13),
-            AArch64RegId::X(14) => write_64bit_reg!(self.machine.cpu_state.registers.x14),
-            AArch64RegId::X(15) => write_64bit_reg!(self.machine.cpu_state.registers.x15),
-            AArch64RegId::X(16) => write_64bit_reg!(self.machine.cpu_state.registers.x16),
-            AArch64RegId::X(17) => write_64bit_reg!(self.machine.cpu_state.registers.x17),
-            AArch64RegId::X(18) => write_64bit_reg!(self.machine.cpu_state.registers.x18),
-            AArch64RegId::X(19) => write_64bit_reg!(self.machine.cpu_state.registers.x19),
-            AArch64RegId::X(20) => write_64bit_reg!(self.machine.cpu_state.registers.x20),
-            AArch64RegId::X(21) => write_64bit_reg!(self.machine.cpu_state.registers.x21),
-            AArch64RegId::X(22) => write_64bit_reg!(self.machine.cpu_state.registers.x22),
-            AArch64RegId::X(23) => write_64bit_reg!(self.machine.cpu_state.registers.x23),
-            AArch64RegId::X(24) => write_64bit_reg!(self.machine.cpu_state.registers.x24),
-            AArch64RegId::X(25) => write_64bit_reg!(self.machine.cpu_state.registers.x25),
-            AArch64RegId::X(26) => write_64bit_reg!(self.machine.cpu_state.registers.x26),
-            AArch64RegId::X(27) => write_64bit_reg!(self.machine.cpu_state.registers.x27),
-            AArch64RegId::X(28) => write_64bit_reg!(self.machine.cpu_state.registers.x28),
-            AArch64RegId::X(29) => write_64bit_reg!(self.machine.cpu_state.registers.x29),
-            AArch64RegId::X(30) => write_64bit_reg!(self.machine.cpu_state.registers.x30),
+            AArch64RegId::X(0) => write_reg!(self.machine.cpu_state.registers.x0),
+            AArch64RegId::X(1) => write_reg!(self.machine.cpu_state.registers.x1),
+            AArch64RegId::X(2) => write_reg!(self.machine.cpu_state.registers.x2),
+            AArch64RegId::X(3) => write_reg!(self.machine.cpu_state.registers.x3),
+            AArch64RegId::X(4) => write_reg!(self.machine.cpu_state.registers.x4),
+            AArch64RegId::X(5) => write_reg!(self.machine.cpu_state.registers.x5),
+            AArch64RegId::X(6) => write_reg!(self.machine.cpu_state.registers.x6),
+            AArch64RegId::X(7) => write_reg!(self.machine.cpu_state.registers.x7),
+            AArch64RegId::X(8) => write_reg!(self.machine.cpu_state.registers.x8),
+            AArch64RegId::X(9) => write_reg!(self.machine.cpu_state.registers.x9),
+            AArch64RegId::X(10) => write_reg!(self.machine.cpu_state.registers.x10),
+            AArch64RegId::X(11) => write_reg!(self.machine.cpu_state.registers.x11),
+            AArch64RegId::X(12) => write_reg!(self.machine.cpu_state.registers.x12),
+            AArch64RegId::X(13) => write_reg!(self.machine.cpu_state.registers.x13),
+            AArch64RegId::X(14) => write_reg!(self.machine.cpu_state.registers.x14),
+            AArch64RegId::X(15) => write_reg!(self.machine.cpu_state.registers.x15),
+            AArch64RegId::X(16) => write_reg!(self.machine.cpu_state.registers.x16),
+            AArch64RegId::X(17) => write_reg!(self.machine.cpu_state.registers.x17),
+            AArch64RegId::X(18) => write_reg!(self.machine.cpu_state.registers.x18),
+            AArch64RegId::X(19) => write_reg!(self.machine.cpu_state.registers.x19),
+            AArch64RegId::X(20) => write_reg!(self.machine.cpu_state.registers.x20),
+            AArch64RegId::X(21) => write_reg!(self.machine.cpu_state.registers.x21),
+            AArch64RegId::X(22) => write_reg!(self.machine.cpu_state.registers.x22),
+            AArch64RegId::X(23) => write_reg!(self.machine.cpu_state.registers.x23),
+            AArch64RegId::X(24) => write_reg!(self.machine.cpu_state.registers.x24),
+            AArch64RegId::X(25) => write_reg!(self.machine.cpu_state.registers.x25),
+            AArch64RegId::X(26) => write_reg!(self.machine.cpu_state.registers.x26),
+            AArch64RegId::X(27) => write_reg!(self.machine.cpu_state.registers.x27),
+            AArch64RegId::X(28) => write_reg!(self.machine.cpu_state.registers.x28),
+            AArch64RegId::X(29) => write_reg!(self.machine.cpu_state.registers.x29),
+            AArch64RegId::X(30) => write_reg!(self.machine.cpu_state.registers.x30),
             AArch64RegId::X(other) => {
                 tracing::error!("GDB requested write of invalid register x{other}");
                 return Err(TargetError::NonFatal);
             }
-            AArch64RegId::Sp => write_64bit_reg!(self.machine.cpu_state.registers.sp),
-            AArch64RegId::Pc => write_64bit_reg!(self.machine.pc),
+            AArch64RegId::Sp => write_reg!(self.machine.cpu_state.registers.sp),
+            AArch64RegId::Pc => write_reg!(self.machine.pc),
             AArch64RegId::Pstate => {
-                self.machine.cpu_state.registers.pstate = u64::from_ne_bytes(val_64);
+                write_reg!(self.machine.cpu_state.registers.pstate)
             }
-            AArch64RegId::V(_) => {
-                // FIXME
-                unimplemented!()
-            }
-            AArch64RegId::SP_EL0 => write_64bit_reg!(self.machine.cpu_state.registers.sp_el0),
-            AArch64RegId::SP_EL1 => write_64bit_reg!(self.machine.cpu_state.registers.sp_el1),
-            AArch64RegId::SP_EL2 => write_64bit_reg!(self.machine.cpu_state.registers.sp_el2),
+            AArch64RegId::V(i) => self
+                .machine
+                .cpu_state
+                .vector_registers
+                .get_mut(i as usize)
+                .map_or_else(
+                    || {
+                        tracing::error!("GDB requested write of invalid register v{i}");
+                        Err(TargetError::NonFatal)
+                    },
+                    |v| {
+                        write_reg!(128 v);
+                        Ok(())
+                    },
+                )?,
+            AArch64RegId::SP_EL0 => write_reg!(self.machine.cpu_state.registers.sp_el0),
+            AArch64RegId::SP_EL1 => write_reg!(self.machine.cpu_state.registers.sp_el1),
+            AArch64RegId::SP_EL2 => write_reg!(self.machine.cpu_state.registers.sp_el2),
             // AArch64RegId::SP_EL3 => write_64bit_reg!(self.machine.cpu_state.registers.sp_el3),
             AArch64RegId::TTBR0_EL1 => {
-                write_64bit_reg!(self.machine.cpu_state.mmu_registers.ttbr0_el1)
+                write_reg!(self.machine.cpu_state.mmu_registers.ttbr0_el1)
             }
             AArch64RegId::VTTBR_EL2 => {
-                write_64bit_reg!(self.machine.cpu_state.mmu_registers.vttbr_el2)
+                write_reg!(self.machine.cpu_state.mmu_registers.vttbr_el2)
             }
             AArch64RegId::MAIR_EL1 => {
-                write_64bit_reg!(self.machine.cpu_state.mmu_registers.mair_el1)
+                write_reg!(self.machine.cpu_state.mmu_registers.mair_el1)
             }
-            AArch64RegId::TCR_EL1 => write_64bit_reg!(self.machine.cpu_state.mmu_registers.tcr_el1),
+            AArch64RegId::TCR_EL1 => write_reg!(self.machine.cpu_state.mmu_registers.tcr_el1),
             AArch64RegId::SCTLR_EL1 => {
-                write_64bit_reg!(self.machine.cpu_state.control_registers.sctlr_el1)
+                write_reg!(self.machine.cpu_state.control_registers.sctlr_el1)
             }
             AArch64RegId::SCTLR_EL2 => {
-                write_64bit_reg!(self.machine.cpu_state.control_registers.sctlr_el2)
+                write_reg!(self.machine.cpu_state.control_registers.sctlr_el2)
             }
             AArch64RegId::SCTLR_EL3 => {
-                write_64bit_reg!(self.machine.cpu_state.control_registers.sctlr_el3)
+                write_reg!(self.machine.cpu_state.control_registers.sctlr_el3)
             }
             AArch64RegId::CPACR_EL1 => {
-                write_64bit_reg!(self.machine.cpu_state.control_registers.cpacr_el1)
+                write_reg!(self.machine.cpu_state.control_registers.cpacr_el1)
             }
             AArch64RegId::VBAR_EL1 => {
-                write_64bit_reg!(self.machine.cpu_state.exception_registers.vbar_el1)
+                write_reg!(self.machine.cpu_state.exception_registers.vbar_el1)
             }
             AArch64RegId::HCR_EL2 => {
-                write_64bit_reg!(self.machine.cpu_state.control_registers.hcr_el2)
+                write_reg!(self.machine.cpu_state.control_registers.hcr_el2)
             }
             AArch64RegId::SCR_EL3 => {
-                write_64bit_reg!(self.machine.cpu_state.control_registers.scr_el3)
+                write_reg!(self.machine.cpu_state.control_registers.scr_el3)
             }
             AArch64RegId::VPIDR_EL2 => {
-                write_64bit_reg!(self.machine.cpu_state.id_registers.midr_el1)
+                write_reg!(self.machine.cpu_state.id_registers.midr_el1)
             }
             AArch64RegId::SPSR_EL3 => {
-                self.machine.cpu_state.registers.spsr_el3 = u64::from_ne_bytes(val_64);
+                write_reg!(self.machine.cpu_state.registers.spsr_el3)
             }
             AArch64RegId::ELR_EL1 => {
-                write_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el1)
+                write_reg!(self.machine.cpu_state.exception_registers.elr_el1)
             }
             AArch64RegId::ELR_EL2 => {
-                write_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el2)
+                write_reg!(self.machine.cpu_state.exception_registers.elr_el2)
             }
             AArch64RegId::ELR_EL3 => {
-                write_64bit_reg!(self.machine.cpu_state.exception_registers.elr_el3)
+                write_reg!(self.machine.cpu_state.exception_registers.elr_el3)
             }
             _ => return Err(TargetError::NonFatal),
         }
