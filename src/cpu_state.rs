@@ -438,6 +438,13 @@ pub struct MMURegisterFile {
     pub amair_el1: u64,
     /// Context ID Register (EL1)
     pub contextidr_el1: u64,
+    // TLS registers for guest software use
+    /// User Read and Write Thread ID Register
+    pub tpidr_el0: u64,
+    /// User Read-Only Thread ID Register
+    pub tpidrro_el0: u64,
+    /// Thread ID Register, privileged accesses only
+    pub tpidr_el1: u64,
 }
 
 /// Exception handling registers

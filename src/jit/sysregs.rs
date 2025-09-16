@@ -83,6 +83,9 @@ impl BlockTranslator<'_> {
             SysReg::VTTBR_EL2 => register_field!(read self, mmu_registers.vttbr_el2),
             SysReg::MAIR_EL1 => register_field!(read self, mmu_registers.mair_el1),
             SysReg::AMAIR_EL1 => register_field!(read self, mmu_registers.amair_el1),
+            SysReg::TPIDR_EL0 => register_field!(read self, mmu_registers.tpidr_el0),
+            SysReg::TPIDRRO_EL0 => register_field!(read self, mmu_registers.tpidrro_el0),
+            SysReg::TPIDR_EL1 => register_field!(read self, mmu_registers.tpidr_el1),
             SysReg::CONTEXTIDR_EL1 => register_field!(read self, mmu_registers.contextidr_el1),
             SysReg::ESR_EL1 => register_field!(read self, exception_registers.esr_el1),
             SysReg::VBAR_EL1 => register_field!(read self, exception_registers.vbar_el1),
@@ -126,6 +129,9 @@ impl BlockTranslator<'_> {
             SysReg::CONTEXTIDR_EL1 => {
                 register_field!(write self, value, mmu_registers.contextidr_el1)
             }
+            SysReg::TPIDR_EL0 => register_field!(write self, value, mmu_registers.tpidr_el0),
+            SysReg::TPIDRRO_EL0 => register_field!(write self, value, mmu_registers.tpidrro_el0),
+            SysReg::TPIDR_EL1 => register_field!(write self, value, mmu_registers.tpidr_el1),
             SysReg::ESR_EL1 => register_field!(write self, value, exception_registers.esr_el1),
             SysReg::VBAR_EL1 => register_field!(write self, value, exception_registers.vbar_el1),
             SysReg::ELR_EL1 => register_field!(write self, value, exception_registers.elr_el1),
