@@ -130,16 +130,11 @@ pub mod memory;
 #[macro_use]
 pub mod tracing;
 
-/// Disassembles and prints each decoded aarch64 instruction to stdout using
-/// Capstone library, for debugging.
-pub fn disas(input: &[u8], starting_address: u64) -> Result<(), Box<dyn std::error::Error>> {
+/// Returns bytes as a disassembled string for debugging.
+pub fn disas(input: &[u8], starting_address: u64) -> Result<String, Box<dyn std::error::Error>> {
     use std::fmt::Write;
 
     use capstone::prelude::*;
-
-    if !tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE) {
-        return Ok(());
-    }
 
     let mut cs = Capstone::new()
         .arm64()
@@ -154,12 +149,11 @@ pub fn disas(input: &[u8], starting_address: u64) -> Result<(), Box<dyn std::err
     for insn in decoded_iter.as_ref() {
         writeln!(&mut s, "{insn}")?;
     }
-    tracing::event!(
-        target: tracing::TraceItem::InAsm.as_str(),
-        tracing::Level::TRACE,
-        "{s}"
-    );
-    Ok(())
+    if !s.is_empty() {
+        // Remove last newline.
+        s.pop();
+    }
+    Ok(s)
 }
 
 /// Execute machine continuously until it requests shutdown.

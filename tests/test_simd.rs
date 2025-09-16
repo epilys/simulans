@@ -33,7 +33,7 @@ mod utils;
 #[test_log::test]
 fn test_simd_rev() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_simd_rev.bin");
-    // _ = simulans::disas(TEST_INPUT, 0x40080000);
+    utils::disas(TEST_INPUT, 0);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -49,7 +49,7 @@ fn test_simd_rev() {
 #[test_log::test]
 fn test_simd_mov() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_simd_mov.bin");
-    // _ = simulans::disas(TEST_INPUT, 0x40080000);
+    utils::disas(TEST_INPUT, 0);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);

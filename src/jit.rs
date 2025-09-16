@@ -83,13 +83,23 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
                 pc = ?Address(pc),
                 "re-using cached block for 0x{:x}-0x{:x}",
                 pc,
-                tb.start
+                tb.end
             );
-            // let mem_region = machine.memory.find_region(Address(pc)).unwrap();
-            // let mmapped_region = mem_region.as_mmap().unwrap();
-            // let input = &mmapped_region.as_ref()[(pc -
-            // mem_region.phys_offset.0).try_into().unwrap()..]     [..(tb.start as
-            // usize - pc as usize + 4)]; _ = crate::disas(input, pc);
+            if tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE)
+            {
+                let mem_region = machine.memory.find_region(Address(pc)).unwrap();
+                let mmapped_region = mem_region.as_mmap().unwrap();
+                let input = &mmapped_region.as_ref()
+                    [(pc - mem_region.phys_offset.0).try_into().unwrap()..]
+                    [..(tb.end as usize - pc as usize + 4)];
+                if let Ok(s) = crate::disas(input, pc) {
+                    tracing::event!(
+                        target: tracing::TraceItem::InAsm.as_str(),
+                        tracing::Level::TRACE,
+                        "{s}"
+                    );
+                }
+            }
             return tb.entry;
         }
     }
@@ -102,15 +112,16 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
 
     let new_ctx = JitContext::new(jit.single_step);
     let block = new_ctx.compile(machine, pc).unwrap();
-    let next_entry = block.entry;
-    jit.translation_blocks.insert(block);
-
     tracing::event!(
         target: tracing::TraceItem::LookupBlock.as_str(),
         tracing::Level::TRACE,
         pc = ?Address(pc),
+        end = ?Address(block.end),
         "returning generated block",
     );
+    let next_entry = block.entry;
+    jit.translation_blocks.insert(block);
+
     next_entry
 }
 
@@ -499,19 +510,15 @@ impl JitContext {
                 target: tracing::TraceItem::Jit.as_str(),
                 tracing::Level::TRACE,
                 pc = ?Address(first.address()),
-                "{first:#?}",
+                "{first:?}",
             );
             if let ControlFlow::Break(jump_pc) = trans.translate_instruction(&first) {
                 prev_pc = first.address();
                 next_pc = jump_pc;
             } else if self.single_step {
-                // [ref:FIXME]: If single stepping and program_counter + 4, we will receive an unmapped PC
-                // for the next translation block.
+                prev_pc = last_pc;
                 next_pc = Some(BlockExit::Branch(
-                    trans
-                        .builder
-                        .ins()
-                        .iconst(I64, (program_counter + 4) as i64),
+                    trans.builder.ins().iconst(I64, (last_pc + 4) as i64),
                 ));
             } else {
                 for insn in decoded_iter {
@@ -521,7 +528,7 @@ impl JitContext {
                                 target: tracing::TraceItem::Jit.as_str(),
                                 tracing::Level::TRACE,
                                 pc = ?Address(insn.address()),
-                                "{insn:#?}",
+                                "{insn:?}",
                             );
                             if !machine.hw_breakpoints.is_empty()
                                 && machine.hw_breakpoints.contains(&Address(insn.address()))
@@ -546,12 +553,24 @@ impl JitContext {
                 }
             }
         }
-        _ = crate::disas(
-            &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
+        if tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE)
+        {
+            let code_area = &mmapped_region.as_ref()[(program_counter
+                - mem_region.phys_offset.0)
                 .try_into()
-                .unwrap()..][..(last_pc - program_counter).try_into().unwrap()],
-            program_counter,
-        );
+                .unwrap()..];
+            let len = code_area.len();
+            let input = &code_area[..=(len
+                .saturating_sub(1)
+                .min(usize::try_from(last_pc - program_counter).unwrap() + 4))];
+            if let Ok(s) = crate::disas(input, program_counter) {
+                tracing::event!(
+                    target: tracing::TraceItem::InAsm.as_str(),
+                    tracing::Level::TRACE,
+                    "{s}"
+                );
+            }
+        }
         match next_pc {
             Some(BlockExit::Branch(next_pc)) => {
                 trans.emit_jump(prev_pc, next_pc);

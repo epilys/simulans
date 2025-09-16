@@ -45,7 +45,7 @@ fn test_square() {
     //  }
     // ```
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_square.bin");
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -67,7 +67,7 @@ fn test_square() {
 #[test_log::test]
 fn test_load_stores() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_load_stores.bin");
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -103,7 +103,7 @@ fn test_load_stores() {
 #[test_log::test]
 fn test_load_stores_2() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_load_stores_2.bin");
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -133,7 +133,7 @@ fn test_uart_write_str() {
 
     const DRAM_MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new(4 * TEST_INPUT.len() as u64).unwrap());
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     let pl011_addr = Address(4 * TEST_INPUT.len() as u64);
     let exit_request = Arc::new(AtomicU8::new(0));

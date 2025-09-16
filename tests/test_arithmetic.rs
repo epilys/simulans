@@ -30,7 +30,7 @@ mod utils;
 #[test_log::test]
 fn test_div() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_div.bin");
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
 
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
@@ -65,7 +65,7 @@ fn test_div() {
 fn test_mov() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_mov.bin");
 
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -81,7 +81,7 @@ fn test_mov() {
 fn test_bitfields() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_bitfields.bin");
 
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -97,7 +97,7 @@ fn test_bitfields() {
 fn test_bitfields_2() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_bitfields_2.bin");
 
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -113,7 +113,7 @@ fn test_bitfields_2() {
 fn test_bitfields_signed() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_bitfields_signed.bin");
 
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
@@ -143,7 +143,7 @@ fn test_bitfields_signed() {
 #[test_log::test]
 fn test_mul() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_mul.bin");
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
 
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
@@ -174,7 +174,7 @@ fn test_mul() {
 #[test_log::test]
 fn test_bit_counts() {
     const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_bit_counts.bin");
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
 
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());

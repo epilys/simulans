@@ -87,3 +87,11 @@ pub fn make_test_machine(
     let memory = memory.build();
     Armv8AMachine::new_with_exit_request(memory, exit_request)
 }
+
+#[allow(dead_code)]
+pub fn disas(input: &[u8], starting_address: u64) {
+    let Ok(s) = simulans::disas(input, starting_address) else {
+        return;
+    };
+    tracing::info!("{s}");
+}

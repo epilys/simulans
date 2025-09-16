@@ -29,12 +29,11 @@ mod utils;
 #[test_log::test]
 fn test_simple_if() {
     const FOOBAR: &[u8] = include_bytes!("./inputs/test_simple_if_opt.bin");
-    _ = simulans::disas(FOOBAR, 0);
     const FOOBAR_UNOPT: &[u8] = include_bytes!("./inputs/test_simple_if.bin");
-    // _ = simulans::disas(FOOBAR_UNOPT, 0);
 
     let entry_point = Address(0);
     {
+        utils::disas(FOOBAR_UNOPT, 0);
         const MEMORY_SIZE: MemorySize =
             MemorySize(NonZero::new((4 * FOOBAR_UNOPT.len()) as u64).unwrap());
         {
@@ -58,6 +57,7 @@ fn test_simple_if() {
     }
     // Optimized version
     {
+        utils::disas(FOOBAR, 0);
         const MEMORY_SIZE: MemorySize =
             MemorySize(NonZero::new((4 * FOOBAR.len()) as u64).unwrap());
         {

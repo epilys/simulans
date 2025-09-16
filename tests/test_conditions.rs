@@ -34,7 +34,7 @@ fn test_conditional_execution() {
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
 
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
 
@@ -157,7 +157,7 @@ fn test_cmp_nzcv() {
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
 
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
 
@@ -270,7 +270,7 @@ fn test_cmp_b_cnd() {
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
 
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
 
@@ -324,7 +324,7 @@ fn test_adds() {
     const MEMORY_SIZE: MemorySize =
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
 
-    // _ = simulans::disas(TEST_INPUT, 0);
+    utils::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
 
