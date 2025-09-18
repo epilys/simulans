@@ -32,7 +32,7 @@ pub struct ResolvedAddress<'a> {
     pub address_inside_region: u64,
 }
 
-/// JIT helper function to look up translated blocks for given address.
+/// JIT helper function to look up memory region for given address.
 pub extern "C" fn address_lookup(machine: &mut Armv8AMachine, address: u64) -> ResolvedAddress<'_> {
     tracing::event!(
         target: tracing::TraceItem::AddressLookup.as_str(),
