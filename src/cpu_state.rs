@@ -12,6 +12,9 @@ use num_traits::cast::FromPrimitive;
 
 use crate::memory::Address;
 
+mod memory;
+pub use memory::*;
+
 mod pstate;
 pub use pstate::*;
 
@@ -210,7 +213,7 @@ impl Default for IDRegisterFile {
             midr_el1: (0b1111) << 16,
             // vpidr_el2: (0b1111) << 16,
             id_aa64pfr0_el1,
-            id_aa64mmfr0_el1: 0,
+            id_aa64mmfr0_el1: PARange::_1 as u64,
             id_aa64mmfr1_el1: 0,
             id_aa64mmfr2_el1: 0,
             id_aa64mmfr3_el1: 0,
@@ -219,44 +222,42 @@ impl Default for IDRegisterFile {
     }
 }
 
-/// MMU registers
-#[derive(Default, Debug)]
-#[repr(C)]
-pub struct MMURegisterFile {
-    /// Permission Indirection Register 0 (EL1)
-    pub pire0_el1: u64,
-    /// Permission Indirection Register 1 (EL1)
-    pub pir_el1: u64,
-    /// Translation Control Register (EL1)
-    pub tcr_el1: u64,
-    /// Extended Translation Control Register (EL1)
-    pub tcr2_el1: u64,
-    /// EL1 Translation Table Base Register 0
-    pub ttbr0_el1: u64,
-    /// EL1 Translation Table Base Register 1
-    pub ttbr1_el1: u64,
-    // pub ttbr0_el2: u64,
-    // pub ttbr0_el3: u64,
-    /// Virtualization Translation Table Base Register.
-    pub vttbr_el2: u64,
-    /// EL1 Memory Attribute Indirection Register
-    pub mair_el1: u64,
-    // pub mair_el2: u64,
-    // pub mair_el3: u64,
-    /// Auxiliary Memory Attribute Indirection Register (EL1)
-    ///
-    /// Register contents are implementation defined and not assigned any
-    /// meaning by the spec.
-    pub amair_el1: u64,
-    /// Context ID Register (EL1)
-    pub contextidr_el1: u64,
-    // TLS registers for guest software use
-    /// User Read and Write Thread ID Register
-    pub tpidr_el0: u64,
-    /// User Read-Only Thread ID Register
-    pub tpidrro_el0: u64,
-    /// Thread ID Register, privileged accesses only
-    pub tpidr_el1: u64,
+#[derive(Copy, Clone, Debug)]
+#[repr(u8)]
+pub enum PARange {
+    ///4GB 32 bits, PA[31:0]
+    _1 = 0b0000,
+    /// 64GB 36 bits, PA[35:0]
+    _2 = 0b0001,
+    ///1TB 40 bits, PA[39:0]
+    _3 = 0b0010,
+    /// 4TB 42 bits, PA[41:0]
+    _4 = 0b0011,
+    /// 16TB 44 bits, PA[43:0]
+    _5 = 0b0100,
+    /// 256TB 48 bits, PA[47:0]
+    _6 = 0b0101,
+    /// 4PB 52 bits, PA[51:0]
+    _7 = 0b0110,
+    /// 64PB 56 bits, PA[55:0]
+    _8 = 0b0111,
+}
+
+impl IDRegisterFile {
+    /// Returns `ID_AA64MMFR0_EL1.PARange` value.
+    pub const fn pa_range(&self) -> PARange {
+        match self.id_aa64mmfr0_el1 & 0b1111 {
+            0b0000 => PARange::_1,
+            0b0001 => PARange::_2,
+            0b0010 => PARange::_3,
+            0b0011 => PARange::_4,
+            0b0100 => PARange::_5,
+            0b0101 => PARange::_6,
+            0b0110 => PARange::_7,
+            0b0111 => PARange::_8,
+            _other => unreachable!(),
+        }
+    }
 }
 
 /// Exception handling registers
