@@ -17,10 +17,10 @@ impl BlockTranslator<'_> {
     /// Generates a JIT write access
     pub fn generate_write(&mut self, target_address: Value, value: Value, width: Width) {
         let (write_func, sigref) = self.memops_table.write(width);
-        let address_lookup_func = self
-            .builder
-            .ins()
-            .iconst(I64, crate::machine::address_lookup as usize as u64 as i64);
+        let address_lookup_func = self.builder.ins().iconst(
+            I64,
+            crate::machine::physical_address_lookup as usize as u64 as i64,
+        );
         let call = self.builder.ins().call_indirect(
             self.address_lookup_sigref,
             address_lookup_func,
@@ -43,10 +43,10 @@ impl BlockTranslator<'_> {
     /// Generates a JIT read access
     pub fn generate_read(&mut self, target_address: Value, width: Width) -> Value {
         let (read_func, sigref) = self.memops_table.read(width);
-        let address_lookup_func = self
-            .builder
-            .ins()
-            .iconst(I64, crate::machine::address_lookup as usize as u64 as i64);
+        let address_lookup_func = self.builder.ins().iconst(
+            I64,
+            crate::machine::physical_address_lookup as usize as u64 as i64,
+        );
         let call = self.builder.ins().call_indirect(
             self.address_lookup_sigref,
             address_lookup_func,
