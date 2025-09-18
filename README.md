@@ -18,6 +18,6 @@ See `--help` output for all CLI options.
 
 - ~~`EL{0,1,2}` trap handling.~~
 - ~~UART device.~~ [`./src/devices/pl011.rs`](./src/devices/pl011.rs)
-- MMU.
+- ~~MMU~~ (`4KB` granule) [`./src/memory/mmu.rs`](./src/memory/mmu.rs).
 - Timers.
 - ~~Passing FDT to loaded binary.~~ [`./src/fdt.rs`](./src/fdt.rs)

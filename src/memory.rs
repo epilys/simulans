@@ -3,6 +3,8 @@
 
 //! Virtual machine memory types.
 
+pub mod mmu;
+
 mod map;
 mod region;
 

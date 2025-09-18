@@ -3,7 +3,7 @@
 
 //! Generation of JIT code as translation blocks.
 
-use std::ops::ControlFlow;
+use std::{mem::MaybeUninit, ops::ControlFlow};
 
 use bad64::ArrSpec;
 use codegen::ir::{
@@ -18,9 +18,9 @@ use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
 use crate::{
-    cpu_state::ExecutionState,
+    cpu_state::{ExecutionState, ExitRequest},
     machine::{Armv8AMachine, TranslationBlock, TranslationBlocks},
-    memory::{Address, Width},
+    memory::{mmu::ResolvedAddress, Address, Width},
     tracing,
 };
 
@@ -52,6 +52,17 @@ pub struct Entry(
 /// ([`Armv8AMachine::translation_blocks`]).
 pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> Entry {
     let pc: u64 = machine.pc;
+    if let Some(exit_request) = machine.cpu_state.exit_request.take() {
+        match exit_request {
+            ExitRequest::Abort {
+                fault,
+                preferred_exception_return,
+            } => {
+                crate::exceptions::aarch64_abort(machine, fault, preferred_exception_return);
+                return Entry(lookup_block);
+            }
+        }
+    }
     if tracing::event_enabled!(target: tracing::TraceItem::BlockEntry.as_str(), tracing::Level::TRACE)
     {
         crate::tracing::print_registers(machine);
@@ -70,17 +81,15 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
             );
             if tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE)
             {
-                let mem_region = machine.memory.find_region(Address(pc)).unwrap();
-                let mmapped_region = mem_region.as_mmap().unwrap();
-                let input = &mmapped_region.as_ref()
-                    [(pc - mem_region.phys_offset.0).try_into().unwrap()..]
-                    [..(tb.end as usize - pc as usize + 4)];
-                if let Ok(s) = crate::disas(input, pc) {
-                    tracing::event!(
-                        target: tracing::TraceItem::InAsm.as_str(),
-                        tracing::Level::TRACE,
-                        "{s}"
-                    );
+                if let Ok(code_area) = translate_code_address(machine, pc) {
+                    let input = &code_area[..(tb.end as usize - tb.start as usize + 4)];
+                    if let Ok(s) = crate::disas(input, pc) {
+                        tracing::event!(
+                            target: tracing::TraceItem::InAsm.as_str(),
+                            tracing::Level::TRACE,
+                            "{s}"
+                        );
+                    }
                 }
             }
             return tb.entry;
@@ -106,6 +115,41 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
     jit.translation_blocks.insert(block);
 
     next_entry
+}
+
+fn translate_code_address(
+    machine: &mut Armv8AMachine,
+    program_counter: u64,
+) -> Result<&[u8], Box<dyn std::error::Error>> {
+    let mut resolved_pc_address = MaybeUninit::uninit();
+    if !crate::memory::mmu::translate_address(
+        machine,
+        Address(program_counter),
+        Address(program_counter),
+        true,
+        &mut resolved_pc_address,
+    ) {
+        return Err(format!(
+            "Received program counter {} which is unmapped in physical memory.",
+            Address(program_counter),
+        )
+        .into());
+    }
+    let ResolvedAddress {
+                mem_region,
+                address_inside_region: pc_offset,
+            } =
+            // SAFETY: we checked the return value
+            unsafe { resolved_pc_address.assume_init( )};
+    let mem_region: &crate::memory::MemoryRegion = &*mem_region.unwrap();
+    let Some(mmapped_region) = mem_region.as_mmap() else {
+        return Err(format!(
+            "Received program counter {} which is mapped in device memory.",
+            Address(program_counter),
+        )
+        .into());
+    };
+    Ok(&mmapped_region.as_ref()[pc_offset.try_into().unwrap()..])
 }
 
 pub struct Jit {
@@ -260,26 +304,9 @@ impl JitContext {
     ) -> Result<u64, Box<dyn std::error::Error>> {
         let machine_addr = std::ptr::addr_of!(*machine);
 
-        let Armv8AMachine {
-            ref mut memory,
-            ref mut cpu_state,
-            ..
-        } = machine;
+        let hw_breakpoints = machine.hw_breakpoints.clone();
 
-        let Some(mem_region) = memory.find_region(Address(program_counter)) else {
-            return Err(format!(
-                "Received program counter {} which is unmapped in physical memory.",
-                Address(program_counter),
-            )
-            .into());
-        };
-        let Some(mmapped_region) = mem_region.as_mmap() else {
-            return Err(format!(
-                "Received program counter {} which is mapped in device memory.",
-                Address(program_counter),
-            )
-            .into());
-        };
+        let code_area = translate_code_address(machine, program_counter)?;
 
         let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
 
@@ -300,23 +327,34 @@ impl JitContext {
         let mut registers = IndexMap::new();
         let mut sys_registers = IndexMap::new();
 
-        // Declare variables for each register.
-        // Emit code to load register values into variables.
-        cpu_state.load_cpu_state(&mut builder, &mut registers, &mut sys_registers);
         let machine_ptr = builder.ins().iconst(
             self.module.target_config().pointer_type(),
             machine_addr as i64,
         );
+        // Declare variables for each register.
+        // Emit code to load register values into variables.
+        ExecutionState::load_cpu_state(
+            machine_ptr,
+            &mut builder,
+            &mut registers,
+            &mut sys_registers,
+        );
         let address_lookup_sigref = {
             let mut sig = self.module.make_signature();
+            // machine: &mut Armv8AMachine,
             sig.params
                 .push(AbiParam::new(self.module.target_config().pointer_type()));
+            // input_address: Address,
+            sig.params.push(AbiParam::new(I64));
+            // preferred_exception_return: Address,
+            sig.params.push(AbiParam::new(I64));
+            // raise_exception: bool,
+            sig.params.push(AbiParam::new(I8));
+            // ret: &mut ResolvedAddress<'_>
             sig.params
                 .push(AbiParam::new(self.module.target_config().pointer_type()));
-            sig.returns
-                .push(AbiParam::new(self.module.target_config().pointer_type()));
-            sig.returns
-                .push(AbiParam::new(self.module.target_config().pointer_type()));
+            // -> bool
+            sig.returns.push(AbiParam::new(I8));
             builder.import_signature(sig)
         };
         let mut trans = BlockTranslator {
@@ -325,7 +363,6 @@ impl JitContext {
             write_to_simd: false,
             pointer_type: self.module.target_config().pointer_type(),
             memops_table,
-            cpu_state,
             machine_ptr,
             address_lookup_sigref,
             builder,
@@ -335,12 +372,7 @@ impl JitContext {
             loopback_blocks: IndexMap::default(),
         };
         if !self.single_step {
-            for ins in bad64::disasm(
-                &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
-                    .try_into()
-                    .unwrap()..],
-                program_counter,
-            ) {
+            for ins in bad64::disasm(code_area, program_counter) {
                 let ins = ins.map_err(|err| format!("Error decoding instruction: {}", err))?;
                 use bad64::Op;
                 let label_idx = match ins.op() {
@@ -380,12 +412,7 @@ impl JitContext {
         let mut prev_pc = program_counter;
         let mut last_pc = program_counter;
         // Translate each decoded instruction
-        let mut decoded_iter = bad64::disasm(
-            &mmapped_region.as_ref()[(program_counter - mem_region.phys_offset.0)
-                .try_into()
-                .unwrap()..],
-            program_counter,
-        );
+        let mut decoded_iter = bad64::disasm(code_area, program_counter);
         if let Some(first) = decoded_iter.next() {
             let first = first.map_err(|err| format!("Error decoding instruction: {}", err))?;
             last_pc = first.address();
@@ -413,8 +440,8 @@ impl JitContext {
                                 pc = ?Address(insn.address()),
                                 "{insn:?}",
                             );
-                            if !machine.hw_breakpoints.is_empty()
-                                && machine.hw_breakpoints.contains(&Address(insn.address()))
+                            if !hw_breakpoints.is_empty()
+                                && hw_breakpoints.contains(&Address(insn.address()))
                             {
                                 next_pc = Some(BlockExit::Branch(
                                     trans.builder.ins().iconst(I64, insn.address() as i64),
@@ -438,10 +465,6 @@ impl JitContext {
         }
         if tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE)
         {
-            let code_area = &mmapped_region.as_ref()[(program_counter
-                - mem_region.phys_offset.0)
-                .try_into()
-                .unwrap()..];
             let len = code_area.len();
             let input = &code_area[..=(len
                 .saturating_sub(1)
@@ -488,7 +511,6 @@ struct BlockTranslator<'a> {
     write_to_simd: bool,
     builder: FunctionBuilder<'a>,
     module: &'a JITModule,
-    cpu_state: &'a mut ExecutionState,
     machine_ptr: Value,
     pointer_type: Type,
     memops_table: MemOpsTable,
@@ -1081,6 +1103,18 @@ impl BlockTranslator<'_> {
         }
     }
 
+    #[inline]
+    fn store_pc(&mut self, pc_value: Option<Value>) {
+        let pc_value =
+            pc_value.unwrap_or_else(|| self.builder.ins().iconst(I64, self.address as i64));
+        self.builder.ins().store(
+            MemFlags::trusted(),
+            pc_value,
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, pc) as i32,
+        );
+    }
+
     /// JIT a single instruction.
     fn translate_instruction(
         &mut self,
@@ -1094,16 +1128,7 @@ impl BlockTranslator<'_> {
             self.builder.switch_to_block(loopback_block);
         }
         if cfg!(feature = "accurate-pc") {
-            let pc_value = self
-                .builder
-                .ins()
-                .iconst(I64, i64::try_from(self.address).unwrap());
-            self.builder.ins().store(
-                MemFlags::trusted(),
-                pc_value,
-                self.machine_ptr,
-                std::mem::offset_of!(Armv8AMachine, pc) as i32,
-            );
+            self.store_pc(None);
         }
         let op = instruction.op();
 
@@ -3955,13 +3980,14 @@ impl BlockTranslator<'_> {
                 let Self {
                     write_to_sysreg,
                     write_to_simd,
-                    ref mut cpu_state,
                     ref mut builder,
                     ref registers,
                     ref sys_registers,
+                    machine_ptr,
                     ..
                 } = self;
-                cpu_state.save_cpu_state(
+                ExecutionState::save_cpu_state(
+                    *machine_ptr,
                     builder,
                     registers,
                     sys_registers,
@@ -3978,12 +4004,7 @@ impl BlockTranslator<'_> {
                     std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
                 );
             }
-            self.builder.ins().store(
-                MemFlags::trusted(),
-                next_pc_value,
-                self.machine_ptr,
-                std::mem::offset_of!(Armv8AMachine, pc) as i32,
-            );
+            self.store_pc(Some(next_pc_value));
             // We don't change the lookup_block_func so just use the function pointer of
             // `lookup_block` directly.
             //
@@ -4008,13 +4029,14 @@ impl BlockTranslator<'_> {
             let Self {
                 write_to_sysreg,
                 write_to_simd,
-                ref mut cpu_state,
                 ref mut builder,
                 ref registers,
                 ref sys_registers,
+                machine_ptr,
                 ..
             } = self;
-            cpu_state.save_cpu_state(
+            ExecutionState::save_cpu_state(
+                *machine_ptr,
                 builder,
                 registers,
                 sys_registers,
@@ -4060,12 +4082,7 @@ impl BlockTranslator<'_> {
                 std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
             );
         }
-        self.builder.ins().store(
-            MemFlags::trusted(),
-            dest_label,
-            self.machine_ptr,
-            std::mem::offset_of!(Armv8AMachine, pc) as i32,
-        );
+        self.store_pc(Some(dest_label));
         ControlFlow::Break(Some(BlockExit::Branch(dest_label)))
     }
 
@@ -4098,13 +4115,14 @@ impl BlockTranslator<'_> {
             let Self {
                 write_to_sysreg,
                 write_to_simd,
-                ref mut cpu_state,
                 ref mut builder,
                 ref registers,
                 ref sys_registers,
+                machine_ptr,
                 ..
             } = self;
-            cpu_state.save_cpu_state(
+            ExecutionState::save_cpu_state(
+                *machine_ptr,
                 builder,
                 registers,
                 sys_registers,
@@ -4119,12 +4137,7 @@ impl BlockTranslator<'_> {
             self.machine_ptr,
             std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
         );
-        self.builder.ins().store(
-            MemFlags::trusted(),
-            pc,
-            self.machine_ptr,
-            std::mem::offset_of!(Armv8AMachine, pc) as i32,
-        );
+        self.store_pc(Some(pc));
         let call = self.builder.ins().call_indirect(sig, callee, args);
         self.builder.inst_results(call)
     }

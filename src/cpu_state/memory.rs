@@ -23,8 +23,9 @@ pub struct MMURegisterFile {
     pub ttbr0_el1: u64,
     /// EL1 Translation Table Base Register 1
     pub ttbr1_el1: u64,
-    // pub ttbr0_el2: u64,
-    // pub ttbr0_el3: u64,
+    pub ttbr0_el2: u64,
+    pub ttbr1_el2: u64,
+    pub ttbr0_el3: u64,
     /// Virtualization Translation Table Base Register.
     pub vttbr_el2: u64,
     /// EL1 Memory Attribute Indirection Register
@@ -63,6 +64,20 @@ pub enum Granule {
     _16KB = 0b01,
     _4KB = 0b10,
     _64KB = 0b11,
+}
+
+impl Granule {
+    /// Returns the number of least-significant address bits within a single
+    /// Translation Granule.
+    ///
+    /// `TGBits()`
+    pub fn bits(&self) -> u8 {
+        match self {
+            Self::_4KB => 12,
+            Self::_16KB => 14,
+            Self::_64KB => 16,
+        }
+    }
 }
 
 #[bitsize(64)]
@@ -158,6 +173,7 @@ pub struct TranslationControlRegister {
 
 impl TranslationControlRegister {
     pub fn ttbr0_granule(&self) -> Granule {
+        // `AArch64.S1DecodeTG0`
         match u8::from(self.TG0()) {
             0b00 => Granule::_4KB,
             0b01 => Granule::_64KB,
@@ -167,10 +183,11 @@ impl TranslationControlRegister {
     }
 
     pub fn ttbr1_granule(&self) -> Granule {
+        // `AArch64.S1DecodeTG1`
         match u8::from(self.TG1()) {
-            0b01 => Granule::_16KB,
             0b10 => Granule::_4KB,
             0b11 => Granule::_64KB,
+            0b01 => Granule::_16KB,
             other => unreachable!("0b{other:b}"),
         }
     }

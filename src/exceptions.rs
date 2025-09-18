@@ -16,6 +16,316 @@ use crate::{
     set_bits, tracing,
 };
 
+#[derive(Copy, Clone, Debug)]
+pub enum AccessType {
+    /// Instruction FETCH
+    IFETCH,
+    /// Software load/store to a General Purpose Register
+    GPR,
+    /// Software ASIMD extension load/store instructions
+    ASIMD,
+    /// Software SVE load/store instructions
+    SVE,
+    /// Software SME load/store instructions
+    SME,
+    /// Sysop IC
+    IC,
+    /// Sysop DC (not DC {Z,G,GZ}VA)
+    DC,
+    /// Sysop DC {Z,G,GZ}VA
+    DCZero,
+    /// Sysop AT
+    AT,
+    /// NV2 memory redirected access
+    NV2,
+    /// Statistical Profiling buffer access
+    SPE,
+    /// Guarded Control Stack access
+    GCS,
+    /// Trace Buffer access
+    TRBE,
+    /// Granule Protection Table Walk
+    GPTW,
+    /// Access to the HACDBS structure
+    HACDBS,
+    /// Access to entries in HDBSS
+    HDBSS,
+    /// Translation Table Walk
+    TTW,
+}
+
+/// Fault types
+#[derive(Copy, Clone, Debug)]
+pub enum Fault {
+    None,
+    AccessFlag,
+    Alignment,
+    Background,
+    Domain,
+    Permission,
+    Translation,
+    AddressSize,
+    SyncExternal,
+    SyncExternalOnWalk,
+    SyncParity,
+    SyncParityOnWalk,
+    GPCFOnWalk,
+    GPCFOnOutput,
+    AsyncParity,
+    AsyncExternal,
+    TagCheck,
+    Debug,
+    TLBConflict,
+    BranchTarget,
+    HWUpdateAccessFlag,
+    Lockdown,
+    Exclusive,
+    ICacheMaint,
+}
+
+/// The Security state of an execution context
+#[derive(Copy, Clone, Debug)]
+pub enum SecurityState {
+    NonSecure,
+    Root,
+    Realm,
+    Secure,
+}
+
+#[derive(Copy, Clone, Debug)]
+/// Memory access or translation invocation details that steer architectural
+/// behavior
+pub struct AccessDescriptor {
+    pub acctype: AccessType,
+    /// Acting EL for the access
+    pub el: ExceptionLevel,
+    /// Acting Security State for the access
+    pub ss: SecurityState,
+    // /// Acquire with Sequential Consistency
+    // pub acqsc: bool,
+    // /// FEAT_LRCPC: Acquire with Processor Consistency
+    // pub acqpc: bool,
+    // /// Release with Sequential Consistency
+    // pub relsc: bool,
+    // /// FEAT_LOR: Acquire/Release with limited ordering
+    // pub limitedordered: bool,
+    /// Access has Exclusive semantics
+    pub exclusive: bool,
+    // /// FEAT_LSE: Atomic read-modify-write access
+    // pub atomicop: bool,
+    // /// FEAT_LSE: The modification operation in the 'atomicop' access
+    // pub modop: MemAtomicOp,
+    // /// Hints the access is non-temporal
+    // pub nontemporal: bool,
+    /// Read from memory or only require read permissions
+    pub read: bool,
+    /// Write to memory or only require write permissions
+    pub write: bool,
+    // /// DC/IC: Cache operation
+    // pub cacheop: CacheOp,
+    // /// DC/IC: Scope of cache operation
+    // pub opscope: CacheOpScope,
+    // /// DC/IC: Type of target cache
+    // pub cachetype: CacheType,
+    // /// FEAT_PAN: The access is subject to PSTATE.PAN
+    // pub pan: bool,
+    // /// FEAT_TME: Access is part of a transaction
+    // pub transactional: bool,
+    // /// SVE: Non-faulting load
+    // pub nonfault: bool,
+    // /// SVE: First-fault load
+    // pub firstfault: bool,
+    // /// SVE: First-fault load for the first active element
+    // pub first: bool,
+    // /// SVE: Contiguous load/store not gather load/scatter store
+    // pub contiguous: bool,
+    // /// SME: Access made by PE while in streaming SVE mode
+    // pub streamingsve: bool,
+    // /// FEAT_LS64: Accesses by accelerator support loads/stores
+    // pub ls64: bool,
+    // /// FEAT_LS64: Store with status result
+    // pub withstatus: bool,
+    // /// FEAT_MOPS: Memory operation (CPY/SET) accesses
+    // pub mops: bool,
+    // /// FEAT_THE: Read-Check-Write access
+    // pub rcw: bool,
+    // /// FEAT_THE: Read-Check-Write Software access
+    // pub rcws: bool,
+    // /// FEAT_THE: Translation table walk access for TTB address
+    // pub toplevel: bool,
+    // /// FEAT_THE: The corresponding TTBR supplying the TTB
+    // pub varange: VARange,
+    // /// A32 Load/Store Multiple Data access
+    // pub a32lsmd: bool,
+    // /// FEAT_MTE2: Access is tag checked
+    // pub tagchecked: bool,
+    // /// FEAT_MTE: Access targets the tag bits
+    // pub tagaccess: bool,
+    // /// FEAT_MTE: Accesses that store Allocation tags to Device memory are CONSTRAINED
+    // UNPREDICTABLE pub stzgm: bool,
+    /// Access represents a Load/Store pair access
+    pub ispair: bool,
+    // /// FEAT_LRCPC3: Highest address is accessed first
+    // pub highestaddressfirst: bool,
+    // // FEAT_MPAM: MPAM information
+    // pub mpam: MPAMinfo,
+}
+
+impl AccessDescriptor {
+    /// Create a new [`AccessDescriptor`] with initialised fields
+    /// `NewAccDesc`
+    pub fn new(el: ExceptionLevel, acctype: AccessType) -> Self {
+        Self {
+            acctype,
+            el,
+            ss: SecurityState::NonSecure, // TODO SecurityStateAtEL(PSTATE.EL),
+            // acqsc: false,
+            // acqpc: false,
+            // relsc: false,
+            // limitedordered: false,
+            exclusive: false,
+            // rcw: false,
+            // rcws: false,
+            // atomicop: false,
+            // nontemporal: false,
+            read: false,
+            write: false,
+            // pan: false,
+            // nonfault: false,
+            // firstfault: false,
+            // first: false,
+            // contiguous: false,
+            // streamingsve: false,
+            // ls64: false,
+            // withstatus: false,
+            // mops: false,
+            // a32lsmd: false,
+            // tagchecked: false,
+            // tagaccess: false,
+            // stzgm: false,
+            // transactional: false,
+            // mpam: GenMPAMCurEL(acctype),
+            ispair: false,
+            // highestaddressfirst: false,
+        }
+    }
+}
+
+/// The allowed error states that can be returned by memory and used by the PE.
+#[derive(Copy, Clone, Debug)]
+pub enum ErrorState {
+    /// Uncontainable
+    UC,
+    /// Unrecoverable state
+    UEU,
+    /// Restartable state
+    UEO,
+    /// Recoverable state
+    UER,
+    /// Corrected
+    CE,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct FaultRecord {
+    /// Fault Status
+    pub statuscode: Fault,
+    /// Details of the faulting access
+    pub accessdesc: AccessDescriptor,
+    /// Faulting virtual address
+    pub vaddress: Address,
+    /// Intermediate physical address
+    pub ipaddress: FullAddress,
+    // /// Granule Protection Check Fault record
+    // pub gpcf: GPCFRecord,
+    /// Physical address
+    pub paddress: FullAddress,
+    /// GPC for a stage 2 translation table walk
+    pub gpcfs2walk: bool,
+    /// Is on a Stage 1 translation table walk
+    pub s2fs1walk: bool,
+    /// TRUE for a write, FALSE for a read
+    pub write: bool,
+    /// TRUE for a fault due to tag not accessible at stage 1.
+    pub s1tagnotdata: bool,
+    /// TRUE for a fault due to `NoTagAccess` permission.
+    pub tagaccess: bool,
+    /// For translation, access flag and `Permission` faults
+    pub level: u8,
+    /// IMPLEMENTATION DEFINED syndrome for `External` aborts
+    pub extflag: bool,
+    /// Is a Stage 2 abort
+    pub secondstage: bool,
+    /// Stage 2 Permission fault due to `AssuredOnly` attribute
+    pub assuredonly: bool,
+    /// Stage 2 Permission fault due to `TopLevel`
+    pub toplevel: bool,
+    /// Fault due to overlay permissions
+    pub overlay: bool,
+    /// Fault due to dirty state
+    pub dirtybit: bool,
+    // /// Domain number, AArch32 only
+    // pub domain: bits(4),
+    /// Incoming error state from memory
+    pub merrorstate: ErrorState,
+    // /// Fault caused by HDBSS
+    // pub hdbssf: bool,
+    // /// Watchpoint related fields
+    // pub watchptinfo: WatchpointInfo,
+    // /// Debug method of entry, from AArch32 only
+    // pub debugmoe: bits(4)
+}
+
+impl FaultRecord {
+    pub fn no_fault(accessdesc: AccessDescriptor, vaddress: Address) -> Self {
+        let write = !accessdesc.read && accessdesc.write;
+        Self {
+            statuscode: Fault::None,
+            ipaddress: FullAddress::UNKNOWN,
+            paddress: FullAddress::UNKNOWN,
+            accessdesc,
+            vaddress,
+            gpcfs2walk: false,
+            s2fs1walk: true,
+            write,
+            s1tagnotdata: false,
+            tagaccess: false,
+            level: 0,
+            extflag: false,
+            secondstage: false,
+            assuredonly: false,
+            toplevel: false,
+            overlay: false,
+            dirtybit: false,
+            merrorstate: ErrorState::UER,
+        }
+    }
+
+    /// Returns true if the IPA is reported for the abort
+    pub fn ipa_valid(&self) -> bool {
+        debug_assert!(
+            !matches!(self.statuscode, Fault::None),
+            "{:?}",
+            self.statuscode
+        );
+        // if self.gpcf.gpf != GPCF_None then
+        // return self.secondstage;
+        if self.s2fs1walk {
+            matches!(
+                self.statuscode,
+                Fault::AccessFlag | Fault::Permission | Fault::Translation | Fault::AddressSize
+            )
+        } else if self.secondstage {
+            matches!(
+                self.statuscode,
+                Fault::AccessFlag | Fault::Translation | Fault::AddressSize
+            )
+        } else {
+            false
+        }
+    }
+}
+
 #[bitsize(49)]
 #[derive(Copy, Clone, Default, FromBits, DebugBits)]
 /// [`ExceptionRecord`] field.
@@ -26,15 +336,131 @@ pub struct IssType {
     pub iss2: u24,
 }
 
+impl IssType {
+    pub fn empty() -> Self {
+        Self::new(u25::new(0), u24::new(0))
+    }
+
+    /// Creates an exception syndrome value and updates the virtual address for
+    /// Abort and Watchpoint exceptions taken to an Exception level using
+    /// `AArch64`.
+    ///
+    /// `AArch64.FaultSyndrome`
+    pub fn fault_syndrome(exceptype: Exception, fault: FaultRecord) -> Self {
+        debug_assert!(
+            !matches!(fault.statuscode, Fault::None),
+            "{:?}",
+            fault.statuscode
+        );
+        let mut isstype = Self::empty();
+
+        let d_side: bool = matches!(
+            exceptype,
+            Exception::DataAbort
+                | Exception::NV2DataAbort
+                | Exception::Watchpoint
+                | Exception::NV2Watchpoint
+        );
+        if d_side {
+            isstype.set_iss2_bit(8, matches!(fault.accessdesc.acctype, AccessType::GCS));
+
+            // if matches!(exceptype , Exception::Watchpoint, Exception::NV2Watchpoint) {
+            //     isstype.iss<23:0> = WatchpointRelatedSyndrome(fault);
+            // }
+            // if IsFeatureImplemented(FEAT_LS64) && fault.accessdesc.ls64 then
+            //     if (fault.statuscode IN {Fault_AccessFlag, Fault_Translation,
+            // Fault_Permission}) then         (isstype.iss2,
+            // isstype.iss<24:14>) = LS64InstructionSyndrome();
+            // elsif (IsSecondStage(fault) && !fault.s2fs1walk &&
+            //     (!IsExternalSyncAbort(fault) ||
+            //      (!IsFeatureImplemented(FEAT_RAS) && fault.accessdesc.acctype ==
+            // AccessType_TTW &&       boolean IMPLEMENTATION_DEFINED "ISV on
+            // second stage translation table walk"))) then     isstype.iss<24:
+            // 14> = LSInstructionSyndrome(); if IsFeatureImplemented(FEAT_NV2)
+            // && fault.accessdesc.acctype == AccessType_NV2 then     isstype.
+            // iss<13> = '1'; // Fault is generated by use of VNCR_EL2
+            // if (IsFeatureImplemented(FEAT_LS64) &&
+            // fault.statuscode IN {Fault_AccessFlag, Fault_Translation, Fault_Permission})
+            // then isstype.iss<12:11> = GetLoadStoreType();
+            isstype.set_iss_bit(
+                8,
+                matches!(
+                    fault.accessdesc.acctype,
+                    AccessType::DC | AccessType::IC | AccessType::AT
+                ),
+            );
+            if matches!(
+                fault.accessdesc.acctype,
+                AccessType::DC | AccessType::IC | AccessType::AT
+            ) {
+                isstype.set_iss_bit(6, true);
+            } else {
+                isstype.set_iss_bit(6, fault.write);
+            }
+
+            if matches!(fault.statuscode, Fault::Permission) {
+                isstype.set_iss2_bit(5, fault.dirtybit);
+                isstype.set_iss2_bit(6, fault.overlay);
+                if get_bits!(u32::from(isstype.iss()), off = 24, len = 1) == 0 {
+                    isstype.set_iss_bit(21, fault.toplevel);
+                }
+                isstype.set_iss2_bit(7, fault.assuredonly);
+                isstype.set_iss2_bit(9, fault.tagaccess);
+                isstype.set_iss2_bit(10, fault.s1tagnotdata);
+            }
+        } else if matches!(
+            (fault.accessdesc.acctype, fault.statuscode),
+            (AccessType::IFETCH, Fault::Permission)
+        ) {
+            isstype.set_iss2_bit(5, fault.dirtybit);
+            isstype.set_iss_bit(21, fault.toplevel);
+            isstype.set_iss2_bit(7, fault.assuredonly);
+            isstype.set_iss2_bit(6, fault.overlay);
+        }
+        // isstype.set_iss2_bit(11, fault.hdbssf);
+        // if IsExternalAbort(fault) then isstype.iss<9> = fault.extflag;
+        isstype.set_iss_bit(7, fault.s2fs1walk);
+        // isstype.set_iss_bit<5:0> = EncodeLDFSC(fault.statuscode, fault.level);
+        isstype
+    }
+
+    fn set_iss_bit(&mut self, bit: u8, value: bool) {
+        assert!(bit < 25, "{bit}");
+        if value {
+            self.set_iss(u25::new(u32::from(self.iss()) | (1 << bit)));
+        } else {
+            self.set_iss(u25::new(u32::from(self.iss()) & !(1 << bit)));
+        }
+    }
+
+    fn set_iss2_bit(&mut self, bit: u8, value: bool) {
+        assert!(bit < 24, "{bit}");
+        if value {
+            self.set_iss2(u24::new(u32::from(self.iss2()) | (1 << bit)));
+        } else {
+            self.set_iss2(u24::new(u32::from(self.iss2()) & !(1 << bit)));
+        }
+    }
+}
+
 /// [`ExceptionRecord`] field.
+#[derive(Copy, Clone, Debug)]
 pub struct FullAddress {
     /// PA space
     pub paspace: PASpace,
     /// 56 bits
-    pub address: u64,
+    pub address: Address,
+}
+
+impl FullAddress {
+    pub const UNKNOWN: Self = Self {
+        paspace: PASpace::UNKNOWN,
+        address: Address(0x0),
+    };
 }
 
 /// Physical address spaces
+#[derive(Copy, Clone, Debug)]
 pub enum PASpace {
     /// Unknown
     UNKNOWN = 0,
@@ -57,6 +483,7 @@ pub enum PASpace {
 }
 
 /// <https://developer.arm.com/documentation/ddi0602/2024-12/Shared-Pseudocode/shared-exceptions-exceptions?lang=en#shared.exceptions.exceptions.ExceptionRecord>
+#[derive(Copy, Clone, Debug)]
 pub struct ExceptionRecord {
     /// Exception class
     pub exceptype: Exception,
@@ -65,7 +492,7 @@ pub struct ExceptionRecord {
     /// Physical fault address
     pub paddress: FullAddress,
     /// Virtual fault address
-    pub vaddress: u64,
+    pub vaddress: Address,
     /// Validity of Intermediate Physical fault address
     pub ipavalid: bool,
     /// Validity of Physical fault address
@@ -73,7 +500,7 @@ pub struct ExceptionRecord {
     /// Intermediate Physical fault address space
     pub NS: bool,
     /// Intermediate Physical fault address (56 bits)
-    pub ipaddress: u64,
+    pub ipaddress: Address,
     /// Trapped SVC or SMC instruction
     pub trappedsyscallinst: bool,
 }
@@ -86,18 +513,35 @@ impl ExceptionRecord {
     pub fn exception_syndrome(exceptype: Exception) -> Self {
         Self {
             exceptype,
-            syndrome: IssType::new(u25::new(0), u24::new(0)),
-            vaddress: 0x0,
+            syndrome: IssType::empty(),
+            vaddress: Address(0x0),
             ipavalid: false,
             pavalid: false,
             NS: false,
-            ipaddress: 0x0,
-            paddress: FullAddress {
-                paspace: PASpace::UNKNOWN,
-                address: 0x0, // bits(56) UNKNOWN,
-            },
+            ipaddress: Address(0x0),
+            paddress: FullAddress::UNKNOWN,
             trappedsyscallinst: false,
         }
+    }
+
+    /// `AArch64.AbortSyndrome`
+    ///
+    /// Creates an exception syndrome record for Abort and Watchpoint exceptions
+    /// from an `AArch64` translation regime.
+    pub fn abort_syndrome(exceptype: Exception, fault: FaultRecord) -> Self {
+        let mut except = Self::exception_syndrome(exceptype);
+        except.pavalid = true;
+        except.syndrome = IssType::fault_syndrome(exceptype, fault);
+        except.vaddress = fault.vaddress;
+
+        if fault.ipa_valid() {
+            except.ipavalid = true;
+            except.NS = matches!(fault.ipaddress.paspace, PASpace::NonSecure);
+            except.ipaddress = fault.ipaddress.address;
+        } else {
+            except.ipavalid = false;
+        }
+        except
     }
 }
 
@@ -386,4 +830,51 @@ pub extern "C" fn aarch64_exception_return(
         new_pc.0 &= !(0b11);
     }
     machine.pc = new_pc.0;
+}
+
+/// Abort exception handling for translation regime.
+///
+/// `AArch64.Abort` and mix of `AArch64.DataAbort`
+pub fn aarch64_abort(
+    machine: &mut crate::machine::Armv8AMachine,
+    fault: FaultRecord,
+    preferred_exception_return: Address,
+) {
+    let current_el = machine.cpu_state.PSTATE().EL();
+
+    let route_to_el2 = matches!(current_el, ExceptionLevel::EL0 | ExceptionLevel::EL1)
+        && machine.cpu_state.EL2_enabled()
+        && {
+            // HCR_EL2.TGE == '1';
+            machine.cpu_state.control_registers.hcr_el2 & (1 << 27) > 0
+            // || (IsFeatureImplemented(FEAT_RME) && fault.gpcf.gpf == GPCF_Fail &&
+            // HCR_EL2.GPF == '1') ||
+            // (IsFeatureImplemented(FEAT_NV2) &&
+            // fault.accessdesc.acctype == AccessType_NV2) ||
+            // IsSecondStage(fault)))
+        };
+    let target_el = if current_el == ExceptionLevel::EL3 {
+        current_el
+    } else if current_el == ExceptionLevel::EL2 || route_to_el2 {
+        ExceptionLevel::EL2
+    } else {
+        ExceptionLevel::EL1
+    };
+    let route_to_serr: bool = false; // TODO (IsExternalAbort(fault) && AArch64.RouteToSErrorOffset(target_el));
+    let vect_offset = if route_to_serr {
+        Address(0x180)
+    } else {
+        Address(0x0)
+    };
+
+    let except = ExceptionRecord::abort_syndrome(Exception::DataAbort, fault);
+    tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, ?target_el, ?vect_offset, ?except, ?preferred_exception_return, "AArch64.Abort");
+
+    aarch64_take_exception(
+        machine,
+        target_el,
+        except,
+        preferred_exception_return,
+        vect_offset,
+    );
 }

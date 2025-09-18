@@ -23,40 +23,6 @@ use crate::{
 mod translation_blocks;
 pub use translation_blocks::{TranslationBlock, TranslationBlocks};
 
-#[repr(C)]
-/// A resolved address for a translated block.
-pub struct ResolvedAddress<'a> {
-    /// Memory region this block resides.
-    pub mem_region: &'a mut MemoryRegion,
-    /// The offset inside this region.
-    pub address_inside_region: u64,
-}
-
-/// JIT helper function to look up memory region for given physical address.
-pub extern "C" fn physical_address_lookup(
-    machine: &mut Armv8AMachine,
-    address: u64,
-) -> ResolvedAddress<'_> {
-    tracing::event!(
-        target: tracing::TraceItem::AddressLookup.as_str(),
-        tracing::Level::TRACE,
-        address = ?Address(address),
-        pc = ?Address(machine.pc),
-    );
-    let Some(mem_region) = machine.memory.find_region_mut(Address(address)) else {
-        panic!(
-            "Could not look up address {} in physical memory map. pc was: 0x{:x}",
-            Address(address),
-            machine.pc
-        );
-    };
-    let address_inside_region = address - mem_region.phys_offset.0;
-    ResolvedAddress {
-        mem_region,
-        address_inside_region,
-    }
-}
-
 /// JIT Helper function to set [`Armv8AMachine::exit_request`] field.
 pub extern "C" fn helper_set_exit_request(machine: &mut Armv8AMachine, exit_request: u8) {
     machine.exit_request.store(exit_request, Ordering::SeqCst);
