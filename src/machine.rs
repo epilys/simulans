@@ -27,7 +27,7 @@ pub use translation_blocks::{TranslationBlock, TranslationBlocks};
 /// A resolved address for a translated block.
 pub struct ResolvedAddress<'a> {
     /// Memory region this block resides.
-    pub mem_region: &'a MemoryRegion,
+    pub mem_region: &'a mut MemoryRegion,
     /// The offset inside this region.
     pub address_inside_region: u64,
 }
@@ -40,7 +40,7 @@ pub extern "C" fn address_lookup(machine: &mut Armv8AMachine, address: u64) -> R
         address = ?Address(address),
         pc = ?Address(machine.pc),
     );
-    let Some(mem_region) = machine.memory.find_region(Address(address)) else {
+    let Some(mem_region) = machine.memory.find_region_mut(Address(address)) else {
         panic!(
             "Could not look up address {} in physical memory map. pc was: 0x{:x}",
             Address(address),
