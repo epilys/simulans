@@ -1,7 +1,7 @@
 //
 // simulans
 //
-// Copyright 2025 Emmanouil Pitsidianakis <manos@pitsidianak.is>
+// Copyright 2025 Manos Pitsidianakis <manos@pitsidianak.is>
 //
 // This file is part of simulans.
 //
