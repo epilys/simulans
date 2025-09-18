@@ -2,6 +2,7 @@
 // Copyright Contributors to the simulans project.
 
 use std::{
+    mem::MaybeUninit,
     os::unix::net::UnixListener,
     pin::Pin,
     sync::{
@@ -229,7 +230,7 @@ impl GdbStubRunner {
 
     #[inline(always)]
     fn read_addrs(
-        &self,
+        &mut self,
         start_address: <AArch64 as Arch>::Usize,
         max_bytes: usize,
     ) -> TargetResult<Box<[u8]>, GdbStub> {
@@ -241,24 +242,37 @@ impl GdbStubRunner {
             max_bytes = max_bytes,
             "reading memory",
         );
-        let Some(mem_region) = self.machine.memory.find_region(start_address) else {
+        let mut resolved_address = MaybeUninit::uninit();
+        if !crate::memory::mmu::translate_address(
+            &mut self.machine,
+            start_address,
+            start_address,
+            false,
+            &mut resolved_address,
+        ) {
             tracing::error!(
                 "Cannot read from address {} which is not covered by a RAM memory region.",
                 start_address
             );
             return Err(TargetError::NonFatal);
-        };
-        let address_inside_region = start_address.0 - mem_region.phys_offset.0;
-        let Some(mmapped_region) = mem_region.as_mmap() else {
+        }
+        let crate::memory::mmu::ResolvedAddress {
+                mem_region,
+                address_inside_region,
+            } =
+            // SAFETY: we checked the return value
+            unsafe { resolved_address.assume_init( )};
+        let Some(mmapped_region) = mem_region.unwrap().as_mmap() else {
             tracing::error!(
                 "Cannot read from address {} which is mapped to device memory",
                 start_address
             );
             return Err(TargetError::NonFatal);
         };
-        let r: &[u8] = &mmapped_region.as_ref()[address_inside_region as usize..];
+        let r: &[u8] = &mmapped_region.as_ref()[address_inside_region.try_into().unwrap()..];
         let r = &r[..max_bytes.min(r.len())];
-        Ok(r.into())
+        let r = r.into();
+        Ok(r)
     }
 
     #[inline(always)]
@@ -275,15 +289,28 @@ impl GdbStubRunner {
             value = ?value,
             "writing memory",
         );
-        let Some(mem_region) = self.machine.memory.find_region_mut(start_address) else {
+
+        let mut resolved_address = MaybeUninit::uninit();
+        if !crate::memory::mmu::translate_address(
+            &mut self.machine,
+            start_address,
+            start_address,
+            false,
+            &mut resolved_address,
+        ) {
             tracing::error!(
                 "Cannot write to address {} which is not covered by a RAM memory region.",
-                start_address
+                start_address,
             );
             return Err(TargetError::NonFatal);
-        };
-        let address_inside_region = start_address.0 - mem_region.phys_offset.0;
-        let Some(mmapped_region) = mem_region.as_mmap_mut() else {
+        }
+        let crate::memory::mmu::ResolvedAddress {
+                mem_region,
+                address_inside_region,
+            } =
+            // SAFETY: we checked the return value
+            unsafe { resolved_address.assume_init( )};
+        let Some(mmapped_region) = mem_region.unwrap().as_mmap_mut() else {
             tracing::error!(
                 "Cannot write to address {} which is mapped to device memory",
                 start_address

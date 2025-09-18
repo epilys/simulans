@@ -4,32 +4,87 @@
 //! Memory access operations
 
 use cranelift::{
-    codegen::ir::types::{I128, I16, I32, I64, I8},
+    codegen::ir::{
+        entities::StackSlot,
+        instructions::BlockArg,
+        stackslot::{StackSlotData, StackSlotKind},
+        types::{I128, I16, I32, I64, I8},
+    },
     prelude::*,
 };
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
-use crate::{jit::BlockTranslator, memory::Width};
+use crate::{
+    jit::{lookup_block, BlockTranslator},
+    memory::{mmu::ResolvedAddress, Width},
+};
 
 impl BlockTranslator<'_> {
+    fn create_resolved_address_stack_slot(&mut self) -> StackSlot {
+        self.builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            std::mem::size_of::<ResolvedAddress<'_>>()
+                .try_into()
+                .unwrap(),
+            std::mem::align_of::<ResolvedAddress<'_>>()
+                .try_into()
+                .unwrap(),
+        ))
+    }
+
     #[inline]
     /// Generates a JIT write access
-    pub fn generate_write(&mut self, target_address: Value, value: Value, width: Width) {
-        let (write_func, sigref) = self.memops_table.write(width);
+    pub fn generate_write(&mut self, target_address: Value, value: Value, width: Width) -> Value {
         let address_lookup_func = self.builder.ins().iconst(
             I64,
-            crate::machine::physical_address_lookup as usize as u64 as i64,
+            crate::memory::mmu::translate_address as usize as u64 as i64,
+        );
+        self.store_pc(None);
+        let preferred_exception_return = self.builder.ins().iconst(I64, self.address as i64);
+        let raise_exception = self.builder.ins().iconst(I8, i64::from(true));
+        let resolved_address_slot = self.create_resolved_address_stack_slot();
+        let resolved_address_slot_address = self.builder.ins().stack_addr(
+            self.module.target_config().pointer_type(),
+            resolved_address_slot,
+            0,
         );
         let call = self.builder.ins().call_indirect(
             self.address_lookup_sigref,
             address_lookup_func,
-            &[self.machine_ptr, target_address],
+            &[
+                self.machine_ptr,
+                target_address,
+                preferred_exception_return,
+                raise_exception,
+                resolved_address_slot_address,
+            ],
         );
-        let (memory_region_ptr, address_inside_region) = {
-            let results = self.builder.inst_results(call);
-            (results[0], results[1])
+        let (success, memory_region_ptr, address_inside_region) = {
+            let success = self.builder.inst_results(call)[0];
+            let memory_region_ptr = self.builder.ins().stack_load(
+                self.module.target_config().pointer_type(),
+                resolved_address_slot,
+                std::mem::offset_of!(ResolvedAddress, mem_region) as i32,
+            );
+            let address_inside_region = self.builder.ins().stack_load(
+                I64,
+                resolved_address_slot,
+                std::mem::offset_of!(ResolvedAddress, address_inside_region) as i32,
+            );
+            (success, memory_region_ptr, address_inside_region)
         };
+        let success_block = self.builder.create_block();
+        let failure_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder.append_block_param(merge_block, I8);
+        self.builder
+            .ins()
+            .brif(success, success_block, &[], failure_block, &[]);
+        self.builder.switch_to_block(success_block);
+        self.builder.seal_block(success_block);
+
+        let (write_func, sigref) = self.memops_table.write(width);
         let write_func = self.builder.ins().iconst(I64, write_func);
         let call = self.builder.ins().call_indirect(
             *sigref,
@@ -37,31 +92,93 @@ impl BlockTranslator<'_> {
             &[memory_region_ptr, address_inside_region, value],
         );
         self.builder.inst_results(call);
+        self.builder
+            .ins()
+            .jump(merge_block, &[BlockArg::from(success)]);
+        self.builder.switch_to_block(failure_block);
+        self.builder.seal_block(failure_block);
+        let translate_func = self
+            .builder
+            .ins()
+            .iconst(I64, lookup_block as usize as u64 as i64);
+        self.builder.ins().return_(&[translate_func]);
+        self.builder.switch_to_block(merge_block);
+        self.builder.seal_block(merge_block);
+        let success = self.builder.block_params(merge_block)[0];
+        success
     }
 
     #[inline]
     /// Generates a JIT read access
     pub fn generate_read(&mut self, target_address: Value, width: Width) -> Value {
-        let (read_func, sigref) = self.memops_table.read(width);
         let address_lookup_func = self.builder.ins().iconst(
             I64,
-            crate::machine::physical_address_lookup as usize as u64 as i64,
+            crate::memory::mmu::translate_address as usize as u64 as i64,
+        );
+        self.store_pc(None);
+        let preferred_exception_return = self.builder.ins().iconst(I64, self.address as i64);
+        let raise_exception = self.builder.ins().iconst(I8, i64::from(true));
+        let resolved_address_slot = self.create_resolved_address_stack_slot();
+        let resolved_address_slot_address = self.builder.ins().stack_addr(
+            self.module.target_config().pointer_type(),
+            resolved_address_slot,
+            0,
         );
         let call = self.builder.ins().call_indirect(
             self.address_lookup_sigref,
             address_lookup_func,
-            &[self.machine_ptr, target_address],
+            &[
+                self.machine_ptr,
+                target_address,
+                preferred_exception_return,
+                raise_exception,
+                resolved_address_slot_address,
+            ],
         );
-        let resolved = {
-            let results = self.builder.inst_results(call);
-            [results[0], results[1]]
+        let (success, resolved) = {
+            let success = self.builder.inst_results(call)[0];
+            let memory_region_ptr = self.builder.ins().stack_load(
+                self.module.target_config().pointer_type(),
+                resolved_address_slot,
+                std::mem::offset_of!(ResolvedAddress, mem_region) as i32,
+            );
+            let address_inside_region = self.builder.ins().stack_load(
+                I64,
+                resolved_address_slot,
+                std::mem::offset_of!(ResolvedAddress, address_inside_region) as i32,
+            );
+            (success, [memory_region_ptr, address_inside_region])
         };
+        let success_block = self.builder.create_block();
+        let failure_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder.append_block_param(merge_block, width.into());
+        self.builder
+            .ins()
+            .brif(success, success_block, &[], failure_block, &[]);
+        self.builder.switch_to_block(success_block);
+        self.builder.seal_block(success_block);
+
+        let (read_func, sigref) = self.memops_table.read(width);
         let read_func = self.builder.ins().iconst(I64, read_func);
         let call = self
             .builder
             .ins()
             .call_indirect(*sigref, read_func, &resolved);
-        self.builder.inst_results(call)[0]
+        let read_value = self.builder.inst_results(call)[0];
+        self.builder
+            .ins()
+            .jump(merge_block, &[BlockArg::from(read_value)]);
+        self.builder.switch_to_block(failure_block);
+        self.builder.seal_block(failure_block);
+        let translate_func = self
+            .builder
+            .ins()
+            .iconst(I64, lookup_block as usize as u64 as i64);
+        self.builder.ins().return_(&[translate_func]);
+        self.builder.switch_to_block(merge_block);
+        self.builder.seal_block(merge_block);
+        self.builder.block_params(merge_block)[0]
     }
 }
 

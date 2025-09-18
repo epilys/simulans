@@ -10,7 +10,7 @@ use cranelift::prelude::*;
 use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
-use crate::memory::Address;
+use crate::{machine::Armv8AMachine, memory::Address};
 
 mod memory;
 pub use memory::*;
@@ -163,8 +163,13 @@ pub enum Exception {
 #[derive(Copy, Clone, Debug)]
 /// Exit request to be serviced on main execution loop
 pub enum ExitRequest {
-    /// An architectural exception.
-    Exception(Exception),
+    /// Instruction or data abort
+    Abort {
+        /// Causing fault
+        fault: crate::exceptions::FaultRecord,
+        /// Return address
+        preferred_exception_return: Address,
+    },
 }
 
 /// ID registers
@@ -354,7 +359,7 @@ impl ExecutionState {
     ///
     /// Used as a preamble to a translation block.
     pub fn load_cpu_state(
-        &self,
+        machine_ptr: Value,
         builder: &mut FunctionBuilder,
         registers: &mut IndexMap<bad64::Reg, Variable>,
         sys_registers: &mut IndexMap<bad64::SysReg, Variable>,
@@ -364,7 +369,7 @@ impl ExecutionState {
         macro_rules! reg_field {
             ($($field:ident$([$index:expr])? => $bad_reg:expr),*$(,)?) => {{
                 $(
-                    let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
+                    let addr = builder.ins().iadd_imm(machine_ptr, std::mem::offset_of!(Armv8AMachine, cpu_state.registers) as i64);
                     let offset = core::mem::offset_of!(RegisterFile, $field) $(+ $index * std::mem::size_of::<u128>())*;
                     let value = builder.ins().load(I64, TRUSTED_MEMFLAGS, addr, i32::try_from(offset).unwrap());
                     assert!(!registers.contains_key(&$bad_reg));
@@ -375,7 +380,7 @@ impl ExecutionState {
             }};
             (sys $($field:ident => $bad_sys_reg:expr),*$(,)?) => {{
                 $(
-                    let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
+                    let addr = builder.ins().iadd_imm(machine_ptr, std::mem::offset_of!(Armv8AMachine, cpu_state.registers) as i64);
                     let offset = core::mem::offset_of!(RegisterFile, $field);
                     let value = builder.ins().load(I64, TRUSTED_MEMFLAGS, addr, i32::try_from(offset).unwrap());
                     assert!(!sys_registers.contains_key(&$bad_sys_reg));
@@ -435,9 +440,10 @@ impl ExecutionState {
             registers.insert(Reg::XZR, var);
             builder.def_var(var, zero);
         }
-        let vector_addr = builder
-            .ins()
-            .iconst(I64, std::ptr::addr_of!(self.vector_registers) as i64);
+        let vector_addr = builder.ins().iadd_imm(
+            machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, cpu_state.vector_registers) as i64,
+        );
         for i in 0_u32..=31 {
             let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
             assert!(!registers.contains_key(&v_reg));
@@ -456,7 +462,7 @@ impl ExecutionState {
     ///
     /// Used as an epilogue of a translation block.
     pub fn save_cpu_state(
-        &self,
+        machine_ptr: Value,
         builder: &mut FunctionBuilder,
         registers: &IndexMap<bad64::Reg, Variable>,
         sys_registers: &IndexMap<bad64::SysReg, Variable>,
@@ -468,7 +474,7 @@ impl ExecutionState {
         macro_rules! reg_field {
             ($($field:ident$([$index:expr])? => $bad_reg:expr),*$(,)?) => {{
                 $(
-                    let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
+                    let addr = builder.ins().iadd_imm(machine_ptr, std::mem::offset_of!(Armv8AMachine, cpu_state.registers) as i64);
                     let offset = core::mem::offset_of!(RegisterFile, $field) $(+ $index * std::mem::size_of::<u128>())*;
                     assert!(registers.contains_key(&$bad_reg));
                     let var = &registers[&$bad_reg];
@@ -478,7 +484,7 @@ impl ExecutionState {
             }};
             (sys $($field:ident$($conversion:expr)? => $bad_sys_reg:expr),*$(,)?) => {{
                 $(
-                    let addr = builder.ins().iconst(I64, std::ptr::addr_of!(self.registers) as i64);
+                    let addr = builder.ins().iadd_imm(machine_ptr, std::mem::offset_of!(Armv8AMachine, cpu_state.registers) as i64);
                     let offset = core::mem::offset_of!(RegisterFile, $field);
                     assert!(sys_registers.contains_key(&$bad_sys_reg));
                     let var = &sys_registers[&$bad_sys_reg];
@@ -534,9 +540,10 @@ impl ExecutionState {
             sp => Reg::SP,
         }
         if write_to_simd {
-            let vector_addr = builder
-                .ins()
-                .iconst(I64, std::ptr::addr_of!(self.vector_registers) as i64);
+            let vector_addr = builder.ins().iadd_imm(
+                machine_ptr,
+                std::mem::offset_of!(Armv8AMachine, cpu_state.vector_registers) as i64,
+            );
             for i in 0_u32..=31 {
                 let offset = i * std::mem::size_of::<u128>() as u32;
                 let offset = i32::try_from(offset).unwrap();
@@ -584,6 +591,15 @@ impl ExecutionState {
             ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.exception_registers.elr_el1 = val,
             ExceptionLevel::EL2 => self.exception_registers.elr_el2 = val,
             ExceptionLevel::EL3 => self.exception_registers.elr_el3 = val,
+        }
+    }
+
+    /// Returns `SCTLR_ELx` register value depending on current exception level.
+    pub fn sctlr_elx(&self) -> u64 {
+        match self.PSTATE().EL() {
+            ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.control_registers.sctlr_el1,
+            ExceptionLevel::EL2 => self.control_registers.sctlr_el2,
+            ExceptionLevel::EL3 => self.control_registers.sctlr_el3,
         }
     }
 }
