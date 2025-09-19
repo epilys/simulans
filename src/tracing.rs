@@ -24,7 +24,7 @@ use tracing_subscriber::{prelude::*, reload, Layer};
 
 mod helpers {
     /// Helper method to print register state on block entry/exit for trace item
-    /// [`BlockEntry`](tracing::TraceItem::BlockEntry)
+    /// [`BlockEntry`](crate::tracing::TraceItem::BlockEntry)
     pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine) {
         tracing::event!(
             target: crate::tracing::TraceItem::BlockEntry.as_str(),
@@ -82,7 +82,7 @@ pub enum TraceItem {
     LookupBlock,
     /// Logs memory accesses.
     Memory,
-    /// Logs [`PL011State`](crate::devices::PL011State`) related events.
+    /// Logs [`PL011State`](crate::devices::pl011::PL011State`) related events.
     Pl011,
 }
 
