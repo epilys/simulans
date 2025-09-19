@@ -49,7 +49,7 @@ pub struct Entry(
 );
 
 /// Lookup [`machine.pc`] in cached translation blocks
-/// ([`Armv8AMachine::translation_blocks`]).
+/// ([`Jit::translation_blocks`]).
 pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> Entry {
     let pc: u64 = machine.pc;
     if let Some(exit_request) = machine.cpu_state.exit_request.take() {

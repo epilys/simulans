@@ -230,21 +230,21 @@ impl Default for IDRegisterFile {
 #[derive(Copy, Clone, Debug)]
 #[repr(u8)]
 pub enum PARange {
-    ///4GB 32 bits, PA[31:0]
+    ///4GB 32 bits, `PA[31:0]`
     _1 = 0b0000,
-    /// 64GB 36 bits, PA[35:0]
+    /// 64GB 36 bits, `PA[35:0]`
     _2 = 0b0001,
-    ///1TB 40 bits, PA[39:0]
+    ///1TB 40 bits, `PA[39:0]`
     _3 = 0b0010,
-    /// 4TB 42 bits, PA[41:0]
+    /// 4TB 42 bits, `PA[41:0]`
     _4 = 0b0011,
-    /// 16TB 44 bits, PA[43:0]
+    /// 16TB 44 bits, `PA[43:0]`
     _5 = 0b0100,
-    /// 256TB 48 bits, PA[47:0]
+    /// 256TB 48 bits, `PA[47:0]`
     _6 = 0b0101,
-    /// 4PB 52 bits, PA[51:0]
+    /// 4PB 52 bits, `PA[51:0]`
     _7 = 0b0110,
-    /// 64PB 56 bits, PA[55:0]
+    /// 64PB 56 bits, `PA[55:0]`
     _8 = 0b0111,
 }
 
