@@ -2049,20 +2049,6 @@ impl BlockTranslator<'_> {
             Op::ASRR => todo!(),
             Op::ASRV => todo!(),
             Op::AT => todo!(),
-            Op::AUTDA => todo!(),
-            Op::AUTDB => todo!(),
-            Op::AUTDZA => todo!(),
-            Op::AUTDZB => todo!(),
-            Op::AUTIA => todo!(),
-            Op::AUTIA1716 => todo!(),
-            Op::AUTIASP => todo!(),
-            Op::AUTIAZ => todo!(),
-            Op::AUTIB => todo!(),
-            Op::AUTIB1716 => todo!(),
-            Op::AUTIBSP => todo!(),
-            Op::AUTIBZ => todo!(),
-            Op::AUTIZA => todo!(),
-            Op::AUTIZB => todo!(),
             Op::AXFLAG => todo!(),
             Op::BCAX => todo!(),
             Op::BDEP => todo!(),
@@ -3080,21 +3066,41 @@ impl BlockTranslator<'_> {
             Op::ORNS => todo!(),
             Op::ORRS => todo!(),
             Op::ORV => todo!(),
-            Op::PACDA => todo!(),
-            Op::PACDB => todo!(),
-            Op::PACDZA => todo!(),
-            Op::PACDZB => todo!(),
-            Op::PACGA => todo!(),
-            Op::PACIA => todo!(),
-            Op::PACIA1716 => todo!(),
-            Op::PACIASP => todo!(),
-            Op::PACIAZ => todo!(),
-            Op::PACIB => todo!(),
-            Op::PACIB1716 => todo!(),
-            Op::PACIBSP => todo!(),
-            Op::PACIBZ => todo!(),
-            Op::PACIZA => todo!(),
-            Op::PACIZB => todo!(),
+            Op::AUTDA
+            | Op::AUTDB
+            | Op::AUTDZA
+            | Op::AUTDZB
+            | Op::AUTIA
+            | Op::AUTIA1716
+            | Op::AUTIAZ
+            | Op::AUTIB
+            | Op::AUTIB1716
+            | Op::AUTIBSP
+            | Op::AUTIBZ
+            | Op::AUTIZA
+            | Op::AUTIZB
+            | Op::PACIAZ
+            | Op::PACIB
+            | Op::PACIB1716
+            | Op::PACIBSP
+            | Op::PACIBZ
+            | Op::PACIZA
+            | Op::PACIZB
+            | Op::PACDA
+            | Op::PACDB
+            | Op::PACDZA
+            | Op::PACDZB
+            | Op::PACGA
+            | Op::PACIA
+            | Op::PACIA1716
+            | Op::XPACD
+            | Op::XPACI
+            | Op::XPACLRI
+            | Op::AUTIASP
+            | Op::PACIASP => {
+                // [ref:pointer_auth]
+                // NOP
+            }
             Op::PFALSE => todo!(),
             Op::PFIRST => todo!(),
             Op::PMUL => todo!(),
@@ -3945,9 +3951,6 @@ impl BlockTranslator<'_> {
             Op::WRFFR => todo!(),
             Op::XAFLAG => todo!(),
             Op::XAR => todo!(),
-            Op::XPACD => todo!(),
-            Op::XPACI => todo!(),
-            Op::XPACLRI => todo!(),
             Op::XTN => todo!(),
             Op::XTN2 => todo!(),
             Op::YIELD => {
