@@ -1951,6 +1951,16 @@ impl BlockTranslator<'_> {
                 let width = self.operand_width(&instruction.operands()[1]);
                 write_to_register!(target, TypedValue { value, width });
             }
+            Op::ASR => {
+                // Arithmetic shift right (alias of SBFM)
+                // [ref:needs_unit_test]
+                let target = get_destination_register!();
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let value = self.builder.ins().sshr(a, b);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
+            }
             Op::ABS => {
                 // Absolute value
                 // [ref:FEAT_CSSC]
@@ -2048,7 +2058,6 @@ impl BlockTranslator<'_> {
                 self.update_nzcv(nzcv);
             }
             Op::ANDV => todo!(),
-            Op::ASR => todo!(),
             Op::ASRD => todo!(),
             Op::ASRR => todo!(),
             Op::ASRV => todo!(),
