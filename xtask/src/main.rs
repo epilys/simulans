@@ -20,7 +20,7 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use std::fmt::Write;
+use std::{fmt::Write, process::Stdio};
 
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -69,6 +69,21 @@ enum Command {
         /// Force generation of slices larger than 256 bytes.
         #[arg(long, default_value_t = false)]
         force: bool,
+    },
+    /// Shows the semantics of an instruction in P-Code format using `python3`
+    /// and `pypcode`
+    ///
+    /// Python and `pypcode` must be installed, obviously.
+    Pcode {
+        /// Instruction value
+        #[arg(value_name = "INPUT")]
+        input: String,
+        /// Don't assemble input but interpret it as hex
+        #[arg(long, default_value_t = false)]
+        hex: bool,
+        /// Set base address
+        #[arg(long, default_value = None)]
+        base_address: Option<String>,
     },
 }
 
@@ -257,6 +272,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             output.push_str("\";");
             println!("{output}");
+        }
+        Command::Pcode {
+            input,
+            hex,
+            base_address,
+        } => {
+            let hex_input = if hex {
+                input
+            } else {
+                let input_path = tmp_dir.path().join("input.S");
+                std::fs::write(&input_path, &input).unwrap();
+                let output_path = tmp_dir.path().join("pcode.bin");
+                compile_assembly(&input_path, &output_path, &tmp_dir, CompileFormat::Blob)?;
+                let bin = std::fs::read(&output_path).unwrap();
+                let mut hex = String::new();
+                for b in bin {
+                    write!(&mut hex, "{:x?}", b).unwrap();
+                }
+                // Pad hex value because bytearray.fromhex expects a multiple of 2
+                if !hex.len().is_multiple_of(2) {
+                    format!("0{hex}")
+                } else {
+                    hex
+                }
+            };
+            let python_script = format!(
+                r#"
+from pypcode import Arch, Context, PcodePrettyPrinter
+
+ctx = Context("AARCH64:LE:64:v8A")
+machine_code = bytearray.fromhex("{}")
+base_address = {}
+result = ctx.disassemble(bytes(machine_code),base_address)
+for insn in result.instructions:
+    print(insn)
+result = ctx.translate(bytes(machine_code), base_address)
+for op in result.ops:
+    print(op)
+"#,
+                hex_input,
+                base_address.unwrap_or_else(|| "0".to_string())
+            );
+            std::process::Command::new("python3")
+                .arg("-c")
+                .arg(python_script)
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .stdin(Stdio::null())
+                .current_dir(tmp_dir.path())
+                .output()
+                .map_err(|err| format!("Could not launch python3: {err}"))?;
         }
     }
     Ok(())

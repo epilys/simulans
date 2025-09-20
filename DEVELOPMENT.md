@@ -52,12 +52,36 @@ You can also view current register state and assembly by enabling the `asm` and 
 
 ## Emulating specific instructions
 
-[Refer to the official Arm documentation about A-profile AArch64 Instructions](https://developer.arm.com/documentation/ddi0601/2025-03/AArch64-Instructions?lang=en)
-
 The code generation for emulated instructions happens in the [`jit`
 module](./src/jit.rs) in the `BlockTranslator::translate_instruction` function.
 
 So far unimplemented instructions have a `todo!()` stub which you can replace with the JIT generation logic.
+
+### Instruction operation from Arm's specification
+
+[Refer to the official Arm documentation about A-profile AArch64 Instructions](https://developer.arm.com/documentation/ddi0601/2025-03/AArch64-Instructions?lang=en)
+
+### Instruction operation from Ghidra's P-Code
+
+The Ghidra decompiler uses a generic language, [P-Code](https://github.com/NationalSecurityAgency/ghidra/blob/master/GhidraDocs/languages/html/pcoderef.html), to describe operations of instructions of various architectures, including `Aarch64`.
+
+The `xtask` utility can call into python and translate an instruction to P-Code operations using the `pypcode` module which you can install from `pip`.
+
+```sh
+$ cargo xtask pcode "add x0, x26, w27, sxtw"
+0x0/4: add x0, x26, w27, SXTW
+IMARK ram[0:4]
+unique[5f80:8] = sext(w27)
+unique[6080:8] = unique[5f80:8]
+unique[6080:8] = unique[6080:8] << 0x0
+unique[11700:8] = unique[6080:8]
+tmpCY = carry(x26, unique[11700:8])
+tmpOV = scarry(x26, unique[11700:8])
+unique[11800:8] = x26 + unique[11700:8]
+tmpNG = unique[11800:8] s< 0x0
+tmpZR = unique[11800:8] == 0x0
+x0 = unique[11800:8]
+```
 
 ### Special register logic
 
