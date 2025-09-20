@@ -578,20 +578,28 @@ impl BlockTranslator<'_> {
                 match shift {
                     Shift::LSL(lsl) => self.builder.ins().ishl_imm(value, i64::from(*lsl)),
                     Shift::LSR(lsr) => self.builder.ins().ushr_imm(value, i64::from(*lsr)),
-                    Shift::ASR(_asr) => {
-                        todo!()
+                    Shift::ASR(asr) => {
+                        // [ref:verify_implementation]
+                        self.builder.ins().sshr_imm(value, i64::from(*asr))
                     }
                     Shift::ROR(ror) => self.builder.ins().rotr_imm(value, i64::from(*ror)),
                     Shift::UXTW(uxtw) => {
                         // [ref:verify_implementation]
+                        let value = self.builder.ins().uextend(I64, value);
                         if *uxtw == 0 {
                             value
                         } else {
                             self.builder.ins().ishl_imm(value, i64::from(*uxtw))
                         }
                     }
-                    Shift::SXTW(_sxtw) => {
-                        todo!()
+                    Shift::SXTW(sxtw) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().sextend(I64, value);
+                        if *sxtw == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*sxtw))
+                        }
                     }
                     Shift::SXTX(_sxtx) => {
                         todo!()
@@ -599,15 +607,30 @@ impl BlockTranslator<'_> {
                     Shift::UXTX(_uxtx) => {
                         todo!()
                     }
-                    Shift::SXTB(_sxtb) => {
-                        todo!()
+                    Shift::SXTB(sxtb) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().ireduce(I8, value);
+                        let value = self.builder.ins().sextend(I32, value);
+                        if *sxtb == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*sxtb))
+                        }
                     }
-                    Shift::SXTH(_sxth) => {
-                        todo!()
+                    Shift::SXTH(sxth) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().ireduce(I16, value);
+                        let value = self.builder.ins().sextend(I32, value);
+                        if *sxth == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*sxth))
+                        }
                     }
                     Shift::UXTH(uxth) => {
                         // [ref:verify_implementation]
-                        let value = self.builder.ins().band_imm(value, i64::from(u16::MAX));
+                        let value = self.builder.ins().ireduce(I16, value);
+                        let value = self.builder.ins().uextend(I32, value);
                         if *uxth == 0 {
                             value
                         } else {
@@ -617,6 +640,7 @@ impl BlockTranslator<'_> {
                     Shift::UXTB(uxtb) => {
                         // [ref:verify_implementation]
                         let value = self.builder.ins().band_imm(value, i64::from(u8::MAX));
+                        let value = self.builder.ins().uextend(I32, value);
                         if *uxtb == 0 {
                             value
                         } else {
@@ -778,12 +802,12 @@ impl BlockTranslator<'_> {
             }
             Operand::SysReg(reg) => self.read_sysreg(reg),
             Operand::MemExt {
-                regs: [ref address, ref offset],
+                regs: [ref address_reg, ref offset_reg],
                 shift,
                 arrspec: None,
             } => {
-                let address = self.reg_to_value(address, None);
-                let offset = self.reg_to_value(offset, None);
+                let address = self.reg_to_value(address_reg, None);
+                let offset = self.reg_to_value(offset_reg, None);
                 let offset = match shift {
                     None => offset,
                     Some(bad64::Shift::LSL(ref lsl)) => {
@@ -792,6 +816,34 @@ impl BlockTranslator<'_> {
                     Some(bad64::Shift::MSL(ref lsl)) => {
                         let val = self.builder.ins().ishl_imm(offset, i64::from(*lsl));
                         self.builder.ins().bor_imm(val, 2_i64.pow(*lsl) - 1)
+                    }
+                    Some(bad64::Shift::UXTW(ref uxtw)) => {
+                        let addr_width = self.reg_width(address_reg);
+                        let offset_width = self.reg_width(offset_reg);
+                        let value = if *uxtw == 0 {
+                            offset
+                        } else {
+                            self.builder.ins().ishl_imm(offset, i64::from(*uxtw))
+                        };
+                        if addr_width > offset_width {
+                            self.builder.ins().uextend(addr_width.into(), value)
+                        } else {
+                            value
+                        }
+                    }
+                    Some(bad64::Shift::SXTW(ref sxtw)) => {
+                        let addr_width = self.reg_width(address_reg);
+                        let offset_width = self.reg_width(offset_reg);
+                        let value = if *sxtw == 0 {
+                            offset
+                        } else {
+                            self.builder.ins().ishl_imm(offset, i64::from(*sxtw))
+                        };
+                        if addr_width > offset_width {
+                            self.builder.ins().sextend(addr_width.into(), value)
+                        } else {
+                            value
+                        }
                     }
                     other => unimplemented!("unimplemented shift {other:?}"),
                 };
@@ -1045,30 +1097,8 @@ impl BlockTranslator<'_> {
         self.builder.ins().ireduce(I32, value)
     }
 
-    fn operand_width(&self, operand: &bad64::Operand) -> Width {
-        use bad64::{Operand, Reg};
-
-        let reg = match operand {
-            Operand::MemOffset { reg, .. }
-            | Operand::MemPreIdx { reg, .. }
-            | Operand::MemPostIdxImm { reg, .. }
-            | Operand::MemReg(reg)
-            | Operand::ShiftReg { reg, .. }
-            | Operand::QualReg { reg, .. }
-            | Operand::Reg { reg, .. } => reg,
-            Operand::ImplSpec { .. } | Operand::SysReg { .. } => return Width::_64,
-            Operand::FImm32(_) | Operand::Imm32 { .. } => return Width::_32,
-            Operand::Label(_) | Operand::Imm64 { .. } => return Width::_64,
-            Operand::MultiReg { .. }
-            | Operand::MemPostIdxReg(_)
-            | Operand::MemExt { .. }
-            | Operand::SmeTile { .. }
-            | Operand::AccumArray { .. }
-            | Operand::IndexedElement { .. }
-            | Operand::Cond(_)
-            | Operand::Name(_)
-            | Operand::StrImm { .. } => unimplemented!(),
-        };
+    fn reg_width(&self, reg: &bad64::Reg) -> Width {
+        use bad64::Reg;
 
         let reg_no = *reg as u32;
 
@@ -1093,6 +1123,33 @@ impl BlockTranslator<'_> {
         } else {
             Width::_64
         }
+    }
+
+    fn operand_width(&self, operand: &bad64::Operand) -> Width {
+        use bad64::Operand;
+
+        let reg = match operand {
+            Operand::MemOffset { reg, .. }
+            | Operand::MemPreIdx { reg, .. }
+            | Operand::MemPostIdxImm { reg, .. }
+            | Operand::MemReg(reg)
+            | Operand::ShiftReg { reg, .. }
+            | Operand::QualReg { reg, .. }
+            | Operand::Reg { reg, .. } => reg,
+            Operand::ImplSpec { .. } | Operand::SysReg { .. } => return Width::_64,
+            Operand::FImm32(_) | Operand::Imm32 { .. } => return Width::_32,
+            Operand::Label(_) | Operand::Imm64 { .. } => return Width::_64,
+            Operand::MultiReg { .. }
+            | Operand::MemPostIdxReg(_)
+            | Operand::MemExt { .. }
+            | Operand::SmeTile { .. }
+            | Operand::AccumArray { .. }
+            | Operand::IndexedElement { .. }
+            | Operand::Cond(_)
+            | Operand::Name(_)
+            | Operand::StrImm { .. } => unimplemented!(),
+        };
+        self.reg_width(reg)
     }
 
     #[inline]
@@ -1622,19 +1679,7 @@ impl BlockTranslator<'_> {
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[1]);
-                let b = {
-                    let value = self.translate_operand(&instruction.operands()[2]);
-
-                    // Fixup value if it's an extending register instruction, e.g.
-                    // "add X1, X2, W3, UXTB #2"
-                    if matches!(width, Width::_64)
-                        && matches!(self.operand_width(&instruction.operands()[2]), Width::_32)
-                    {
-                        self.builder.ins().uextend(I64, value)
-                    } else {
-                        value
-                    }
-                };
+                let b = self.translate_operand(&instruction.operands()[2]);
                 let (value, _overflow) = self.builder.ins().uadd_overflow(a, b);
                 write_to_register!(target, TypedValue { value, width });
             }
@@ -1642,18 +1687,7 @@ impl BlockTranslator<'_> {
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[1]);
-                let b = {
-                    let value = self.translate_operand(&instruction.operands()[2]);
-
-                    // Fixup value if it's an extending register instruction
-                    if matches!(width, Width::_64)
-                        && matches!(self.operand_width(&instruction.operands()[2]), Width::_32)
-                    {
-                        self.builder.ins().uextend(I64, value)
-                    } else {
-                        value
-                    }
-                };
+                let b = self.translate_operand(&instruction.operands()[2]);
                 let (value, _ignore_overflow) = self.builder.ins().usub_overflow(a, b);
                 write_to_register!(target, TypedValue { value, width });
             }
@@ -1661,18 +1695,7 @@ impl BlockTranslator<'_> {
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[1]);
-                let b = {
-                    let value = self.translate_operand(&instruction.operands()[2]);
-
-                    // Fixup value if it's an extending register instruction
-                    if matches!(width, Width::_64)
-                        && matches!(self.operand_width(&instruction.operands()[2]), Width::_32)
-                    {
-                        self.builder.ins().uextend(I64, value)
-                    } else {
-                        value
-                    }
-                };
+                let b = self.translate_operand(&instruction.operands()[2]);
                 let negoperand2 = self.builder.ins().bnot(b);
                 let one = self.builder.ins().iconst(I8, 1);
                 let (result, nzcv) = self.add_with_carry(a, negoperand2, b, one, width);
@@ -2008,19 +2031,7 @@ impl BlockTranslator<'_> {
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[1]);
-                let b = {
-                    let value = self.translate_operand(&instruction.operands()[2]);
-
-                    // Fixup value if it's an extending register instruction, e.g.
-                    // "adds X1, X2, W3, UXTB #2"
-                    if matches!(width, Width::_64)
-                        && matches!(self.operand_width(&instruction.operands()[2]), Width::_32)
-                    {
-                        self.builder.ins().uextend(I64, value)
-                    } else {
-                        value
-                    }
-                };
+                let b = self.translate_operand(&instruction.operands()[2]);
                 let zero = self.builder.ins().iconst(I8, 0);
                 let (result, nzcv) = self.add_with_carry(a, b, b, zero, width);
                 write_to_register!(
@@ -2313,18 +2324,7 @@ impl BlockTranslator<'_> {
                 // [ref:needs_unit_test]
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[0]);
-                let b = {
-                    let value = self.translate_operand(&instruction.operands()[1]);
-
-                    // Fixup value if it's an extending register instruction
-                    if matches!(width, Width::_64)
-                        && matches!(self.operand_width(&instruction.operands()[1]), Width::_32)
-                    {
-                        self.builder.ins().uextend(I64, value)
-                    } else {
-                        value
-                    }
-                };
+                let b = self.translate_operand(&instruction.operands()[1]);
                 let zero = self.builder.ins().iconst(I8, 0);
                 let (_result, nzcv) = self.add_with_carry(a, b, b, zero, width);
                 self.update_nzcv(nzcv);
@@ -2332,18 +2332,7 @@ impl BlockTranslator<'_> {
             Op::CMP => {
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[0]);
-                let b = {
-                    let value = self.translate_operand(&instruction.operands()[1]);
-
-                    // Fixup value if it's an extending register instruction
-                    if matches!(width, Width::_64)
-                        && matches!(self.operand_width(&instruction.operands()[1]), Width::_32)
-                    {
-                        self.builder.ins().uextend(I64, value)
-                    } else {
-                        value
-                    }
-                };
+                let b = self.translate_operand(&instruction.operands()[1]);
                 let negoperand2 = self.builder.ins().bnot(b);
                 let one = self.builder.ins().iconst(I8, 1);
                 let (_result, nzcv) = self.add_with_carry(a, negoperand2, b, one, width);
@@ -3270,6 +3259,34 @@ impl BlockTranslator<'_> {
                     }
                 );
             }
+            Op::SXTB => {
+                // Sign Extend Byte Alias of SBFM <Rd>, <Rn>, #0, #7
+                let destination = get_destination_register!();
+                let w = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().ireduce(I8, w);
+                let value = self.builder.ins().sextend(destination.width.into(), value);
+                write_to_register!(
+                    destination,
+                    TypedValue {
+                        value,
+                        width: destination.width
+                    }
+                );
+            }
+            Op::SXTH => {
+                // Sign Extend Halfword Alias of SBFM <Rd>, <Rn>, #0, #15
+                let destination = get_destination_register!();
+                let w = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().ireduce(I16, w);
+                let value = self.builder.ins().sextend(destination.width.into(), value);
+                write_to_register!(
+                    destination,
+                    TypedValue {
+                        value,
+                        width: destination.width
+                    }
+                );
+            }
             Op::SBFX => {
                 let destination = get_destination_register!();
                 let source = self.translate_operand(&instruction.operands()[1]);
@@ -3672,8 +3689,6 @@ impl BlockTranslator<'_> {
             Op::SWPL => todo!(),
             Op::SWPLB => todo!(),
             Op::SWPLH => todo!(),
-            Op::SXTB => todo!(),
-            Op::SXTH => todo!(),
             Op::SXTL => todo!(),
             Op::SXTL2 => todo!(),
             Op::SYS => todo!(),
