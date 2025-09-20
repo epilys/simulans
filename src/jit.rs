@@ -3109,12 +3109,10 @@ impl BlockTranslator<'_> {
             Op::PMULLB => todo!(),
             Op::PMULLT => todo!(),
             Op::PNEXT => todo!(),
-            Op::PRFB => todo!(),
-            Op::PRFD => todo!(),
-            Op::PRFH => todo!(),
-            Op::PRFM => todo!(),
-            Op::PRFUM => todo!(),
-            Op::PRFW => todo!(),
+            Op::PRFB | Op::PRFD | Op::PRFH | Op::PRFW | Op::PRFUM | Op::PRFM => {
+                // Prefetch Memory
+                // NOP
+            }
             Op::PSB => todo!(),
             Op::PSSBB => todo!(),
             Op::PTEST => todo!(),
