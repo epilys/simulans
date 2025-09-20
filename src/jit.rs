@@ -3869,14 +3869,23 @@ impl BlockTranslator<'_> {
             Op::UMOV => todo!(),
             Op::UMSUBL => todo!(),
             Op::UMULH => {
-                let target = get_destination_register!();
+                // [ref:needs_unit_test]
+                let destination = get_destination_register!();
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
                 let value = self.builder.ins().umulhi(a, b);
                 let width = self.operand_width(&instruction.operands()[1]);
-                write_to_register!(target, TypedValue { value, width });
+                write_to_register!(destination, TypedValue { value, width });
             }
-            Op::UMULL => todo!(),
+            Op::UMULL => {
+                // [ref:needs_unit_test]
+                let destination = get_destination_register!();
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let value = self.builder.ins().imul(a, b);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(destination, TypedValue { value, width });
+            }
             Op::UMULL2 => todo!(),
             Op::UMULLB => todo!(),
             Op::UMULLT => todo!(),
