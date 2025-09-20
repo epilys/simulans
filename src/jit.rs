@@ -925,14 +925,6 @@ impl BlockTranslator<'_> {
                 };
             }
         };
-        if write {
-            // Writes to W registers set the higher 32 bits of the X register to zero. So,
-            // writing 0xFFFFFFFF into W0 sets X0 to 0x00000000FFFFFFFF.
-            let mask = self.builder.ins().iconst(I64, 0xffff_ffff);
-            let unmasked_value = self.builder.use_var(self.registers[&reg_64]);
-            let masked_value = self.builder.ins().band(unmasked_value, mask);
-            self.builder.def_var(self.registers[&reg_64], masked_value);
-        }
         TypedRegisterView {
             var: self.registers[&reg_64],
             width: Width::_32,
