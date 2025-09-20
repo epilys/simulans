@@ -1451,8 +1451,9 @@ impl BlockTranslator<'_> {
                     .iadd_imm(target, i64::from(width as i32) / 8);
                 self.generate_write(target, data2, width);
             }
-            Op::LDAR | Op::LDR => {
+            Op::LDXR | Op::LDAR | Op::LDR => {
                 // For LDAR: [ref:atomics]: We don't model exclusive access (yet).
+                // For LDXR: [ref:atomics]: We don't model exclusive access (yet).
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
@@ -2962,7 +2963,6 @@ impl BlockTranslator<'_> {
             Op::LDURSH => todo!(),
             Op::LDURSW => todo!(),
             Op::LDXP => todo!(),
-            Op::LDXR => todo!(),
             Op::LDXRB => todo!(),
             Op::LDXRH => todo!(),
             Op::LSLR => todo!(),
