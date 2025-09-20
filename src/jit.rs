@@ -3248,6 +3248,19 @@ impl BlockTranslator<'_> {
             Op::SBCS => todo!(),
             Op::SBFIZ => todo!(),
             Op::SBFM => todo!(),
+            Op::SXTW => {
+                // Alias of SBFM <Xd>, <Xn>, #0, #31
+                let destination = get_destination_register!();
+                let w = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().sextend(destination.width.into(), w);
+                write_to_register!(
+                    destination,
+                    TypedValue {
+                        value,
+                        width: destination.width
+                    }
+                );
+            }
             Op::SBFX => {
                 let destination = get_destination_register!();
                 let source = self.translate_operand(&instruction.operands()[1]);
@@ -3655,7 +3668,6 @@ impl BlockTranslator<'_> {
             Op::SXTH => todo!(),
             Op::SXTL => todo!(),
             Op::SXTL2 => todo!(),
-            Op::SXTW => todo!(),
             Op::SYS => todo!(),
             Op::SYSL => todo!(),
             Op::TBL => todo!(),
