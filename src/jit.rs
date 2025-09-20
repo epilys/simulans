@@ -590,8 +590,13 @@ impl BlockTranslator<'_> {
                             self.builder.ins().ishl_imm(value, i64::from(*uxtw))
                         }
                     }
-                    Shift::SXTW(_sxtw) => {
-                        todo!()
+                    Shift::SXTW(sxtw) => {
+                        // [ref:verify_implementation]
+                        if *sxtw == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*sxtw))
+                        }
                     }
                     Shift::SXTX(_sxtx) => {
                         todo!()
@@ -792,6 +797,22 @@ impl BlockTranslator<'_> {
                     Some(bad64::Shift::MSL(ref lsl)) => {
                         let val = self.builder.ins().ishl_imm(offset, i64::from(*lsl));
                         self.builder.ins().bor_imm(val, 2_i64.pow(*lsl) - 1)
+                    }
+                    Some(bad64::Shift::UXTW(ref uxtw)) => {
+                        // [ref:verify_implementation]
+                        if *uxtw == 0 {
+                            offset
+                        } else {
+                            self.builder.ins().ishl_imm(offset, i64::from(*uxtw))
+                        }
+                    }
+                    Some(bad64::Shift::SXTW(ref sxtw)) => {
+                        // [ref:verify_implementation]
+                        if *sxtw == 0 {
+                            offset
+                        } else {
+                            self.builder.ins().ishl_imm(offset, i64::from(*sxtw))
+                        }
                     }
                     other => unimplemented!("unimplemented shift {other:?}"),
                 };
