@@ -87,22 +87,10 @@ pub enum TraceItem {
 }
 
 impl TraceItem {
-    /// All [`TraceItem`] variants.
-    pub const POSSIBLE_VALUES: &[Self] = &[
-        Self::AddressLookup,
-        Self::BlockEntry,
-        Self::CraneliftCodegen,
-        Self::CraneliftFrontend,
-        Self::CraneliftJit,
-        Self::Exception,
-        Self::Gdb,
-        Self::Gdbstub,
-        Self::InAsm,
-        Self::Jit,
-        Self::LookupBlock,
-        Self::Memory,
-        Self::Pl011,
-    ];
+    /// Returns [`clap::ValueEnum::value_variants`].
+    pub fn value_variants<'a>() -> &'a [Self] {
+        <Self as clap::ValueEnum>::value_variants()
+    }
 
     /// Target path of item.
     pub const fn as_str(&self) -> &'static str {
@@ -153,27 +141,19 @@ impl std::str::FromStr for TraceItem {
     type Err = Box<dyn std::error::Error>;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        for i in Self::POSSIBLE_VALUES.iter() {
-            if i.as_str() == s {
+        for i in Self::value_variants().iter() {
+            if i.name() == s {
                 return Ok(*i);
             }
         }
         Err(Box::<dyn std::error::Error>::from(format!(
             "Expected one of {}",
-            Self::POSSIBLE_VALUES
+            Self::value_variants()
                 .iter()
-                .map(|s| s.as_str())
+                .map(|s| s.name())
                 .collect::<Vec<&str>>()
                 .join(", ")
         )))
-    }
-}
-
-impl std::ops::Deref for TraceItem {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        self.as_str()
     }
 }
 
@@ -270,7 +250,8 @@ impl TracingGuard {
             .with_default_directive(level.into())
             .from_env()
             .unwrap_or_default();
-        for item in TraceItem::POSSIBLE_VALUES {
+        env_filter = env_filter.add_directive(format!("simulans={level}").parse().unwrap());
+        for item in TraceItem::value_variants() {
             env_filter = if events.contains(item) {
                 env_filter.add_directive(format!("{}=trace", item.as_str()).parse().unwrap())
             } else {
