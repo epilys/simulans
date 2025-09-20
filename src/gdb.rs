@@ -586,9 +586,11 @@ impl GdbStubRunner {
 
     #[inline(always)]
     fn handle_monitor_cmd(&self, s: &str) -> String {
+        const AVAILABLE_COMMANDS: &str = "log,trace,pc,state,registers";
+
         let words = s.split_whitespace().collect::<Vec<&str>>();
         if words.is_empty() {
-            return String::from("Available monitor commands: {{log,pc,state,registers}}");
+            return format!("Available monitor commands: {{{AVAILABLE_COMMANDS}}}");
         }
 
         if let Err(err) = match words[0] {
@@ -627,11 +629,16 @@ impl GdbStubRunner {
             "trace" => match words.get(1) {
                 None => {
                     return format!(
-                        "Active trace items {}",
+                        "Available trace items {}\nActive trace items {}",
+                        tracing::TraceItem::value_variants()
+                            .iter()
+                            .map(|s| s.name())
+                            .collect::<Vec<&str>>()
+                            .join(","),
                         self.tracing_guard
                             .events()
                             .iter()
-                            .map(|s| s.as_str())
+                            .map(|s| s.name())
                             .collect::<Vec<&str>>()
                             .join(",")
                     );
@@ -640,13 +647,24 @@ impl GdbStubRunner {
                     let tokens = item.split('=').collect::<Vec<&str>>();
                     if !item.contains('=')
                         || tokens.len() != 2
-                        || ["off", "on"].contains(&tokens[1])
+                        || !["off", "on"].contains(&tokens[1])
                     {
                         return "Invalid syntax: use TRACE_ITEM=[off|on]".to_string();
                     }
                     let item = match tokens[0].parse() {
                         Ok(v) => v,
-                        Err(err) => return format!("{err}"),
+                        Err(err) => {
+                            return format!(
+                                "Could not parse {:?} as trace item: {err}. Available trace \
+                                 items: {}",
+                                tokens[0],
+                                tracing::TraceItem::value_variants()
+                                    .iter()
+                                    .map(|s| s.name())
+                                    .collect::<Vec<&str>>()
+                                    .join(","),
+                            )
+                        }
                     };
                     let mut events = self.tracing_guard.events().clone();
                     match tokens[1] {
@@ -675,7 +693,7 @@ impl GdbStubRunner {
             }
             other => {
                 return format!(
-                    "Unexpected command {other:?}: available commands: {{log,pc,state,registers}}"
+                    "Unexpected command {other:?}: available commands: {{{AVAILABLE_COMMANDS}}}"
                 );
             }
         } {
