@@ -107,19 +107,19 @@ impl TraceItem {
     /// Target path of item.
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::AddressLookup => "simulans::address_lookup",
-            Self::BlockEntry => "simulans::block_entry",
+            Self::AddressLookup => "simulans::address_lookup:event",
+            Self::BlockEntry => "simulans::block_entry:event",
             Self::CraneliftCodegen => "cranelift_codegen",
             Self::CraneliftFrontend => "cranelift_frontend",
             Self::CraneliftJit => "cranelift_jit",
-            Self::Exception => "simulans::exception",
-            Self::Gdb => "simulans::gdb",
+            Self::Exception => "simulans::exception:event",
+            Self::Gdb => "simulans::gdb:event",
             Self::Gdbstub => "gdbstub",
-            Self::InAsm => "simulans::in_asm",
-            Self::Jit => "simulans::jit",
-            Self::LookupBlock => "simulans::lookup_block",
-            Self::Memory => "simulans::memory",
-            Self::Pl011 => "simulans::pl011",
+            Self::InAsm => "simulans::in_asm:event",
+            Self::Jit => "simulans::jit:event",
+            Self::LookupBlock => "simulans::lookup_block:event",
+            Self::Memory => "simulans::memory:event",
+            Self::Pl011 => "simulans::pl011:event",
         }
     }
 
