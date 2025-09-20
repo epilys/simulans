@@ -1692,6 +1692,17 @@ impl BlockTranslator<'_> {
                 let width = self.operand_width(&instruction.operands()[1]);
                 write_to_register!(target, TypedValue { value, width });
             }
+            Op::MADD => {
+                // Multiply-add
+                let target = get_destination_register!();
+                let n = self.translate_operand(&instruction.operands()[1]);
+                let m = self.translate_operand(&instruction.operands()[2]);
+                let addend = self.translate_operand(&instruction.operands()[3]);
+                let value = self.builder.ins().imul(n, m);
+                let value = self.builder.ins().iadd(value, addend);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
+            }
             Op::MSUB => {
                 // Multiply-subtract
                 let destination = get_destination_register!();
@@ -2959,7 +2970,6 @@ impl BlockTranslator<'_> {
             Op::LSRR => todo!(),
             Op::LSRV => todo!(),
             Op::MAD => todo!(),
-            Op::MADD => todo!(),
             Op::MATCH => todo!(),
             Op::MLA => todo!(),
             Op::MLS => todo!(),
