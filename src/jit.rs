@@ -3504,7 +3504,6 @@ impl BlockTranslator<'_> {
             Op::STLURB => todo!(),
             Op::STLURH => todo!(),
             Op::STLXP => todo!(),
-            Op::STLXR => todo!(),
             Op::STLXRB => {
                 // [ref:atomics]: We don't model exclusive access (yet).
                 // [ref:needs_unit_test]
@@ -3585,7 +3584,7 @@ impl BlockTranslator<'_> {
             }
             Op::STURH => todo!(),
             Op::STXP => todo!(),
-            Op::STXR => {
+            Op::STLXR | Op::STXR => {
                 // [ref:atomics]: We don't model exclusive access (yet).
                 let status_target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
