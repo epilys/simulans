@@ -1,6 +1,58 @@
 # Development
 
-Set the environment variable `RUST_LOG=trace` or `RUST_LOG=debug` to print logs during execution.
+<!-- mdformat-toc start --slug=github --no-anchors --maxlevel=6 --minlevel=1 -->
+
+- [Development](#development)
+  - [Tracing and logs](#tracing-and-logs)
+  - [Debugging the VM as a remote `aarch64` target with the integrated GDB stub](#debugging-the-vm-as-a-remote-aarch64-target-with-the-integrated-gdb-stub)
+  - [Emulating specific instructions](#emulating-specific-instructions)
+    - [Instruction operation from Arm's specification](#instruction-operation-from-arms-specification)
+    - [Instruction operation from Ghidra's P-Code](#instruction-operation-from-ghidras-p-code)
+    - [Special register logic](#special-register-logic)
+  - [Debugging JIT code](#debugging-jit-code)
+    - [Debugging JIT IR](#debugging-jit-ir)
+    - [Debugging native JITed code](#debugging-native-jited-code)
+  - [Running tests](#running-tests)
+    - [Generating test case input as Rust slices](#generating-test-case-input-as-rust-slices)
+      - [With `xtask` utility](#with-xtask-utility)
+      - [Manually](#manually)
+    - [Generating binary from assembly code, manually](#generating-binary-from-assembly-code-manually)
+    - [Running the stand-alone test unikernel](#running-the-stand-alone-test-unikernel)
+
+<!-- mdformat-toc end -->
+
+## Tracing and logs
+
+Simulans uses the `tracing` crate.
+
+Besides plain `tracing::{info,error,trace,...}` prints, it also uses named events:
+
+```sh
+$ cargo run -- --help
+...
+     --trace-items <ITEM>
+          By default named trace items are not logged and must be enabled
+
+          Possible values:
+          - address-lookup:     Logs an address lookup
+          - block-entry:        Logs registers when entering a translated block
+          - cranelift-codegen:  Enables `cranelift_codegen` crate tracing
+          - cranelift-frontend: Enables `cranelift_frontend` crate tracing
+          - cranelift-jit:      Enables `cranelift_jit` crate tracing
+          - exception:          Logs exceptions
+          - gdb:                Logs gdb related events
+          - gdbstub:            Logs `gdbstub` crate tracing
+          - in-asm:             Logs `aarch64` assembly of translated blocks
+          - jit:                Logs JIT related events
+          - lookup-block:       Logs lookup of translated blocks
+          - memory:             Logs memory accesses
+          - pl011:              Logs [`PL011State`](crate::devices::pl011::PL011State`) related events
+...
+```
+
+To enable named events, use `--trace-items`.
+
+To use simple prints, increase verbosity via CLI (`cargo run -- -vvvv`) or set the environment variable `RUST_LOG=trace` or `RUST_LOG=debug` to print logs during execution.
 
 ## Debugging the VM as a remote `aarch64` target with the integrated GDB stub
 
@@ -96,7 +148,7 @@ Needless to say, it's not easy.
 
 ### Debugging JIT IR
 
-For Cranelift, the JIT can dump its IR representation when translating a block when you pass `RUST_LOG=trace`.
+For Cranelift, the JIT can dump its IR representation when translating a block when you enable `--trace-items cranelift_jit`.
 
 ### Debugging native JITed code
 
@@ -148,7 +200,13 @@ Under [`tests/`](./tests/) you will find integration tests that run small
 programs of a few instructions and check the processor state before and after
 execution.
 
-### Generating test case input
+Inputs (in assembly) are stored in `tests/inputs/` directory.
+
+When they change, the `build.rs` script compiles them to binary blobs.
+
+### Generating test case input as Rust slices
+
+You can generate binary blobs from assembly for direct use outside of integration tests.
 
 #### With `xtask` utility
 
@@ -179,7 +237,7 @@ Example:
 xxd -c 1 -plain program.bin|sed -e 's/^/\\x/' |paste -s -d ""
 ```
 
-##### Generating binary from assembly code
+### Generating binary from assembly code, manually
 
 You might wish to test the emulator with custom aarch64 assembly.
 
@@ -192,6 +250,7 @@ You might wish to test the emulator with custom aarch64 assembly.
    aarch64-linux-gnu-ld "${base}.o" -o "${base}"
    aarch64-linux-gnu-objcopy -O binary "${base}" "${base}.bin"
    ```
+
    Your output will be at `program.bin`.
 
 Pass the `program.bin` path as an argument when you run the application e.g.
