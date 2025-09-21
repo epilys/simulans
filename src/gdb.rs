@@ -395,6 +395,9 @@ impl GdbStubRunner {
             AArch64RegId::TTBR0_EL1 => {
                 read_reg!(self.machine.cpu_state.mmu_registers.ttbr0_el1)
             }
+            AArch64RegId::TTBR1_EL1 => {
+                read_reg!(self.machine.cpu_state.mmu_registers.ttbr1_el1)
+            }
             AArch64RegId::VTTBR_EL2 => {
                 read_reg!(self.machine.cpu_state.mmu_registers.vttbr_el2)
             }
@@ -535,6 +538,9 @@ impl GdbStubRunner {
             // AArch64RegId::SP_EL3 => write_64bit_reg!(self.machine.cpu_state.registers.sp_el3),
             AArch64RegId::TTBR0_EL1 => {
                 write_reg!(self.machine.cpu_state.mmu_registers.ttbr0_el1)
+            }
+            AArch64RegId::TTBR1_EL1 => {
+                write_reg!(self.machine.cpu_state.mmu_registers.ttbr1_el1)
             }
             AArch64RegId::VTTBR_EL2 => {
                 write_reg!(self.machine.cpu_state.mmu_registers.vttbr_el2)
