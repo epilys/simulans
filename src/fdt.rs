@@ -126,6 +126,16 @@ impl<'a> FdtBuilder<'a> {
             fdt.property_string("method", "hvc")?;
             fdt.end_node(psci_node)?;
         }
+        {
+            let timer_node = fdt.begin_node("timer")?;
+            let interrupts = [
+                0x01, 0x0d, 0x104, 0x01, 0x0e, 0x104, 0x01, 0x0b, 0x104, 0x01, 0x0a, 0x104,
+            ];
+            fdt.property_array_u32("interrupts", &interrupts)?;
+            fdt.property_null("always-on")?;
+            fdt.property_string("compatible", "arm,armv8-timer")?;
+            fdt.end_node(timer_node)?;
+        }
         fdt.end_node(root_node)?;
 
         let fdt = fdt.finish()?;

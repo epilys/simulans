@@ -79,6 +79,10 @@ impl BlockTranslator<'_> {
             SysReg::CPACR_EL1 => register_field!(read self, control_registers.cpacr_el1),
             SysReg::HCR_EL2 => register_field!(read self, control_registers.hcr_el2),
             SysReg::SCR_EL3 => register_field!(read self, control_registers.scr_el3),
+            SysReg::CNTFRQ_EL0 => register_field!(read self, timer_registers.cntfrq_el0),
+            SysReg::CNTKCTL_EL1 => register_field!(read self, timer_registers.cntkctl_el1),
+            SysReg::CNTV_CTL_EL0 => register_field!(read self, timer_registers.cntv_ctl_el0),
+            SysReg::CNTV_CVAL_EL0 => register_field!(read self, timer_registers.cntv_cval_el0),
             _ => {
                 let var = *self.sysreg_to_var(reg, false);
                 self.builder.use_var(var)
@@ -124,6 +128,15 @@ impl BlockTranslator<'_> {
             SysReg::CPACR_EL1 => register_field!(write self, value, control_registers.cpacr_el1),
             SysReg::HCR_EL2 => register_field!(write self, value, control_registers.hcr_el2),
             SysReg::SCR_EL3 => register_field!(write self, value, control_registers.scr_el3),
+            SysReg::CNTKCTL_EL1 => {
+                register_field!(write self, value, timer_registers.cntkctl_el1)
+            }
+            SysReg::CNTV_CTL_EL0 => {
+                register_field!(write self, value, timer_registers.cntv_ctl_el0)
+            }
+            SysReg::CNTV_CVAL_EL0 => {
+                register_field!(write self, value, timer_registers.cntv_cval_el0)
+            }
             _ => {
                 let target = *self.sysreg_to_var(reg, true);
                 self.builder.def_var(target, value);
@@ -184,6 +197,16 @@ impl BlockTranslator<'_> {
             } => {
                 // [ref:FIXME]: CTR_EL0
                 self.builder.ins().iconst(I64, 0xb444c004)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b11,
+                cm: 0b1110,
+                cn: 0,
+                o2: 0b10,
+            } => {
+                // CNTVCT_EL0, Counter-timer Virtual Count Register
+                register_field!(read self, timer_registers.cntvct_el0)
             }
             SysRegEncoding {
                 o0: 3,
