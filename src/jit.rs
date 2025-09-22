@@ -3498,7 +3498,17 @@ impl BlockTranslator<'_> {
             Op::SMSTOP => todo!(),
             Op::SMSUBL => todo!(),
             Op::SMULH => todo!(),
-            Op::SMULL => todo!(),
+            Op::SMULL => {
+                // [ref:needs_unit_test]
+                let destination = get_destination_register!();
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let a = self.builder.ins().sextend(I64, a);
+                let b = self.builder.ins().sextend(I64, b);
+                let (value, _) = self.builder.ins().smul_overflow(a, b);
+                let width = self.operand_width(&instruction.operands()[0]);
+                write_to_register!(destination, TypedValue { value, width });
+            }
             Op::SMULL2 => todo!(),
             Op::SMULLB => todo!(),
             Op::SMULLT => todo!(),
