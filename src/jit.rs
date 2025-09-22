@@ -3257,7 +3257,17 @@ impl BlockTranslator<'_> {
             Op::NORS => todo!(),
             Op::NOT => todo!(),
             Op::NOTS => todo!(),
-            Op::ORN => todo!(),
+            Op::ORN => {
+                // Bitwise OR NOT
+                // [ref:needs_unit_test]
+                let target = get_destination_register!();
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let b = self.builder.ins().bnot(b);
+                let value = self.builder.ins().bor(a, b);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
+            }
             Op::ORNS => todo!(),
             Op::ORRS => todo!(),
             Op::ORV => todo!(),
