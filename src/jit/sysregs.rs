@@ -140,6 +140,18 @@ impl BlockTranslator<'_> {
             SysReg::CNTV_CVAL_EL0 => {
                 register_field!(write self, value, timer_registers.cntv_cval_el0)
             }
+            SysReg::APDAKEYHI_EL1
+            | SysReg::APDAKEYLO_EL1
+            | SysReg::APDBKEYHI_EL1
+            | SysReg::APDBKEYLO_EL1
+            | SysReg::APIBKEYHI_EL1
+            | SysReg::APGAKEYHI_EL1
+            | SysReg::APGAKEYLO_EL1
+            | SysReg::APIAKEYHI_EL1
+            | SysReg::APIBKEYLO_EL1
+            | SysReg::APIAKEYLO_EL1 => {
+                // [ref:pointer_auth]
+            }
             _ => {
                 let target = *self.sysreg_to_var(reg, true);
                 self.builder.def_var(target, value);
