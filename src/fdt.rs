@@ -58,8 +58,8 @@ impl<'a> FdtBuilder<'a> {
         // [ref:TODO][ref:serial]: add pl011 node, if present
         // [ref:TODO][ref:serial]: implement hypervisor calls?
 
-        // [ref:TODO][ref:interrupts]: add gic support
-        // fdt.property_u32("interrupt-parent", phandle_gic)?;
+        let phandle_gic = 0x8002;
+        fdt.property_u32("interrupt-parent", phandle_gic)?;
         fdt.property_null("dma-coherent")?;
         fdt.property_string("model", "linux,dummy-virt")?;
         fdt.property_string("compatible", "linux,dummy-virt")?;
@@ -87,6 +87,22 @@ impl<'a> FdtBuilder<'a> {
             fdt.property_string("device_type", "memory")?;
             fdt.property_array_u64("reg", &mem_reg_prop)?;
             fdt.end_node(memory_node)?;
+        }
+        {
+            // [ref:FIXME]: get address from device instance
+            let gic_start = 0x8000000;
+
+            let intc_node = fdt.begin_node(&format!("intc@{gic_start:x?}"))?;
+            fdt.property_u32("phandle", phandle_gic)?;
+            let reg_prop = [gic_start, 0x10000, gic_start + 0x10000, 0x10000];
+            fdt.property_array_u64("reg", &reg_prop)?;
+            fdt.property_string("compatible", "arm,cortex-a15-gic")?;
+            fdt.property_null("ranges")?;
+            fdt.property_u32("#size-cells", 0x02)?;
+            fdt.property_u32("#address-cells", 0x02)?;
+            fdt.property_null("interrupt-controller")?;
+            fdt.property_u32("#interrupt-cells", 0x03)?;
+            fdt.end_node(intc_node)?;
         }
         {
             let cpus_node = fdt.begin_node("cpus")?;
