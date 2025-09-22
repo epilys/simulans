@@ -172,6 +172,36 @@ impl BlockTranslator<'_> {
                 o0: 0b11,
                 o1: 0,
                 cm: 0,
+                cn: 0b110,
+                o2: 0,
+            } => {
+                // ID_AA64ISAR0_EL1, AArch64 Instruction Set Attribute Register 0
+                self.builder.ins().iconst(I64, 0)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0,
+                cm: 0,
+                cn: 0b110,
+                o2: 0b1,
+            } => {
+                // ID_AA64ISAR1_EL1, AArch64 Instruction Set Attribute Register 1
+                self.builder.ins().iconst(I64, 0)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0,
+                cm: 0,
+                cn: 0b110,
+                o2: 0b10,
+            } => {
+                // ID_AA64ISAR2_EL1, AArch64 Instruction Set Attribute Register 2
+                self.builder.ins().iconst(I64, 0)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0,
+                cm: 0,
                 cn: 0,
                 o2: 0,
             } => {
@@ -222,6 +252,46 @@ impl BlockTranslator<'_> {
                 o0: 3,
                 o1: 0,
                 cm: 0,
+                cn: 4,
+                o2: 1,
+            } => {
+                // ID_AA64PFR1_EL1, AArch64 Processor Feature Register 1
+                register_field!(read self, id_registers.id_aa64pfr1_el1)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0,
+                cm: 0,
+                cn: 0b100,
+                o2: 0b100,
+            } => {
+                // ID_AA64ZFR0_EL1, SVE Feature ID Register 0
+                self.builder.ins().iconst(I64, 0)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0,
+                cm: 0,
+                cn: 0b100,
+                o2: 0b101,
+            } => {
+                // ID_AA64SMFR0_EL1, SME Feature ID Register 0
+                self.builder.ins().iconst(I64, 0)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b1,
+                cm: 0,
+                cn: 0,
+                o2: 0b100,
+            } => {
+                // GMID_EL1, Multiple tag transfer ID Register
+                self.builder.ins().iconst(I64, 0)
+            }
+            SysRegEncoding {
+                o0: 3,
+                o1: 0,
+                cm: 0,
                 cn: 5,
                 o2: 0,
             } => {
@@ -237,6 +307,26 @@ impl BlockTranslator<'_> {
             } => {
                 // ID_AA64MMFR1_EL1, AArch64 Memory Model Feature Register 1
                 register_field!(read self, id_registers.id_aa64mmfr1_el1)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b000,
+                cm: 0b0000,
+                cn: 0b0001,
+                o2: 0b111,
+            } => {
+                // ID_MMFR3_EL1, AArch32 Memory Model Feature Register 3
+                self.builder.ins().iconst(I64, 0)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b000,
+                cm: 0b0000,
+                cn: 0b0011,
+                o2: 0b110,
+            } => {
+                // ID_MMFR5_EL1, AArch32 Memory Model Feature Register 5
+                self.builder.ins().iconst(I64, 0)
             }
             SysRegEncoding {
                 o0: 0b11,
@@ -257,6 +347,36 @@ impl BlockTranslator<'_> {
             } => {
                 // DCZID_EL0, Data Cache Zero ID Register
                 register_field!(read self, id_registers.dczid_el0)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b1,
+                cm: 0,
+                cn: 0,
+                o2: 0b1,
+            } => {
+                // CLIDR_EL1, Cache Level ID Register
+                self.builder.ins().iconst(I64, 0)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0,
+                cm: 0,
+                cn: 0,
+                o2: 0b110,
+            } => {
+                // REVIDR_EL1, Revision ID Register
+                self.builder.ins().iconst(I64, 0)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0,
+                cm: 0,
+                cn: 0b101,
+                o2: 0b1,
+            } => {
+                // ID_AA64DFR1_EL1, AArch64 Debug Feature Register 1
+                self.builder.ins().iconst(I64, 0)
             }
             _other => unimplemented!(
                 "unimplemented sysreg encoding: {:?} pc =0x{:x?}",

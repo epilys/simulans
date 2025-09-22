@@ -227,6 +227,8 @@ pub struct IDRegisterFile {
     pub midr_el1: u64,
     /// `AArch64` Processor Feature Register 0
     pub id_aa64pfr0_el1: u64,
+    /// `AArch64` Processor Feature Register 1
+    pub id_aa64pfr1_el1: u64,
     /// `AArch64` Memory Model Feature Register 0
     pub id_aa64mmfr0_el1: u64,
     /// `AArch64` Memory Model Feature Register 1
@@ -265,6 +267,7 @@ impl Default for IDRegisterFile {
             midr_el1: (0b1111) << 16,
             // vpidr_el2: (0b1111) << 16,
             id_aa64pfr0_el1,
+            id_aa64pfr1_el1: 0,
             id_aa64mmfr0_el1: PARange::_1 as u64,
             id_aa64mmfr1_el1: 0,
             id_aa64mmfr2_el1: 0,
