@@ -3,7 +3,7 @@
 
 //! Generation of JIT code as translation blocks.
 
-use std::{mem::MaybeUninit, ops::ControlFlow};
+use std::{collections::BTreeSet, mem::MaybeUninit, ops::ControlFlow};
 
 use bad64::ArrSpec;
 use codegen::ir::{
@@ -102,8 +102,16 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
         "generating block",
     );
 
-    let new_ctx = JitContext::new(jit.single_step);
-    let block = new_ctx.compile(machine, pc).unwrap();
+    let machine_addr = std::ptr::addr_of!(*machine).addr();
+
+    let Ok(code_area) = translate_code_address(machine, pc) else {
+        // Exception raised
+        return Entry(lookup_block);
+    };
+
+    let block = JitContext::new(machine_addr, jit)
+        .compile(code_area, pc)
+        .unwrap();
     tracing::event!(
         target: tracing::TraceItem::LookupBlock.as_str(),
         tracing::Level::TRACE,
@@ -155,6 +163,8 @@ fn translate_code_address(
 pub struct Jit {
     pub translation_blocks: TranslationBlocks,
     pub single_step: bool,
+    /// List of breakpoint addresses.
+    pub hw_breakpoints: BTreeSet<Address>,
 }
 
 impl Jit {
@@ -162,6 +172,7 @@ impl Jit {
         Self {
             translation_blocks: TranslationBlocks::new(),
             single_step: false,
+            hw_breakpoints: BTreeSet::new(),
         }
     }
 }
@@ -173,7 +184,8 @@ impl Default for Jit {
 }
 
 /// JIT context/builder used to disassemble code and JIT compile it.
-pub struct JitContext {
+pub struct JitContext<'j> {
+    hw_breakpoints: &'j BTreeSet<Address>,
     /// The function builder context, which is reused across multiple
     /// `FunctionBuilder` instances.
     builder_context: FunctionBuilderContext,
@@ -185,11 +197,13 @@ pub struct JitContext {
     /// functions.
     module: JITModule,
     single_step: bool,
+    /// Address of [`Pin<Box<Armv8AMachine>>`] in memory.
+    machine_addr: usize,
 }
 
-impl JitContext {
+impl<'j> JitContext<'j> {
     /// Returns a new [`JitContext`].
-    pub fn new(single_step: bool) -> Self {
+    pub fn new(machine_addr: usize, jit: &'j Jit) -> Self {
         let mut flag_builder = settings::builder();
         flag_builder.set("opt_level", "speed").unwrap();
         flag_builder.set("regalloc_checker", "false").unwrap();
@@ -218,10 +232,12 @@ impl JitContext {
             cranelift_module::default_libcall_names(),
         ));
         Self {
+            hw_breakpoints: &jit.hw_breakpoints,
             builder_context: FunctionBuilderContext::new(),
             ctx: module.make_context(),
             module,
-            single_step,
+            single_step: jit.single_step,
+            machine_addr,
         }
     }
 
@@ -229,7 +245,7 @@ impl JitContext {
     /// returns an [`Entry`] for it.
     pub fn compile(
         mut self,
-        machine: &mut Armv8AMachine,
+        code_area: &[u8],
         program_counter: u64,
     ) -> Result<TranslationBlock, Box<dyn std::error::Error>> {
         tracing::event!(
@@ -249,7 +265,7 @@ impl JitContext {
         // self.ctx.set_disasm(true);
 
         // Actually perform the translation for this translation block
-        let last_pc = self.translate(machine, program_counter)?;
+        let last_pc = self.translate(code_area, program_counter)?;
 
         // We generate the translated block as a Cranelift function.
         //
@@ -299,15 +315,9 @@ impl JitContext {
     /// Translate instructions starting from address `program_counter`.
     fn translate(
         &mut self,
-        machine: &mut Armv8AMachine,
+        code_area: &[u8],
         program_counter: u64,
     ) -> Result<u64, Box<dyn std::error::Error>> {
-        let machine_addr = std::ptr::addr_of!(*machine);
-
-        let hw_breakpoints = machine.hw_breakpoints.clone();
-
-        let code_area = translate_code_address(machine, program_counter)?;
-
         let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
 
         let memops_table = MemOpsTable::new(&self.module, &mut builder);
@@ -329,7 +339,7 @@ impl JitContext {
 
         let machine_ptr = builder.ins().iconst(
             self.module.target_config().pointer_type(),
-            machine_addr as i64,
+            self.machine_addr as i64,
         );
         // Declare variables for each register.
         // Emit code to load register values into variables.
@@ -440,8 +450,8 @@ impl JitContext {
                                 pc = ?Address(insn.address()),
                                 "{insn:?}",
                             );
-                            if !hw_breakpoints.is_empty()
-                                && hw_breakpoints.contains(&Address(insn.address()))
+                            if !self.hw_breakpoints.is_empty()
+                                && self.hw_breakpoints.contains(&Address(insn.address()))
                             {
                                 next_pc = Some(BlockExit::Branch(
                                     trans.builder.ins().iconst(I64, insn.address() as i64),

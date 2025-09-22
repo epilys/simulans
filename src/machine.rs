@@ -4,7 +4,6 @@
 //! Representation of an emulated machine.
 
 use std::{
-    collections::BTreeSet,
     num::NonZero,
     pin::Pin,
     sync::{
@@ -41,8 +40,6 @@ pub struct Armv8AMachine {
     pub memory: MemoryMap,
     /// Function to call to look up translated blocks.
     pub lookup_block_func: Entry,
-    /// List of breakpoint addresses.
-    pub hw_breakpoints: BTreeSet<Address>,
     /// Exit request field.
     pub exit_request: Arc<AtomicU8>,
     /// Whether we have stopped at a breakpoint.
@@ -65,7 +62,6 @@ impl Armv8AMachine {
             cpu_state: ExecutionState::default(),
             memory,
             lookup_block_func: Entry(lookup_block),
-            hw_breakpoints: BTreeSet::new(),
             exit_request,
             in_breakpoint: false,
         })
