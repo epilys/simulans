@@ -2272,7 +2272,54 @@ impl BlockTranslator<'_> {
             Op::CASPA => todo!(),
             Op::CASPAL => todo!(),
             Op::CASPL => todo!(),
-            Op::CCMN => todo!(),
+            Op::CCMN => {
+                // Conditional Compare Negative; sets NZCV flags to the result of the comparison
+                // of a register value and a negated value if the condition is TRUE, and an
+                // immediate value otherwise
+                let cnd = match instruction.operands()[3] {
+                    bad64::Operand::Cond(cnd) => cnd,
+                    other => panic!(
+                        "expected condition argument in {op:?}: {:?}. Instruction: {instruction:?}",
+                        other
+                    ),
+                };
+                let result = self.condition_holds(cnd);
+                let condition_holds_block = self.builder.create_block();
+                let else_block = self.builder.create_block();
+                let merge_block = self.builder.create_block();
+                self.builder
+                    .ins()
+                    .brif(result, condition_holds_block, &[], else_block, &[]);
+                self.builder.switch_to_block(condition_holds_block);
+                self.builder.seal_block(condition_holds_block);
+                // Perform regular CMP between two first operands.
+                let operand1 = self.translate_operand(&instruction.operands()[0]);
+                let operand2 = self.translate_operand(&instruction.operands()[1]);
+                let operand2 = self.builder.ins().ineg(operand2);
+                let negoperand2 = self.builder.ins().bnot(operand2);
+                let one = self.builder.ins().iconst(I8, 1);
+                let width = self.operand_width(&instruction.operands()[0]);
+                let (_result, nzcv) =
+                    self.add_with_carry(operand1, negoperand2, operand2, one, width);
+                // discard result, only update NZCV flags.
+                self.update_nzcv(nzcv);
+                self.builder.ins().jump(merge_block, &[]);
+                self.builder.switch_to_block(else_block);
+                self.builder.seal_block(else_block);
+                // Update NZCV with value of immediate.
+                {
+                    let new_nzcv = self.translate_operand(&instruction.operands()[2]);
+                    let new_nzcv_width = self.operand_width(&instruction.operands()[2]);
+                    let mut new_nzcv = self.builder.ins().ishl_imm(new_nzcv, 28);
+                    if !matches!(new_nzcv_width, Width::_64) {
+                        new_nzcv = self.builder.ins().uextend(I64, new_nzcv);
+                    }
+                    self.write_sysreg(&bad64::SysReg::NZCV, new_nzcv);
+                }
+                self.builder.ins().jump(merge_block, &[]);
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
+            }
             Op::CCMP => {
                 // Conditional compare; set NZCV to immediate value if condition doesn't hold.
                 let cnd = match instruction.operands()[3] {
