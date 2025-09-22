@@ -1605,7 +1605,7 @@ impl BlockTranslator<'_> {
                     width: Width::_8,
                 })
             }
-            Op::LDRSH => {
+            Op::LDURSH | Op::LDRSH => {
                 let target = get_destination_register!();
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_16);
@@ -3088,7 +3088,6 @@ impl BlockTranslator<'_> {
             Op::LDUMINL => todo!(),
             Op::LDUMINLB => todo!(),
             Op::LDUMINLH => todo!(),
-            Op::LDURSH => todo!(),
             Op::LDURSW => todo!(),
             Op::LDXP => todo!(),
             Op::LDXRB => todo!(),
