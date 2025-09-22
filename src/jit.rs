@@ -3411,7 +3411,25 @@ impl BlockTranslator<'_> {
             Op::REVH => todo!(),
             Op::REVW => todo!(),
             Op::RMIF => todo!(),
-            Op::ROR => todo!(),
+            Op::ROR => {
+                // [ref:needs_unit_test]
+                let destination = get_destination_register!();
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let rotr: i64 = match instruction.operands()[2] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(rotr),
+                        shift: None,
+                    } => rotr as i64,
+                    bad64::Operand::Imm64 {
+                        imm: bad64::Imm::Unsigned(rotr),
+                        shift: None,
+                    } => rotr as i64,
+                    other => unexpected_operand!(other),
+                };
+                let value = self.builder.ins().rotr_imm(value, rotr);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(destination, TypedValue { value, width });
+            }
             Op::RORV => todo!(),
             Op::RSHRN => todo!(),
             Op::RSHRN2 => todo!(),
