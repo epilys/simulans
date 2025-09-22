@@ -566,6 +566,88 @@ impl BlockTranslator<'_> {
         self.builder.seal_block(merge_block);
     }
 
+    fn translate_operand_extended(&mut self, operand: &bad64::Operand, extend_to: Width) -> Value {
+        match operand {
+            bad64::Operand::ShiftReg { ref reg, shift } => {
+                use bad64::Shift;
+
+                let value = self.reg_to_value(reg, None);
+                match shift {
+                    Shift::LSL(_)
+                    | Shift::LSR(_)
+                    | Shift::ASR(_)
+                    | Shift::ROR(_)
+                    | Shift::MSL(_) => self.translate_operand(operand),
+                    Shift::UXTW(uxtw) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().uextend(extend_to.into(), value);
+                        if *uxtw == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*uxtw))
+                        }
+                    }
+                    Shift::SXTW(sxtw) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().sextend(extend_to.into(), value);
+                        if *sxtw == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*sxtw))
+                        }
+                    }
+                    Shift::SXTX(_sxtx) => {
+                        todo!()
+                    }
+                    Shift::UXTX(_uxtx) => {
+                        todo!()
+                    }
+                    Shift::SXTB(sxtb) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().ireduce(I8, value);
+                        let value = self.builder.ins().sextend(extend_to.into(), value);
+                        if *sxtb == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*sxtb))
+                        }
+                    }
+                    Shift::SXTH(sxth) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().ireduce(I16, value);
+                        let value = self.builder.ins().sextend(extend_to.into(), value);
+                        if *sxth == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*sxth))
+                        }
+                    }
+                    Shift::UXTH(uxth) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().ireduce(I16, value);
+                        let value = self.builder.ins().uextend(extend_to.into(), value);
+                        if *uxth == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*uxth))
+                        }
+                    }
+                    Shift::UXTB(uxtb) => {
+                        // [ref:verify_implementation]
+                        let value = self.builder.ins().band_imm(value, i64::from(u8::MAX));
+                        let value = self.builder.ins().uextend(extend_to.into(), value);
+                        if *uxtb == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*uxtb))
+                        }
+                    }
+                }
+            }
+            _ => self.translate_operand(operand),
+        }
+    }
+
     fn translate_operand(&mut self, operand: &bad64::Operand) -> Value {
         use bad64::{Imm, Operand};
 
@@ -583,73 +665,19 @@ impl BlockTranslator<'_> {
                         self.builder.ins().sshr_imm(value, i64::from(*asr))
                     }
                     Shift::ROR(ror) => self.builder.ins().rotr_imm(value, i64::from(*ror)),
-                    Shift::UXTW(uxtw) => {
-                        // [ref:verify_implementation]
-                        let value = self.builder.ins().uextend(I64, value);
-                        if *uxtw == 0 {
-                            value
-                        } else {
-                            self.builder.ins().ishl_imm(value, i64::from(*uxtw))
-                        }
-                    }
-                    Shift::SXTW(sxtw) => {
-                        // [ref:verify_implementation]
-                        let value = self.builder.ins().sextend(I64, value);
-                        if *sxtw == 0 {
-                            value
-                        } else {
-                            self.builder.ins().ishl_imm(value, i64::from(*sxtw))
-                        }
-                    }
-                    Shift::SXTX(_sxtx) => {
-                        todo!()
-                    }
-                    Shift::UXTX(_uxtx) => {
-                        todo!()
-                    }
-                    Shift::SXTB(sxtb) => {
-                        // [ref:verify_implementation]
-                        let value = self.builder.ins().ireduce(I8, value);
-                        let value = self.builder.ins().sextend(I32, value);
-                        if *sxtb == 0 {
-                            value
-                        } else {
-                            self.builder.ins().ishl_imm(value, i64::from(*sxtb))
-                        }
-                    }
-                    Shift::SXTH(sxth) => {
-                        // [ref:verify_implementation]
-                        let value = self.builder.ins().ireduce(I16, value);
-                        let value = self.builder.ins().sextend(I32, value);
-                        if *sxth == 0 {
-                            value
-                        } else {
-                            self.builder.ins().ishl_imm(value, i64::from(*sxth))
-                        }
-                    }
-                    Shift::UXTH(uxth) => {
-                        // [ref:verify_implementation]
-                        let value = self.builder.ins().ireduce(I16, value);
-                        let value = self.builder.ins().uextend(I32, value);
-                        if *uxth == 0 {
-                            value
-                        } else {
-                            self.builder.ins().ishl_imm(value, i64::from(*uxth))
-                        }
-                    }
-                    Shift::UXTB(uxtb) => {
-                        // [ref:verify_implementation]
-                        let value = self.builder.ins().band_imm(value, i64::from(u8::MAX));
-                        let value = self.builder.ins().uextend(I32, value);
-                        if *uxtb == 0 {
-                            value
-                        } else {
-                            self.builder.ins().ishl_imm(value, i64::from(*uxtb))
-                        }
-                    }
                     Shift::MSL(lsl) => {
                         let val = self.builder.ins().ishl_imm(value, i64::from(*lsl));
                         self.builder.ins().bor_imm(val, 2_i64.pow(*lsl) - 1)
+                    }
+                    Shift::UXTW(_)
+                    | Shift::SXTW(_)
+                    | Shift::SXTX(_)
+                    | Shift::UXTX(_)
+                    | Shift::SXTB(_)
+                    | Shift::SXTH(_)
+                    | Shift::UXTH(_)
+                    | Shift::UXTB(_) => {
+                        panic!()
                     }
                 }
             }
@@ -1679,7 +1707,7 @@ impl BlockTranslator<'_> {
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[1]);
-                let b = self.translate_operand(&instruction.operands()[2]);
+                let b = self.translate_operand_extended(&instruction.operands()[2], width);
                 let (value, _overflow) = self.builder.ins().uadd_overflow(a, b);
                 write_to_register!(target, TypedValue { value, width });
             }
@@ -1687,7 +1715,7 @@ impl BlockTranslator<'_> {
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[1]);
-                let b = self.translate_operand(&instruction.operands()[2]);
+                let b = self.translate_operand_extended(&instruction.operands()[2], width);
                 let (value, _ignore_overflow) = self.builder.ins().usub_overflow(a, b);
                 write_to_register!(target, TypedValue { value, width });
             }
@@ -1695,7 +1723,7 @@ impl BlockTranslator<'_> {
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[1]);
-                let b = self.translate_operand(&instruction.operands()[2]);
+                let b = self.translate_operand_extended(&instruction.operands()[2], width);
                 let negoperand2 = self.builder.ins().bnot(b);
                 let one = self.builder.ins().iconst(I8, 1);
                 let (result, nzcv) = self.add_with_carry(a, negoperand2, b, one, width);
@@ -2031,7 +2059,7 @@ impl BlockTranslator<'_> {
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[1]);
-                let b = self.translate_operand(&instruction.operands()[2]);
+                let b = self.translate_operand_extended(&instruction.operands()[2], width);
                 let zero = self.builder.ins().iconst(I8, 0);
                 let (result, nzcv) = self.add_with_carry(a, b, b, zero, width);
                 write_to_register!(
@@ -2324,7 +2352,7 @@ impl BlockTranslator<'_> {
                 // [ref:needs_unit_test]
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[0]);
-                let b = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand_extended(&instruction.operands()[1], width);
                 let zero = self.builder.ins().iconst(I8, 0);
                 let (_result, nzcv) = self.add_with_carry(a, b, b, zero, width);
                 self.update_nzcv(nzcv);
@@ -2332,7 +2360,7 @@ impl BlockTranslator<'_> {
             Op::CMP => {
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.translate_operand(&instruction.operands()[0]);
-                let b = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand_extended(&instruction.operands()[1], width);
                 let negoperand2 = self.builder.ins().bnot(b);
                 let one = self.builder.ins().iconst(I8, 1);
                 let (_result, nzcv) = self.add_with_carry(a, negoperand2, b, one, width);
