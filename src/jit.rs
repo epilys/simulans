@@ -406,7 +406,18 @@ impl<'j> JitContext<'j> {
                     | Op::B_PL
                     | Op::B_VC
                     | Op::B_VS => 0,
-                    Op::B | Op::BR | Op::BL | Op::BLR | Op::RET | Op::UDF | Op::ERET => break,
+                    Op::BRK
+                    | Op::HVC
+                    | Op::WFI
+                    | Op::WFIT
+                    | Op::WFE
+                    | Op::B
+                    | Op::BR
+                    | Op::BL
+                    | Op::BLR
+                    | Op::RET
+                    | Op::UDF
+                    | Op::ERET => break,
                     _ => continue,
                 };
 
