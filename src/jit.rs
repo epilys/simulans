@@ -3221,6 +3221,7 @@ impl BlockTranslator<'_> {
             Op::NANDS => todo!(),
             Op::NBSL => todo!(),
             Op::NEG => {
+                // [ref:needs_unit_test]
                 let target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let mut value = self.builder.ins().ineg(value);
@@ -3230,7 +3231,25 @@ impl BlockTranslator<'_> {
                 }
                 write_to_register!(target, TypedValue { value, width });
             }
-            Op::NEGS => todo!(),
+            Op::NEGS => {
+                // Negate, setting flags (alias of SUBS)
+                // [ref:needs_unit_test]
+                let target = get_destination_register!();
+                let width = self.operand_width(&instruction.operands()[0]);
+                let a = self.builder.ins().iconst(width.into(), 0);
+                let b = self.translate_operand_extended(&instruction.operands()[2], width);
+                let negoperand2 = self.builder.ins().bnot(b);
+                let one = self.builder.ins().iconst(I8, 1);
+                let (result, nzcv) = self.add_with_carry(a, negoperand2, b, one, width);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
+                self.update_nzcv(nzcv);
+            }
             Op::NGC => todo!(),
             Op::NGCS => todo!(),
             Op::NMATCH => todo!(),
