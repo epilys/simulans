@@ -6,4 +6,7 @@ movz    x2, #0x0, lsl #48
 movk    x2, #0x0, lsl #32
 movk    x2, #0x8080, lsl #16
 movk    x2, #0x3519
+mov     x23, #0xffffffffffffe000
+movk    x23, #0xfddf, lsl #16
+movk    x23, #0xfffd, lsl #32
 write_to_tube w30, x29

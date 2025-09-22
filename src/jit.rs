@@ -1650,12 +1650,12 @@ impl BlockTranslator<'_> {
                             bad64::Imm::Signed(imm) => self.builder.ins().iconst(I32, *imm),
                         };
                         match shift {
-                            None => (const_value, !0xffff),
+                            None => (const_value, (!u32::from(u16::MAX)).into()),
                             Some(bad64::Shift::LSL(lsl)) => {
                                 let const_value =
                                     self.builder.ins().ishl_imm(const_value, i64::from(*lsl));
-                                let shift_mask = !(u64::from(u32::MAX) << lsl);
-                                (const_value, shift_mask)
+                                let shift_mask = !(u32::from(u16::MAX) << lsl);
+                                (const_value, shift_mask.into())
                             }
                             other => unimplemented!(
                                 "unimplemented shift {other:?}. Instruction: {instruction:?}"
@@ -1670,11 +1670,11 @@ impl BlockTranslator<'_> {
                             bad64::Imm::Signed(imm) => self.builder.ins().iconst(I64, *imm),
                         };
                         match shift {
-                            None => (const_value, !0xffff),
+                            None => (const_value, !u64::from(u16::MAX)),
                             Some(bad64::Shift::LSL(lsl)) => {
                                 let const_value =
                                     self.builder.ins().ishl_imm(const_value, i64::from(*lsl));
-                                let shift_mask = !(u64::MAX << lsl);
+                                let shift_mask = !(u64::from(u16::MAX) << lsl);
                                 (const_value, shift_mask)
                             }
                             other => unimplemented!(
@@ -1686,8 +1686,7 @@ impl BlockTranslator<'_> {
                 };
                 let width = self.operand_width(&instruction.operands()[0]);
                 let mask = { self.builder.ins().iconst(width.into(), shift_mask as i64) };
-                let masked_value = self.builder.ins().band(target_value, mask);
-                let value = self.builder.ins().bor(masked_value, imm_value);
+                let value = self.builder.ins().bitselect(mask, target_value, imm_value);
                 write_to_register!(target, TypedValue { value, width });
             }
             Op::MOVZ => {

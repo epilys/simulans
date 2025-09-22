@@ -75,6 +75,7 @@ fn test_mov() {
     assert_hex_eq!(machine.cpu_state.registers.x1, 0xbeef);
     assert_hex_eq!(machine.cpu_state.registers.x0, 0xf0cacc1a);
     assert_hex_eq!(machine.cpu_state.registers.x2, 0x80803519);
+    assert_hex_eq!(machine.cpu_state.registers.x23, 0xfffffffdfddfe000);
 }
 
 #[test_log::test]
