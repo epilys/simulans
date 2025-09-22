@@ -139,6 +139,12 @@ fn test_bitfields_signed() {
         machine.cpu_state.registers.x4,
         machine.cpu_state.registers.x3,
     );
+    // movq x5, -5
+    assert_hex_eq!(machine.cpu_state.registers.x5, (-5_i64) as u64);
+    // sbfiz x6, x5, #2, #32
+    assert_hex_eq!(machine.cpu_state.registers.x6, ((-5_i64) as u64) << 2);
+    // sbfiz x7, x5, #5, #3
+    assert_hex_eq!(machine.cpu_state.registers.x7, 0b11_u64 << 5);
 }
 
 #[test_log::test]

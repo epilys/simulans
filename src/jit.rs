@@ -3323,7 +3323,32 @@ impl BlockTranslator<'_> {
             Op::SBCLB => todo!(),
             Op::SBCLT => todo!(),
             Op::SBCS => todo!(),
-            Op::SBFIZ => todo!(),
+            Op::SBFIZ => {
+                let destination = get_destination_register!();
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let lsb: i64 = match instruction.operands()[2] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(lsb),
+                        shift: None,
+                    } => lsb as i64,
+                    other => unexpected_operand!(other),
+                };
+                let wmask: i64 = match instruction.operands()[3] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(wmask),
+                        shift: None,
+                    } => wmask as i64,
+                    other => unexpected_operand!(other),
+                };
+                let value = self
+                    .builder
+                    .ins()
+                    .band_imm(value, 2_i64.pow(wmask as u32) - 1);
+                let width = self.operand_width(&instruction.operands()[1]);
+                let value = sign_extend_bitfield!(value, wmask, width);
+                let value = self.builder.ins().ishl_imm(value, lsb);
+                write_to_register!(destination, TypedValue { value, width });
+            }
             Op::SBFM => todo!(),
             Op::SXTW => {
                 // Alias of SBFM <Xd>, <Xn>, #0, #31
@@ -3376,18 +3401,17 @@ impl BlockTranslator<'_> {
                     } => lsb.try_into().unwrap(),
                     other => unexpected_operand!(other),
                 };
-                let (value, wmask) = match instruction.operands()[3] {
+                let wmask = match instruction.operands()[3] {
                     bad64::Operand::Imm32 {
                         imm: bad64::Imm::Unsigned(wmask),
                         shift: None,
-                    } => (
-                        self.builder
-                            .ins()
-                            .band_imm(source, (2_i64.pow(wmask as u32) - 1) << lsb),
-                        wmask,
-                    ),
+                    } => wmask,
                     other => unexpected_operand!(other),
                 };
+                let value = self
+                    .builder
+                    .ins()
+                    .band_imm(source, (2_i64.pow(wmask as u32) - 1) << lsb);
                 let value = self.builder.ins().ushr_imm(value, lsb);
                 let width = self.operand_width(&instruction.operands()[1]);
                 let value = sign_extend_bitfield!(value, wmask, width);
