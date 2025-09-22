@@ -19,7 +19,9 @@ use crate::{
     tracing,
 };
 
+mod psci;
 mod translation_blocks;
+
 pub use translation_blocks::{TranslationBlock, TranslationBlocks};
 
 /// JIT Helper function to set [`Armv8AMachine::exit_request`] field.

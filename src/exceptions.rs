@@ -878,3 +878,37 @@ pub fn aarch64_abort(
         vect_offset,
     );
 }
+
+/// Perform HVC call
+///
+/// `AArch64.CallHypervisor`
+pub fn aarch64_call_hypervisor(
+    machine: &mut crate::machine::Armv8AMachine,
+    preferred_exception_return: Address,
+    immediate: u16,
+) {
+    if machine.psci_call(immediate) {
+        machine.pc = preferred_exception_return.0;
+        return;
+    }
+    let current_el = machine.cpu_state.PSTATE().EL();
+
+    let target_el = if current_el == ExceptionLevel::EL3 {
+        current_el
+    } else {
+        ExceptionLevel::EL2
+    };
+    assert!(machine.cpu_state.have_el(target_el), "{target_el:?}");
+    let vect_offset = Address(0x0);
+
+    let except = ExceptionRecord::exception_syndrome(Exception::Uncategorized);
+    tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, ?target_el, ?vect_offset, ?except, ?preferred_exception_return, "AArch64.CallHypervisor");
+
+    aarch64_take_exception(
+        machine,
+        target_el,
+        except,
+        preferred_exception_return,
+        vect_offset,
+    );
+}
