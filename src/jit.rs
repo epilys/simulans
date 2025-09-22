@@ -1614,6 +1614,12 @@ impl BlockTranslator<'_> {
                     width: Width::_8,
                 })
             }
+            Op::LDRSH => {
+                let target = get_destination_register!();
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read(source_address, Width::_16);
+                write_to_register!(signed target, TypedValue { value, width: Width::_16 });
+            }
             Op::LDRSW => {
                 let target = get_destination_register!();
                 let source_address = self.translate_operand(&instruction.operands()[1]);
@@ -2918,7 +2924,6 @@ impl BlockTranslator<'_> {
             Op::LDPSW => todo!(),
             Op::LDRAA => todo!(),
             Op::LDRAB => todo!(),
-            Op::LDRSH => todo!(),
             Op::LDSET => todo!(),
             Op::LDSETA => todo!(),
             Op::LDSETAB => todo!(),
