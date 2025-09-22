@@ -41,7 +41,10 @@ impl BlockTranslator<'_> {
     fn sysreg_to_var(&mut self, reg: &SysReg, write: bool) -> &Variable {
         self.write_to_sysreg |= write;
         self.sys_registers.get(reg).unwrap_or_else(|| {
-            unimplemented!("unimplemented sysreg {reg:?}");
+            unimplemented!(
+                "{op} unimplemented sysreg {reg:?}",
+                op = if write { "write" } else { "read" }
+            );
         })
     }
 
