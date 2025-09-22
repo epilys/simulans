@@ -6,6 +6,7 @@
 use bad64::SysReg;
 use codegen::ir::types::I64;
 use cranelift::prelude::*;
+use cranelift_module::Module;
 
 use crate::{jit::BlockTranslator, machine::Armv8AMachine};
 
@@ -393,6 +394,27 @@ impl BlockTranslator<'_> {
                 // ID_AA64DFR1_EL1, AArch64 Debug Feature Register 1
                 self.builder.ins().iconst(I64, 0)
             }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b011,
+                cm: 0b0010,
+                cn: 0b0100,
+                o2: 0b001,
+            } => {
+                // [ref:FEAT_RNG]
+                // RNDRRS, Random Number Full Entropy
+                RNDRRS::generate_read(self)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b011,
+                cm: 0b0010,
+                cn: 0b0100,
+                o2: 0b000,
+            } => {
+                // RNDR, Random Number
+                RNDRRS::generate_read(self)
+            }
             _other => unimplemented!(
                 "unimplemented sysreg encoding: {:?} pc =0x{:x?}",
                 reg,
@@ -544,6 +566,28 @@ pub struct SPSel;
 impl SystemRegister for SPSel {
     fn generate_read(jit: &mut BlockTranslator<'_>) -> Value {
         pstate_field!(read jit, mask = 0b1)
+    }
+
+    fn generate_write(_: &mut BlockTranslator<'_>, _: Value) {}
+}
+
+pub struct RNDRRS;
+
+impl SystemRegister for RNDRRS {
+    fn generate_read(jit: &mut BlockTranslator<'_>) -> Value {
+        extern "C" fn rand() -> u64 {
+            getrandom::u64().unwrap_or(0)
+        }
+        let sigref = {
+            let mut sig = jit.module.make_signature();
+            sig.returns.push(AbiParam::new(I64));
+            jit.builder.import_signature(sig)
+        };
+        let callee = jit.builder.ins().iconst(I64, rand as usize as i64);
+        let call = jit.builder.ins().call_indirect(sigref, callee, &[]);
+        let nzcv = jit.builder.ins().iconst(I64, 0);
+        NZCV::generate_write(jit, nzcv);
+        jit.builder.inst_results(call)[0]
     }
 
     fn generate_write(_: &mut BlockTranslator<'_>, _: Value) {}
