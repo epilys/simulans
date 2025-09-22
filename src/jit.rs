@@ -2700,7 +2700,25 @@ impl BlockTranslator<'_> {
             Op::ERETAB => todo!(),
             Op::ESB => todo!(),
             Op::EXT => todo!(),
-            Op::EXTR => todo!(),
+            Op::EXTR => {
+                // Extract register extracts a register from a pair of registers.
+                // [ref:needs_unit_test]
+                let target = get_destination_register!();
+                let n = self.translate_operand(&instruction.operands()[1]);
+                let m = self.translate_operand(&instruction.operands()[2]);
+                let lsb: i64 = match instruction.operands()[3] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(lsb),
+                        shift: None,
+                    } => lsb.try_into().unwrap(),
+                    other => unexpected_operand!(other),
+                };
+                let width = self.operand_width(&instruction.operands()[1]);
+                let n = self.builder.ins().ishl_imm(n, width as i64 - lsb);
+                let m = self.builder.ins().ushr_imm(m, lsb);
+                let value = self.builder.ins().bor(n, m);
+                write_to_register!(target, TypedValue { value, width });
+            }
             Op::FABD => todo!(),
             Op::FABS => todo!(),
             Op::FACGE => todo!(),
