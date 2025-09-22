@@ -383,7 +383,9 @@ impl<'j> JitContext<'j> {
         };
         if !self.single_step {
             for ins in bad64::disasm(code_area, program_counter) {
-                let ins = ins.map_err(|err| format!("Error decoding instruction: {}", err))?;
+                let Ok(ins) = ins else {
+                    break;
+                };
                 use bad64::Op;
                 let label_idx = match ins.op() {
                     Op::CBNZ | Op::CBZ => 1,
