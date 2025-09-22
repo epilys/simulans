@@ -327,14 +327,29 @@ impl SystemRegister for NZCV {
     }
 }
 
-pub struct DAIFSet;
+pub struct DAIF;
 
-impl SystemRegister for DAIFSet {
+impl SystemRegister for DAIF {
     fn generate_read(jit: &mut BlockTranslator<'_>) -> Value {
-        pstate_field!(read jit, mask = 0b1111 << 5)
+        let current_value = pstate_field!(read jit, mask = 0b1111 << 5);
+        jit.builder.ins().ishl_imm(current_value, 1)
     }
 
     fn generate_write(jit: &mut BlockTranslator<'_>, value: Value) {
+        let value = jit.builder.ins().ishl_imm(value, 5);
+        pstate_field!(write jit, value, mask = 0b1111 << 4)
+    }
+}
+
+pub struct DAIFSet;
+
+impl SystemRegister for DAIFSet {
+    fn generate_read(_jit: &mut BlockTranslator<'_>) -> Value {
+        panic!()
+    }
+
+    fn generate_write(jit: &mut BlockTranslator<'_>, value: Value) {
+        let value = jit.builder.ins().ishl_imm(value, 5);
         let current_value = pstate_field!(read jit, mask = 0b1111 << 5);
         let new_value = jit.builder.ins().bor(current_value, value);
         pstate_field!(write jit, new_value, mask = 0b1111 << 5)
@@ -344,11 +359,12 @@ impl SystemRegister for DAIFSet {
 pub struct DAIFClr;
 
 impl SystemRegister for DAIFClr {
-    fn generate_read(jit: &mut BlockTranslator<'_>) -> Value {
-        pstate_field!(read jit, mask = 0b1111 << 5)
+    fn generate_read(_jit: &mut BlockTranslator<'_>) -> Value {
+        panic!()
     }
 
     fn generate_write(jit: &mut BlockTranslator<'_>, value: Value) {
+        let value = jit.builder.ins().ishl_imm(value, 5);
         let current_value = pstate_field!(read jit, mask = 0b1111 << 5);
         let new_value = jit.builder.ins().band_not(current_value, value);
         pstate_field!(write jit, new_value, mask = 0b1111 << 5)

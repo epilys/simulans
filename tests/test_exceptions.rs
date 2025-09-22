@@ -84,6 +84,15 @@ fn test_pstate_pseudoregisters() {
 
         main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
         assert_hex_eq!(machine.cpu_state.registers.x0, 1 << 2);
+        assert_hex_eq!(machine.cpu_state.registers.x1, 0b1111 << 6);
+        assert_hex_eq!(machine.cpu_state.registers.x2, (0b1111 & !(7)) << 6);
+        assert_hex_eq!(machine.cpu_state.registers.x3, 0b1111 << 6);
+        assert_hex_eq!(machine.cpu_state.registers.x4, 0b0101 << 6);
+        assert_hex_eq!(machine.cpu_state.registers.x5, 0b0100 << 6);
+        assert_hex_eq!(machine.cpu_state.registers.x6, 0b1111 << 6);
+        assert_hex_eq!(machine.cpu_state.registers.x7, 0b1100 << 6);
+        assert_hex_eq!(machine.cpu_state.registers.x8, 0b1111 << 6);
+        assert_hex_eq!(machine.cpu_state.registers.x9, 0b1010 << 6);
     }
     {
         let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);

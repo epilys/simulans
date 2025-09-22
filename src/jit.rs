@@ -29,7 +29,7 @@ mod memory;
 mod sysregs;
 
 use memory::MemOpsTable;
-use sysregs::SysRegEncoding;
+use sysregs::{SysRegEncoding, SystemRegister};
 
 const MEMFLAG_LITTLE_ENDIAN: MemFlags = MemFlags::new().with_endianness(Endianness::Little);
 
@@ -1436,6 +1436,13 @@ impl BlockTranslator<'_> {
                     value = self.builder.ins().uextend(I64, value);
                 }
                 match instruction.operands()[0] {
+                    bad64::Operand::SysReg(bad64::SysReg::DAIFSET)
+                        if !matches!(&instruction.operands()[1], bad64::Operand::Imm32 { .. }) =>
+                    {
+                        // bad64 decodes DAIF as DAIFSet, fix it manually.
+                        value = self.builder.ins().ushr_imm(value, 6);
+                        sysregs::DAIF::generate_write(self, value);
+                    }
                     bad64::Operand::SysReg(ref reg) => self.write_sysreg(reg, value),
                     bad64::Operand::ImplSpec { o0, o1, cm, cn, o2 } => self
                         .write_sysreg_o0_op1_CRn_CRm_op2(
@@ -1449,15 +1456,15 @@ impl BlockTranslator<'_> {
                 // Move System register to general-purpose register
                 // [ref:can_trap]
                 let target = get_destination_register!();
-                let sys_reg_value = self.translate_operand(&instruction.operands()[1]);
-                let width = self.operand_width(&instruction.operands()[1]);
-                write_to_register!(
-                    target,
-                    TypedValue {
-                        value: sys_reg_value,
-                        width
+                let value = match instruction.operands()[1] {
+                    bad64::Operand::SysReg(bad64::SysReg::DAIFSET) => {
+                        // bad64 decodes DAIF as DAIFSet, fix it manually.
+                        sysregs::DAIF::generate_read(self)
                     }
-                );
+                    _ => self.translate_operand(&instruction.operands()[1]),
+                };
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
             }
             // Memory-ops
             Op::ADRP => {
