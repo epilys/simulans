@@ -10,7 +10,7 @@ use bilge::prelude::*;
 use super::ExecutionState;
 
 #[bitsize(2)]
-#[derive(Copy, Clone, Default, FromBits, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Default, FromBits, Debug, Eq, PartialEq, PartialOrd)]
 /// Exception level
 pub enum ExceptionLevel {
     /// `EL0`

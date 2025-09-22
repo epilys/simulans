@@ -2200,7 +2200,38 @@ impl BlockTranslator<'_> {
             Op::BRAAZ => todo!(),
             Op::BRAB => todo!(),
             Op::BRABZ => todo!(),
-            Op::BRK => todo!(),
+            Op::BRK => {
+                let imm: u64 = match instruction.operands()[0] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(imm),
+                        shift: None,
+                    } => imm,
+                    other => unexpected_operand!(other),
+                };
+                let imm = self.builder.ins().iconst(I16, imm as i64);
+
+                let sigref = {
+                    let mut sig = self.module.make_signature();
+                    // machine: &mut crate::machine::Armv8AMachine,
+                    sig.params.push(AbiParam::new(self.pointer_type));
+                    // preferred_exception_return: Address,
+                    sig.params.push(AbiParam::new(I64));
+                    // immediate: u16,
+                    sig.params.push(AbiParam::new(I16));
+                    self.builder.import_signature(sig)
+                };
+                let func = self.builder.ins().iconst(
+                    I64,
+                    crate::exceptions::aarch64_software_breakpoint as usize as u64 as i64,
+                );
+                let pc = self.builder.ins().iconst(I64, self.address as i64);
+                return self.emit_indirect_noreturn(
+                    self.address,
+                    sigref,
+                    func,
+                    &[self.machine_ptr, pc, imm],
+                );
+            }
             Op::BRKA => todo!(),
             Op::BRKAS => todo!(),
             Op::BRKB => todo!(),

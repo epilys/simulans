@@ -424,6 +424,14 @@ impl IssType {
         isstype
     }
 
+    pub fn set_iss_bits(&mut self, lsb: u8, len: u8, value: u16) {
+        assert!(lsb + len < 25, "lsb = {lsb}, len = {len}");
+        let value = u32::from(value);
+        let previous_value = u32::from(self.iss());
+        let new_value = set_bits!(previous_value, off = lsb, len = len, val = value);
+        self.set_iss(u25::new(new_value));
+    }
+
     fn set_iss_bit(&mut self, bit: u8, value: bool) {
         assert!(bit < 25, "{bit}");
         if value {
@@ -903,6 +911,45 @@ pub fn aarch64_call_hypervisor(
 
     let except = ExceptionRecord::exception_syndrome(Exception::Uncategorized);
     tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, ?target_el, ?vect_offset, ?except, ?preferred_exception_return, "AArch64.CallHypervisor");
+
+    aarch64_take_exception(
+        machine,
+        target_el,
+        except,
+        preferred_exception_return,
+        vect_offset,
+    );
+}
+
+/// Software breakpoint
+///
+/// `AArch64.SoftwareBreakpoint`
+pub fn aarch64_software_breakpoint(
+    machine: &mut crate::machine::Armv8AMachine,
+    preferred_exception_return: Address,
+    immediate: u16,
+) {
+    tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, immediate = %Address(immediate.into()), "AArch64.SoftwareBreakpoint");
+    let current_el = machine.cpu_state.PSTATE().EL();
+    let route_to_el2 = matches!(current_el, ExceptionLevel::EL0 | ExceptionLevel::EL1)
+        && machine.cpu_state.EL2_enabled()
+        && {
+            // HCR_EL2.TGE == '1';
+            machine.cpu_state.control_registers.hcr_el2 & (1 << 27) > 0
+        };
+
+    let target_el = if current_el > ExceptionLevel::EL1 {
+        current_el
+    } else if route_to_el2 {
+        ExceptionLevel::EL2
+    } else {
+        ExceptionLevel::EL1
+    };
+    assert!(machine.cpu_state.have_el(target_el), "{target_el:?}");
+    let vect_offset = Address(0x0);
+
+    let mut except = ExceptionRecord::exception_syndrome(Exception::SoftwareBreakpoint);
+    except.syndrome.set_iss_bits(0, 16, immediate);
 
     aarch64_take_exception(
         machine,
