@@ -213,7 +213,7 @@ impl Default for IDRegisterFile {
         // GIC, bits [27:24]
         id_aa64pfr0_el1 = crate::set_bits!(id_aa64pfr0_el1, off = 24, len = 4, val = 0b0000); // No GIC
 
-        let dczid_el0 = 0b1000;
+        let dczid_el0 = 0b100;
         Self {
             midr_el1: (0b1111) << 16,
             // vpidr_el2: (0b1111) << 16,
