@@ -3107,8 +3107,37 @@ impl BlockTranslator<'_> {
             Op::LDUMINLB => todo!(),
             Op::LDUMINLH => todo!(),
             Op::LDURSW => todo!(),
-            Op::LDXP => todo!(),
-            Op::LDXRB => todo!(),
+            Op::LDXP => {
+                // [ref:atomics]: We don't model exclusive access (yet).
+                let target1 = get_destination_register!();
+                let target2 = get_destination_register!(1);
+
+                let width = target1.width;
+
+                let source_address = self.translate_operand(&instruction.operands()[2]);
+
+                let value = self.generate_read(source_address, width);
+                write_to_register!(target1, TypedValue { value, width });
+                let source_address = self
+                    .builder
+                    .ins()
+                    .iadd_imm(source_address, i64::from(width as i32) / 8);
+                let value = self.generate_read(source_address, width);
+                write_to_register!(target2, TypedValue { value, width });
+            }
+            Op::LDXRB => {
+                // [ref:atomics]: We don't model exclusive access (yet).
+                let target = get_destination_register!();
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read(source_address, Width::_8);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_8
+                    },
+                );
+            }
             Op::LDXRH => todo!(),
             Op::LSLR => todo!(),
             Op::LSLV => todo!(),
@@ -3722,7 +3751,31 @@ impl BlockTranslator<'_> {
             Op::STLUR => todo!(),
             Op::STLURB => todo!(),
             Op::STLURH => todo!(),
-            Op::STLXP => todo!(),
+            Op::STXP | Op::STLXP => {
+                // [ref:atomics]: We don't model exclusive access (yet).
+                let status_target = get_destination_register!();
+                let width = self.operand_width(&instruction.operands()[1]);
+                let data1 = self.translate_operand(&instruction.operands()[1]);
+                let data2 = self.translate_operand(&instruction.operands()[2]);
+                let target = self.translate_operand(&instruction.operands()[3]);
+                self.generate_write(target, data1, width);
+                let target = self
+                    .builder
+                    .ins()
+                    .iadd_imm(target, i64::from(width as i32) / 8);
+                self.generate_write(target, data2, width);
+                let zero = {
+                    let width = self.operand_width(&instruction.operands()[0]);
+                    self.builder.ins().iconst(width.into(), 0)
+                };
+                write_to_register!(
+                    status_target,
+                    TypedValue {
+                        value: zero,
+                        width: Width::_32,
+                    },
+                );
+            }
             Op::STLXRB => {
                 // [ref:atomics]: We don't model exclusive access (yet).
                 // [ref:needs_unit_test]
@@ -3801,7 +3854,6 @@ impl BlockTranslator<'_> {
                 let value = self.builder.ins().ireduce(I8, value);
                 self.generate_write(target, value, Width::_8);
             }
-            Op::STXP => todo!(),
             Op::STLXR | Op::STXR => {
                 // [ref:atomics]: We don't model exclusive access (yet).
                 let status_target = get_destination_register!();
