@@ -3995,7 +3995,6 @@ impl BlockTranslator<'_> {
             Op::UHADD => todo!(),
             Op::UHSUB => todo!(),
             Op::UHSUBR => todo!(),
-            Op::UMADDL => todo!(),
             Op::UMAX => todo!(),
             Op::UMAXP => todo!(),
             Op::UMAXV => todo!(),
@@ -4030,8 +4029,23 @@ impl BlockTranslator<'_> {
                 let destination = get_destination_register!();
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
+                let a = self.builder.ins().uextend(I64, a);
+                let b = self.builder.ins().uextend(I64, b);
                 let value = self.builder.ins().imul(a, b);
-                let width = self.operand_width(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[0]);
+                write_to_register!(destination, TypedValue { value, width });
+            }
+            Op::UMADDL => {
+                // [ref:needs_unit_test]
+                let destination = get_destination_register!();
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let c = self.translate_operand(&instruction.operands()[3]);
+                let a = self.builder.ins().uextend(I64, a);
+                let b = self.builder.ins().uextend(I64, b);
+                let value = self.builder.ins().imul(a, b);
+                let value = self.builder.ins().iadd(value, c);
+                let width = self.operand_width(&instruction.operands()[0]);
                 write_to_register!(destination, TypedValue { value, width });
             }
             Op::UMULL2 => todo!(),
