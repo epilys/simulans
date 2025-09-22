@@ -695,14 +695,7 @@ impl BlockTranslator<'_> {
                 let reg_val = self.reg_to_value(reg, None);
                 match imm {
                     Imm::Unsigned(imm) => {
-                        let imm_value =
-                            self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap());
-                        // [ref:verify_implementation]: should wrap instead of trap on overflow?
-                        let value = self.builder.ins().uadd_overflow_trap(
-                            reg_val,
-                            imm_value,
-                            TrapCode::INTEGER_OVERFLOW,
-                        );
+                        let value = self.builder.ins().iadd_imm(reg_val, *imm as i64);
                         let reg_var = self.reg_to_var(reg, None, true);
                         self.builder.def_var(reg_var.var, value);
                         self.reg_to_value(reg, None)
@@ -716,13 +709,7 @@ impl BlockTranslator<'_> {
                         self.reg_to_value(reg, None)
                     }
                     Imm::Signed(imm) => {
-                        let imm_value = self.builder.ins().iconst(I64, *imm);
-                        // [ref:verify_implementation]: should wrap instead of trap on overflow?
-                        let value = self.builder.ins().uadd_overflow_trap(
-                            reg_val,
-                            imm_value,
-                            TrapCode::INTEGER_OVERFLOW,
-                        );
+                        let value = self.builder.ins().iadd_imm(reg_val, *imm);
                         let reg_var = self.reg_to_var(reg, None, true);
                         self.builder.def_var(reg_var.var, value);
                         self.reg_to_value(reg, None)
@@ -733,14 +720,7 @@ impl BlockTranslator<'_> {
                 let reg_val = self.reg_to_value(reg, None);
                 match imm {
                     Imm::Unsigned(imm) => {
-                        let imm_value =
-                            self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap());
-                        // [ref:verify_implementation]: should wrap instead of trap on overflow?
-                        let post_value = self.builder.ins().uadd_overflow_trap(
-                            reg_val,
-                            imm_value,
-                            TrapCode::INTEGER_OVERFLOW,
-                        );
+                        let post_value = self.builder.ins().iadd_imm(reg_val, *imm as i64);
                         let reg_var = self.reg_to_var(reg, None, true);
                         self.builder.def_var(reg_var.var, post_value);
                     }
@@ -752,13 +732,7 @@ impl BlockTranslator<'_> {
                         self.builder.def_var(reg_var.var, post_value);
                     }
                     Imm::Signed(imm) => {
-                        let imm_value = self.builder.ins().iconst(I64, *imm);
-                        // [ref:verify_implementation]: should wrap instead of trap on overflow?
-                        let post_value = self.builder.ins().uadd_overflow_trap(
-                            reg_val,
-                            imm_value,
-                            TrapCode::INTEGER_OVERFLOW,
-                        );
+                        let post_value = self.builder.ins().iadd_imm(reg_val, *imm);
                         let reg_var = self.reg_to_var(reg, None, true);
                         self.builder.def_var(reg_var.var, post_value);
                     }
@@ -807,17 +781,7 @@ impl BlockTranslator<'_> {
             } => {
                 let reg_val = self.reg_to_value(reg, None);
                 match offset {
-                    Imm::Unsigned(imm) => {
-                        let imm_value =
-                            self.builder.ins().iconst(I64, i64::try_from(*imm).unwrap());
-                        // [ref:verify_implementation]: should wrap instead of trap on overflow?
-                        let value = self.builder.ins().uadd_overflow_trap(
-                            reg_val,
-                            imm_value,
-                            TrapCode::INTEGER_OVERFLOW,
-                        );
-                        value
-                    }
+                    Imm::Unsigned(imm) => self.builder.ins().iadd_imm(reg_val, *imm as i64),
                     Imm::Signed(imm) if *imm < 0 => {
                         let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
                         let (value, _overflow_flag) =
@@ -885,10 +849,7 @@ impl BlockTranslator<'_> {
                     }
                     other => unimplemented!("unimplemented shift {other:?}"),
                 };
-                // [ref:verify_implementation]: should wrap instead of trap on overflow?
-                self.builder
-                    .ins()
-                    .uadd_overflow_trap(address, offset, TrapCode::INTEGER_OVERFLOW)
+                self.builder.ins().iadd(address, offset)
             }
             other => unimplemented!("unexpected rhs in translate_operand: {:?}", other),
         }
