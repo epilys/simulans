@@ -174,7 +174,7 @@ impl GdbStubRunner {
         }
         regs.sp = self.machine.cpu_state.registers.sp;
         regs.pc = self.machine.pc;
-        regs.cpsr = self.machine.cpu_state.registers.pstate as u32;
+        regs.cpsr = u64::from(self.machine.cpu_state.psr_from_PSTATE()) as u32;
         regs.v = self.machine.cpu_state.vector_registers;
         regs.fpcr = 0;
         regs.fpsr = 0;
@@ -224,8 +224,6 @@ impl GdbStubRunner {
         }
         self.machine.cpu_state.registers.sp = regs.sp;
         self.machine.pc = regs.pc;
-        self.machine.cpu_state.registers.pstate =
-            self.machine.cpu_state.registers.pstate & !(u64::from(u32::MAX)) | u64::from(regs.cpsr);
     }
 
     #[inline(always)]
