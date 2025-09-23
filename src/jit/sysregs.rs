@@ -252,7 +252,23 @@ impl BlockTranslator<'_> {
                 o2: 0b10,
             } => {
                 // CNTVCT_EL0, Counter-timer Virtual Count Register
-                register_field!(read self, timer_registers.cntvct_el0)
+                // register_field!(read self, timer_registers.cntvct_el0)
+                extern "C" fn count() -> u64 {
+                    use std::sync::LazyLock;
+
+                    static NOW: LazyLock<std::time::Instant> =
+                        LazyLock::new(std::time::Instant::now);
+
+                    NOW.elapsed().as_nanos() as u64
+                }
+                let sigref = {
+                    let mut sig = self.module.make_signature();
+                    sig.returns.push(AbiParam::new(I64));
+                    self.builder.import_signature(sig)
+                };
+                let callee = self.builder.ins().iconst(I64, count as usize as i64);
+                let call = self.builder.ins().call_indirect(sigref, callee, &[]);
+                self.builder.inst_results(call)[0]
             }
             SysRegEncoding {
                 o0: 3,
