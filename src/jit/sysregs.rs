@@ -415,6 +415,15 @@ impl BlockTranslator<'_> {
                 // RNDR, Random Number
                 RNDRRS::generate_read(self)
             }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b011,
+                cm: 0b1101,
+                cn: 0b0000,
+                o2: 0b101,
+            } => {
+                register_field!(read self, mmu_registers.tpidr2_el0)
+            }
             _other => unimplemented!(
                 "unimplemented sysreg encoding: {:?} pc =0x{:x?}",
                 reg,
@@ -455,6 +464,15 @@ impl BlockTranslator<'_> {
                 o2: 0b011,
             } => {
                 // TCR2_EL1, Extended Translation Control Register (EL1)
+            }
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b011,
+                cm: 0b1101,
+                cn: 0b0000,
+                o2: 0b101,
+            } => {
+                register_field!(write self, value, mmu_registers.tpidr2_el0)
             }
             _other => unimplemented!(
                 "unimplemented sysreg encoding: {:?} pc =0x{:x?}",

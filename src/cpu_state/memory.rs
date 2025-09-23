@@ -44,6 +44,8 @@ pub struct MMURegisterFile {
     // TLS registers for guest software use
     /// User Read and Write Thread ID Register
     pub tpidr_el0: u64,
+    /// EL0 Read/Write Software Thread ID Register 2
+    pub tpidr2_el0: u64,
     /// User Read-Only Thread ID Register
     pub tpidrro_el0: u64,
     /// Thread ID Register, privileged accesses only
