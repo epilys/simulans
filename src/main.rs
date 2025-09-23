@@ -131,7 +131,7 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let mut memory_map_builder = MemoryMap::builder().with_region(dram)?;
     let pl011 = simulans::devices::pl011::PL011State::new(0);
     memory_map_builder.add_region(MemoryRegion::new_io(
-        MemorySize::new(0x100).unwrap(),
+        MemorySize::new(0x1000).unwrap(),
         Address(0x9000000),
         pl011.ops(),
     )?)?;
