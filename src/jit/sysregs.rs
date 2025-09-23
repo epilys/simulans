@@ -87,6 +87,30 @@ impl BlockTranslator<'_> {
             SysReg::CNTKCTL_EL1 => register_field!(read self, timer_registers.cntkctl_el1),
             SysReg::CNTV_CTL_EL0 => register_field!(read self, timer_registers.cntv_ctl_el0),
             SysReg::CNTV_CVAL_EL0 => register_field!(read self, timer_registers.cntv_cval_el0),
+            SysReg::OSLAR_EL1 | SysReg::OSDLR_EL1 => {
+                // Debugger locks, ignore
+                self.builder.ins().iconst(I64, 0)
+            }
+            SysReg::DBGBVR0_EL1
+            | SysReg::DBGBCR0_EL1
+            | SysReg::DBGBVR1_EL1
+            | SysReg::DBGBCR1_EL1
+            | SysReg::DBGBVR2_EL1
+            | SysReg::DBGBCR2_EL1
+            | SysReg::DBGBVR3_EL1
+            | SysReg::DBGBCR3_EL1
+            | SysReg::DBGBVR4_EL1
+            | SysReg::DBGBCR4_EL1
+            | SysReg::DBGBVR5_EL1
+            | SysReg::DBGBCR5_EL1
+            | SysReg::DBGWVR0_EL1
+            | SysReg::DBGWCR0_EL1
+            | SysReg::DBGWVR1_EL1
+            | SysReg::DBGWCR1_EL1
+            | SysReg::DBGWVR2_EL1
+            | SysReg::DBGWCR2_EL1
+            | SysReg::DBGWVR3_EL1
+            | SysReg::DBGWCR3_EL1 => self.builder.ins().iconst(I64, 0),
             _ => {
                 let var = *self.sysreg_to_var(reg, false);
                 self.builder.use_var(var)
@@ -152,6 +176,31 @@ impl BlockTranslator<'_> {
             | SysReg::APIBKEYLO_EL1
             | SysReg::APIAKEYLO_EL1 => {
                 // [ref:pointer_auth]
+            }
+            SysReg::OSLAR_EL1 | SysReg::OSDLR_EL1 => {
+                // Debugger locks, ignore
+            }
+            SysReg::DBGBVR0_EL1
+            | SysReg::DBGBCR0_EL1
+            | SysReg::DBGBVR1_EL1
+            | SysReg::DBGBCR1_EL1
+            | SysReg::DBGBVR2_EL1
+            | SysReg::DBGBCR2_EL1
+            | SysReg::DBGBVR3_EL1
+            | SysReg::DBGBCR3_EL1
+            | SysReg::DBGBVR4_EL1
+            | SysReg::DBGBCR4_EL1
+            | SysReg::DBGBVR5_EL1
+            | SysReg::DBGBCR5_EL1
+            | SysReg::DBGWVR0_EL1
+            | SysReg::DBGWCR0_EL1
+            | SysReg::DBGWVR1_EL1
+            | SysReg::DBGWCR1_EL1
+            | SysReg::DBGWVR2_EL1
+            | SysReg::DBGWCR2_EL1
+            | SysReg::DBGWVR3_EL1
+            | SysReg::DBGWCR3_EL1 => {
+                // Debugger stuff, ignore
             }
             _ => {
                 let target = *self.sysreg_to_var(reg, true);
