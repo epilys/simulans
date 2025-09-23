@@ -2641,6 +2641,51 @@ impl BlockTranslator<'_> {
             Op::CTERMNE => todo!(),
             Op::DC => {
                 // Data Cache operation
+                match instruction.operands()[0] {
+                    bad64::Operand::Name(n) if n.starts_with(b"zva\0") => {
+                        let vaddress = self.translate_operand(&instruction.operands()[1]);
+                        self.store_pc(None);
+                        let preferred_exception_return =
+                            self.builder.ins().iconst(I64, self.address as i64);
+                        let sigref = {
+                            let mut sig = self.module.make_signature();
+                            sig.params.push(AbiParam::new(self.pointer_type));
+                            sig.params.push(AbiParam::new(I64));
+                            sig.params.push(AbiParam::new(I64));
+                            sig.returns.push(AbiParam::new(I8));
+                            self.builder.import_signature(sig)
+                        };
+                        let mem_zero = self
+                            .builder
+                            .ins()
+                            .iconst(I64, crate::memory::mmu::mem_zero as usize as u64 as i64);
+                        let call = self.builder.ins().call_indirect(
+                            sigref,
+                            mem_zero,
+                            &[self.machine_ptr, vaddress, preferred_exception_return],
+                        );
+                        let success = self.builder.inst_results(call)[0];
+                        let success_block = self.builder.create_block();
+                        let failure_block = self.builder.create_block();
+                        let merge_block = self.builder.create_block();
+                        self.builder
+                            .ins()
+                            .brif(success, success_block, &[], failure_block, &[]);
+                        self.builder.switch_to_block(failure_block);
+                        self.builder.seal_block(failure_block);
+                        let translate_func = self
+                            .builder
+                            .ins()
+                            .iconst(I64, lookup_block as usize as u64 as i64);
+                        self.builder.ins().return_(&[translate_func]);
+                        self.builder.switch_to_block(success_block);
+                        self.builder.seal_block(success_block);
+                        self.builder.ins().jump(merge_block, &[]);
+                        self.builder.switch_to_block(merge_block);
+                        self.builder.seal_block(merge_block);
+                    }
+                    _ => {}
+                }
             }
             Op::DCPS1 => todo!(),
             Op::DCPS2 => todo!(),

@@ -19,6 +19,14 @@ use crate::{
     tracing::TraceItem,
 };
 
+fn align(x: u64, y: u64) -> u64 {
+    y * (x / y)
+}
+
+fn align_bits(x: u64, y: u64, n: u32) -> u64 {
+    get_bits!(align(x, y), off = 0, len = n - 1)
+}
+
 #[repr(C)]
 /// A resolved address for a translated block.
 pub struct ResolvedAddress<'a> {
@@ -281,14 +289,6 @@ struct TableDescriptor {
 
 impl TableDescriptor {
     fn new(descriptor: u64, params: &IAParameters) -> Self {
-        fn align(x: u64, y: u64) -> u64 {
-            y * (x / y)
-        }
-
-        fn align_bits(x: u64, y: u64, n: u32) -> u64 {
-            get_bits!(align(x, y), off = 0, len = n - 1)
-        }
-
         assert_eq!(descriptor & 0b11, 0b11);
         // AArch64.NextTableBase()
         let mut tablebase = 0;
@@ -649,4 +649,42 @@ pub extern "C" fn translate_address<'machine>(
             unimplemented!()
         }
     }
+}
+
+/// `AArch64.MemZero`
+pub extern "C" fn mem_zero(
+    machine: &mut Armv8AMachine,
+    input_address: Address,
+    preferred_exception_return: Address,
+) -> bool {
+    const MAX_ZERO_BLOCK_SIZE: u64 = 2048;
+    let size =
+        4 * 2_u64.pow(get_bits!(machine.cpu_state.id_registers.dczid_el0, off = 0, len = 3) as u32);
+    assert!(size <= MAX_ZERO_BLOCK_SIZE);
+    let vaddress = align(input_address.0, size);
+
+    for i in 0..size {
+        let mut resolved_address = MaybeUninit::uninit();
+        if !translate_address(
+            machine,
+            Address(vaddress + i),
+            preferred_exception_return,
+            true,
+            &mut resolved_address,
+        ) {
+            return false;
+        }
+        let ResolvedAddress {
+                mem_region,
+                address_inside_region,
+            } =
+            // SAFETY: we checked the return value
+            unsafe { resolved_address.assume_init() };
+        crate::memory::region::ops::memory_region_write_8(
+            mem_region.unwrap(),
+            address_inside_region,
+            0,
+        );
+    }
+    true
 }
