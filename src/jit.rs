@@ -3569,8 +3569,15 @@ impl BlockTranslator<'_> {
             Op::SETF16 => todo!(),
             Op::SETF8 => todo!(),
             Op::SETFFR => todo!(),
-            Op::SEV => todo!(),
-            Op::SEVL => todo!(),
+            Op::SEV | Op::SEVL => {
+                let true_val = self.builder.ins().iconst(I8, i64::from(true));
+                self.builder.ins().store(
+                    MemFlags::trusted(),
+                    true_val,
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, cpu_state.event_register) as i32,
+                );
+            }
             Op::SHA1C => todo!(),
             Op::SHA1H => todo!(),
             Op::SHA1M => todo!(),
@@ -4283,10 +4290,16 @@ impl BlockTranslator<'_> {
             Op::UXTW => todo!(),
             Op::UZP1 => todo!(),
             Op::UZP2 => todo!(),
-            Op::WFE => todo!(),
-            Op::WFET => todo!(),
-            Op::WFI => todo!(),
-            Op::WFIT => todo!(),
+            Op::WFE | Op::WFET | Op::WFI | Op::WFIT => {
+                // [ref:FIXME]
+                let false_val = self.builder.ins().iconst(I8, i64::from(false));
+                self.builder.ins().store(
+                    MemFlags::trusted(),
+                    false_val,
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, cpu_state.event_register) as i32,
+                );
+            }
             Op::WHILEGE => todo!(),
             Op::WHILEGT => todo!(),
             Op::WHILEHI => todo!(),

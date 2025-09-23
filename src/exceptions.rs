@@ -834,6 +834,7 @@ pub extern "C" fn aarch64_exception_return(
     tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, ?source_pc, ?source_el, ?target_el, ?new_pc, "exception return");
     //ClearExclusiveLocal(ProcessorID());
     //SendEventLocal();
+    machine.cpu_state.event_register = true;
     if machine.cpu_state.PSTATE().IL() {
         new_pc.0 &= !(0b11);
     }
