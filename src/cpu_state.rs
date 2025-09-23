@@ -22,7 +22,7 @@ const TRUSTED_MEMFLAGS: MemFlags =
     MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
 
 /// Regular registers.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 #[repr(C)]
 #[allow(missing_docs)]
 pub struct RegisterFile {
@@ -68,6 +68,53 @@ pub struct RegisterFile {
     pub spsr_el2: u64,
     pub spsr_el3: u64,
     pub pstate: u64,
+}
+
+impl Default for RegisterFile {
+    fn default() -> Self {
+        Self {
+            x0: 0,
+            x1: 0,
+            x2: 0,
+            x3: 0,
+            x4: 0,
+            x5: 0,
+            x6: 0,
+            x7: 0,
+            x8: 0,
+            x9: 0,
+            x10: 0,
+            x11: 0,
+            x12: 0,
+            x13: 0,
+            x14: 0,
+            x15: 0,
+            x16: 0,
+            x17: 0,
+            x18: 0,
+            x19: 0,
+            x20: 0,
+            x21: 0,
+            x22: 0,
+            x23: 0,
+            x24: 0,
+            x25: 0,
+            x26: 0,
+            x27: 0,
+            x28: 0,
+            x29: 0,
+            x30: 0,
+            sp: 0,
+            sp_el0: 0,
+            sp_el1: 0,
+            sp_el2: 0,
+            sp_el3: 0,
+            spsr_el1: 0,
+            spsr_el2: 0,
+            spsr_el3: 0,
+            pstate: PSTATE::default().into(),
+        }
+    }
 }
 
 /// Classes of exception.

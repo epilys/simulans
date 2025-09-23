@@ -88,7 +88,7 @@ pub struct NZCVFields {
 }
 
 #[bitsize(4)]
-#[derive(Default, Copy, Clone, PartialEq, Eq, FromBits, DebugBits)]
+#[derive(Copy, Clone, PartialEq, Eq, FromBits, DebugBits)]
 /// `DAIF` mask bits.
 pub struct DAIFFields {
     /// FIQ mask.
@@ -99,6 +99,12 @@ pub struct DAIFFields {
     pub A: bool,
     /// Debug mask.
     pub D: bool,
+}
+
+impl Default for DAIFFields {
+    fn default() -> Self {
+        Self::new(true, true, true, true)
+    }
 }
 
 #[bitsize(64)]
