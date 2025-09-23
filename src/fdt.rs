@@ -55,9 +55,10 @@ impl<'a> FdtBuilder<'a> {
         let mut fdt = FdtWriter::new()?;
 
         let root_node = fdt.begin_node("")?;
-        // [ref:TODO][ref:serial]: add pl011 node, if present
+        let stdout_path;
         // [ref:TODO][ref:serial]: implement hypervisor calls?
 
+        let phandle_clk = 0x8000;
         let phandle_gic = 0x8002;
         fdt.property_u32("interrupt-parent", phandle_gic)?;
         fdt.property_null("dma-coherent")?;
@@ -65,13 +66,6 @@ impl<'a> FdtBuilder<'a> {
         fdt.property_string("compatible", "linux,dummy-virt")?;
         fdt.property_u32("#address-cells", 0x2)?;
         fdt.property_u32("#size-cells", 0x2)?;
-
-        {
-            let cmdline = self.cmdline.as_deref().unwrap_or("");
-            let chosen_node = fdt.begin_node("chosen")?;
-            fdt.property_string("bootargs", cmdline)?;
-            fdt.end_node(chosen_node)?;
-        }
 
         for region in self.memory_map.iter() {
             let Some(mmap) = region.as_mmap() else {
@@ -88,6 +82,35 @@ impl<'a> FdtBuilder<'a> {
             fdt.property_array_u64("reg", &mem_reg_prop)?;
             fdt.end_node(memory_node)?;
         }
+
+        {
+            let clk_node = fdt.begin_node("apb-pclk")?;
+            fdt.property_u32("phandle", phandle_clk)?;
+            fdt.property_string("clock-output-names", "clk24mhz")?;
+            fdt.property_u32("clock-frequency", 0x16e3600)?;
+            fdt.property_u32("#clock-cells", 0x00)?;
+            fdt.property_string("compatible", "fixed-clock")?;
+            fdt.end_node(clk_node)?;
+        }
+        {
+            let pl011_id = "pl011@9000000";
+            // [ref:FIXME]: get address from device instance
+            stdout_path = Some(format!("/{pl011_id}"));
+            let pl011_node = fdt.begin_node(pl011_id)?;
+            fdt.property_string_list(
+                "clock-names",
+                vec!["uartclk".to_string(), "apb_pclk".to_string()],
+            )?;
+            fdt.property_array_u32("clocks", &[phandle_clk, phandle_clk])?;
+            fdt.property_array_u32("interrupts", &[0x00, 0x01, 0x04])?;
+            fdt.property_array_u64("reg", &[0x9000000, 0x1000])?;
+            fdt.property_string_list(
+                "compatible",
+                vec!["arm,pl011".to_string(), "arm,primecell".to_string()],
+            )?;
+            fdt.end_node(pl011_node)?;
+        }
+
         {
             // [ref:FIXME]: get address from device instance
             let gic_start = 0x8000000;
@@ -136,6 +159,23 @@ impl<'a> FdtBuilder<'a> {
             fdt.property_string("compatible", "arm,armv8-timer")?;
             fdt.end_node(timer_node)?;
         }
+        {
+            let cmdline = self.cmdline.as_deref().unwrap_or("");
+            let chosen_node = fdt.begin_node("chosen")?;
+            fdt.property_string("bootargs", cmdline)?;
+            if let Some(ref stdout_path) = stdout_path {
+                fdt.property_string("stdout-path", stdout_path)?;
+            }
+            fdt.end_node(chosen_node)?;
+        }
+        {
+            let aliases_node = fdt.begin_node("aliases")?;
+            if let Some(ref stdout_path) = stdout_path {
+                fdt.property_string("serial0", stdout_path)?;
+            }
+            fdt.end_node(aliases_node)?;
+        }
+
         fdt.end_node(root_node)?;
 
         let fdt = fdt.finish()?;
