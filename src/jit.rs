@@ -3032,7 +3032,6 @@ impl BlockTranslator<'_> {
             Op::LDAPURSB => todo!(),
             Op::LDAPURSH => todo!(),
             Op::LDAPURSW => todo!(),
-            Op::LDARB => todo!(),
             Op::LDARH => todo!(),
             Op::LDAXP => todo!(),
             Op::LDAXR => {
@@ -3043,7 +3042,7 @@ impl BlockTranslator<'_> {
                 let value = self.generate_read(source_address, width);
                 write_to_register!(target, TypedValue { value, width });
             }
-            Op::LDAXRB => {
+            Op::LDARB | Op::LDAXRB => {
                 // [ref:atomics]: We don't model exclusive access (yet).
                 let target = get_destination_register!();
                 let source_address = self.translate_operand(&instruction.operands()[1]);
