@@ -18,7 +18,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub use ::tracing::{error, event, event_enabled, info, trace, warn, Level};
+pub use ::tracing::{debug, error, event, event_enabled, info, trace, warn, Level};
 pub use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::{prelude::*, reload, Layer};
 
