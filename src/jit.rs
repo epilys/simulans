@@ -3717,7 +3717,15 @@ impl BlockTranslator<'_> {
             Op::SMSTART => todo!(),
             Op::SMSTOP => todo!(),
             Op::SMSUBL => todo!(),
-            Op::SMULH => todo!(),
+            Op::SMULH => {
+                // [ref:needs_unit_test]
+                let destination = get_destination_register!();
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let value = self.builder.ins().smulhi(a, b);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(destination, TypedValue { value, width });
+            }
             Op::SMULL => {
                 // [ref:needs_unit_test]
                 let destination = get_destination_register!();
