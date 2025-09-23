@@ -1620,6 +1620,32 @@ impl BlockTranslator<'_> {
                     width: Width::_32
                 })
             }
+            Op::LDPSW => {
+                // Load Pair of Registers Signed Word
+                // [ref:needs_unit_test]
+                let target1 = get_destination_register!();
+                let target2 = get_destination_register!(1);
+
+                let source_address = self.translate_operand(&instruction.operands()[2]);
+
+                let value = self.generate_read(source_address, Width::_32);
+                write_to_register!(signed
+                    target1,
+                    TypedValue {
+                        value,
+                        width: Width::_32
+                    }
+                );
+                let source_address = self.builder.ins().iadd_imm(source_address, 4);
+                let value = self.generate_read(source_address, Width::_32);
+                write_to_register!(signed
+                    target2,
+                    TypedValue {
+                        value,
+                        width: Width::_32
+                    }
+                );
+            }
             // Moves
             Op::MOV => {
                 let target = get_destination_register!();
@@ -3082,7 +3108,6 @@ impl BlockTranslator<'_> {
             Op::LDNT1SH => todo!(),
             Op::LDNT1SW => todo!(),
             Op::LDNT1W => todo!(),
-            Op::LDPSW => todo!(),
             Op::LDRAA => todo!(),
             Op::LDRAB => todo!(),
             Op::LDSET => todo!(),
