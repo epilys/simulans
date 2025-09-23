@@ -77,7 +77,7 @@ impl<'a> FdtBuilder<'a> {
                 continue;
             }
             let mem_reg_prop = [region.start_addr().0, region.len() as u64];
-            let memory_node = fdt.begin_node(&format!("memory@{:X?}", region.start_addr().0))?;
+            let memory_node = fdt.begin_node(&format!("memory@{:x?}", region.start_addr().0))?;
             fdt.property_string("device_type", "memory")?;
             fdt.property_array_u64("reg", &mem_reg_prop)?;
             fdt.end_node(memory_node)?;
@@ -145,7 +145,14 @@ impl<'a> FdtBuilder<'a> {
         }
         {
             let psci_node = fdt.begin_node("psci")?;
-            fdt.property_string("compatible", "arm,psci-0.2")?;
+            fdt.property_string_list(
+                "compatible",
+                vec![
+                    "arm,psci-1.0".to_string(),
+                    "arm,psci-0.2".to_string(),
+                    "arm,psci".to_string(),
+                ],
+            )?;
             fdt.property_string("method", "hvc")?;
             fdt.end_node(psci_node)?;
         }
@@ -160,7 +167,7 @@ impl<'a> FdtBuilder<'a> {
             fdt.end_node(timer_node)?;
         }
         {
-            let cmdline = self.cmdline.as_deref().unwrap_or("");
+            let cmdline = self.cmdline.as_deref().unwrap_or("Hello world!");
             let chosen_node = fdt.begin_node("chosen")?;
             fdt.property_string("bootargs", cmdline)?;
             if let Some(ref stdout_path) = stdout_path {
