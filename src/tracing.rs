@@ -74,6 +74,8 @@ pub enum TraceItem {
     Gdb,
     /// Logs `gdbstub` crate tracing.
     Gdbstub,
+    /// Logs [`GicV2`](crate::devices::gicv2::GicV2`) events.
+    GicV2,
     /// Logs `aarch64` assembly of translated blocks.
     InAsm,
     /// Logs JIT related events.
@@ -103,6 +105,7 @@ impl TraceItem {
             Self::Exception => "simulans::exception:event",
             Self::Gdb => "simulans::gdb:event",
             Self::Gdbstub => "gdbstub",
+            Self::GicV2 => "simulans::gicv2:event",
             Self::InAsm => "simulans::in_asm:event",
             Self::Jit => "simulans::jit:event",
             Self::LookupBlock => "simulans::lookup_block:event",
@@ -122,6 +125,7 @@ impl TraceItem {
             Self::Exception => "exception",
             Self::Gdb => "gdb",
             Self::Gdbstub => "gdbstub",
+            Self::GicV2 => "gicv2",
             Self::InAsm => "in_asm",
             Self::Jit => "jit",
             Self::LookupBlock => "lookup_block",

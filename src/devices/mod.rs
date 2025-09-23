@@ -5,6 +5,7 @@
 //!
 //! Devices must implement the [`Device`] trait.
 
+pub mod gicv2;
 pub mod pl011;
 use crate::memory::DeviceMemoryOps;
 

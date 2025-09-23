@@ -135,6 +135,12 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
         Address(0x9000000),
         pl011.ops(),
     )?)?;
+    let gicv2 = simulans::devices::gicv2::GicV2::new(1);
+    memory_map_builder.add_region(MemoryRegion::new_io(
+        MemorySize::new(0x20000).unwrap(),
+        Address(0x8000000),
+        gicv2.ops(),
+    )?)?;
     if args.generate_fdt {
         // Add Boot ROM
         let mut boot_rom = MemoryRegion::new(
