@@ -22,7 +22,7 @@ pub const KERNEL_ADDRESS: usize = 0x40080000;
 /// Default starting offset of DRAM inside the physical address space.
 pub const PHYS_MEM_START: u64 = 0x4000_0000;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
 #[repr(i32)]
 /// Register/memory width in bits.
 pub enum Width {
@@ -36,6 +36,28 @@ pub enum Width {
     _16 = 16,
     /// 8-bit.
     _8 = 8,
+}
+
+impl std::fmt::Debug for Width {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::_8 => {
+                write!(fmt, "8bit")
+            }
+            Self::_16 => {
+                write!(fmt, "16bit")
+            }
+            Self::_32 => {
+                write!(fmt, "32bit")
+            }
+            Self::_64 => {
+                write!(fmt, "64bit")
+            }
+            Self::_128 => {
+                write!(fmt, "128bit")
+            }
+        }
+    }
 }
 
 impl From<Width> for cranelift::prelude::Type {
