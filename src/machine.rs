@@ -83,6 +83,7 @@ impl Armv8AMachine {
         &mut self,
         entry_point: Address,
     ) -> Result<crate::fdt::Fdt, Box<dyn std::error::Error>> {
+        // [ref:needs_unit_test]
         let fdt = crate::fdt::FdtBuilder::new(&self.memory)?
             .num_vcpus(NonZero::new(1).unwrap())
             .cmdline(None)

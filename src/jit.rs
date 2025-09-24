@@ -2142,8 +2142,6 @@ impl BlockTranslator<'_> {
             Op::BFMOPS => todo!(),
             Op::BFXIL => {
                 // Bitfield Extract and Insert Low (alias of BFM)
-                // [ref:needs_unit_test]
-                // [ref:verify_implementation]: I wrote this quickly
                 let destination = get_destination_register!();
                 let dst_val = self.translate_operand(&instruction.operands()[0]);
                 let source = self.translate_operand(&instruction.operands()[1]);
@@ -2546,7 +2544,6 @@ impl BlockTranslator<'_> {
                 // This instruction sets the destination register to 1 if the condition is TRUE,
                 // and otherwise sets it to 0.
 
-                // [ref:needs_unit_test]
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let zero = self.builder.ins().iconst(width.into(), 0);
@@ -3290,7 +3287,6 @@ impl BlockTranslator<'_> {
             Op::NANDS => todo!(),
             Op::NBSL => todo!(),
             Op::NEG => {
-                // [ref:needs_unit_test]
                 let target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let mut value = self.builder.ins().ineg(value);
@@ -3412,7 +3408,6 @@ impl BlockTranslator<'_> {
             Op::RETAA => todo!(),
             Op::RETAB => todo!(),
             Op::REV | Op::REV64 => {
-                // [ref:needs_unit_test]
                 let target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[1]);
@@ -3421,8 +3416,6 @@ impl BlockTranslator<'_> {
             }
             Op::REV16 => todo!(),
             Op::REV32 => {
-                // [ref:verify_implementation]
-                // [ref:needs_unit_test]
                 // Reverse bytes in 32-bit words reverses the byte order in each 32-bit word of
                 // a register.
                 let target = get_destination_register!();
@@ -4281,7 +4274,6 @@ impl BlockTranslator<'_> {
                 write_to_register!(destination, TypedValue { value, width });
             }
             Op::UMULH => {
-                // [ref:needs_unit_test]
                 let destination = get_destination_register!();
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
