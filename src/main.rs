@@ -129,18 +129,14 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
         MemoryRegion::new("ram", dram_size, args.dram_start_address())?
     };
     let mut memory_map_builder = MemoryMap::builder().with_region(dram)?;
-    let pl011 = simulans::devices::pl011::PL011State::new(0);
-    memory_map_builder.add_region(MemoryRegion::new_io(
-        MemorySize::new(0x1000).unwrap(),
-        Address(0x9000000),
-        pl011.ops(),
-    )?)?;
-    let gicv2 = simulans::devices::gicv2::GicV2::new(1);
-    memory_map_builder.add_region(MemoryRegion::new_io(
-        MemorySize::new(0x20000).unwrap(),
-        Address(0x8000000),
-        gicv2.ops(),
-    )?)?;
+    let pl011 = simulans::devices::pl011::PL011State::new(0, Address(0x9000000));
+    for mem in pl011.into_memory_regions() {
+        memory_map_builder.add_region(mem)?;
+    }
+    let gicv2 = simulans::devices::gicv2::GicV2::new(1, Address(0x08000000), Address(0x08010000));
+    for mem in gicv2.into_memory_regions() {
+        memory_map_builder.add_region(mem)?;
+    }
     if args.generate_fdt {
         // Add Boot ROM
         let mut boot_rom = MemoryRegion::new(

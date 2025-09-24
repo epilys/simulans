@@ -8,7 +8,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::{memory::Width, tracing};
+use crate::{
+    memory::{Address, MemoryRegion, MemorySize, Width},
+    tracing,
+};
 
 // TODO: You must disable the UART before any of the control registers are
 // reprogrammed. When the UART is disabled in the middle of transmission or
@@ -82,8 +85,7 @@ pub struct PL011Registers {
 pub struct PL011State {
     /// Device ID.
     pub device_id: u64,
-    /// Register file.
-    pub regs: Arc<Mutex<PL011Registers>>,
+    address: Address,
 }
 
 impl PL011State {
@@ -94,12 +96,20 @@ impl crate::devices::Device for PL011State {
     fn id(&self) -> u64 {
         self.device_id
     }
-    fn ops(&self) -> Box<dyn crate::memory::DeviceMemoryOps> {
-        Box::new(PL011MemoryOps {
-            device_id: self.device_id,
-            char_backend: std::io::stdout(),
-            regs: self.regs.clone(),
-        })
+
+    fn into_memory_regions(self) -> Vec<MemoryRegion> {
+        let Self { device_id, address } = self;
+
+        vec![MemoryRegion::new_io(
+            MemorySize::new(0x1000).unwrap(),
+            address,
+            Box::new(PL011MemoryOps {
+                device_id,
+                char_backend: std::io::stdout(),
+                regs: Default::default(),
+            }),
+        )
+        .unwrap()]
     }
 }
 
@@ -468,11 +478,8 @@ impl crate::memory::DeviceMemoryOps for PL011MemoryOps {
 }
 
 impl PL011State {
-    pub fn new(device_id: u64) -> Self {
-        Self {
-            device_id,
-            regs: Default::default(),
-        }
+    pub fn new(device_id: u64, address: Address) -> Self {
+        Self { device_id, address }
     }
 }
 

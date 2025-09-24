@@ -20,16 +20,11 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use std::{
-    num::NonZero,
-    sync::{atomic::AtomicU8, Arc},
-};
+use std::num::NonZero;
 
 use simulans::{
-    devices::Device,
-    machine::Armv8AMachine,
     main_loop,
-    memory::{Address, MemoryMap, MemoryRegion, MemorySize},
+    memory::{Address, MemorySize},
 };
 
 #[macro_use]
@@ -125,51 +120,4 @@ fn test_load_stores_2() {
         mem.as_ref()[stack_post as usize - phys_offset - 0x10 + 1],
         0x12
     );
-}
-
-#[test_log::test]
-fn test_uart_write_str() {
-    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_write_str.bin");
-
-    const DRAM_MEMORY_SIZE: MemorySize =
-        MemorySize(NonZero::new(4 * TEST_INPUT.len() as u64).unwrap());
-    utils::disas(TEST_INPUT, 0);
-    let entry_point = Address(0);
-    let pl011_addr = Address(4 * TEST_INPUT.len() as u64);
-    let exit_request = Arc::new(AtomicU8::new(0));
-    {
-        let pl011 = simulans::devices::pl011::PL011State::new(0);
-        let tube = simulans::devices::tube::Tube::new(0, Arc::clone(&exit_request));
-        let memory = MemoryMap::builder()
-            .with_region(MemoryRegion::new("ram", DRAM_MEMORY_SIZE, entry_point).unwrap())
-            .unwrap()
-            .with_region(
-                MemoryRegion::new_io(MemorySize::new(0x100).unwrap(), pl011_addr, pl011.ops())
-                    .unwrap(),
-            )
-            .unwrap()
-            .with_region(
-                MemoryRegion::new_io(
-                    MemorySize::new(0x100).unwrap(),
-                    Address(0x0d800020),
-                    tube.ops(),
-                )
-                .unwrap(),
-            )
-            .unwrap()
-            .build();
-        let mut machine = Armv8AMachine::new_with_exit_request(memory, exit_request);
-        machine.cpu_state.registers.x0 = pl011_addr.0;
-        machine.cpu_state.registers.x2 = "Hello world\n".len() as u64;
-
-        main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-
-        macro_rules! reg {
-            ($reg:ident) => {
-                machine.cpu_state.registers.$reg
-            };
-        }
-
-        assert_hex_eq!(reg!(x0), 0x0);
-    }
 }

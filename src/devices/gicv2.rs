@@ -5,56 +5,33 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::{memory::Width, tracing};
+use crate::{
+    memory::{Address, MemoryRegion, MemorySize, Width},
+    tracing,
+};
 
 #[derive(Debug)]
 pub struct GicV2 {
     /// Device ID.
-    pub device_id: u64,
-    pub registers: Arc<Mutex<(Gicd, Gicc)>>,
+    device_id: u64,
+    dist: Address,
+    cpu_if: Address,
 }
 
 impl GicV2 {
-    pub fn new(device_id: u64) -> Self {
+    pub fn new(device_id: u64, dist: Address, cpu_if: Address) -> Self {
+        if (dist < cpu_if && dist + 0x10000_u64 > cpu_if)
+            || (cpu_if < dist && cpu_if + 0x10000_u64 > dist)
+        {
+            panic!(
+                "GicV2 distributor memory at {dist} overlaps with CPU interface memory at \
+                 {cpu_if} (each is sized  0x10000 bytes)"
+            );
+        }
         Self {
             device_id,
-            registers: Arc::new(Mutex::new((
-                Gicd {
-                    ctlr: 0,
-                    typer: 0,
-                    iidr: 0,
-                    _reserved_0: [0; 0x1D],
-                    igroupr: [0; 0x20],
-                    isenabler: [0; 0x20],
-                    icenabler: [0; 0x20],
-                    ispendr: [0; 0x20],
-                    icpendr: [0; 0x20],
-                    isactiver: [0; 0x20],
-                    icactiver: [0; 0x20],
-                    ipriorityr: [0; 0x100],
-                    itargetsr: [0; 0x100],
-                    icfgr: [0; 0x40],
-                    _reserved_1: [0; 0x80],
-                    sgir: 0,
-                },
-                Gicc {
-                    ctlr: 0,
-                    pmr: 0,
-                    bpr: 0,
-                    iar: 0,
-                    eoir: 0,
-                    rpr: 0,
-                    hppir: 0,
-                    abpr: 0,
-                    aiar: 0,
-                    aeoir: 0,
-                    ahppir: 0,
-                    _reserved_0: [0; 0x34],
-                    iidr: 0,
-                    _reserved_1: [0; 0x3C0],
-                    dir: 0,
-                },
-            ))),
+            dist,
+            cpu_if,
         }
     }
 }
@@ -64,11 +41,33 @@ impl crate::devices::Device for GicV2 {
         self.device_id
     }
 
-    fn ops(&self) -> Box<dyn crate::memory::DeviceMemoryOps> {
-        Box::new(GicV2MemoryOps {
-            device_id: self.device_id,
-            registers: self.registers.clone(),
-        })
+    fn into_memory_regions(self) -> Vec<MemoryRegion> {
+        let Self {
+            device_id,
+            dist,
+            cpu_if,
+        } = self;
+        let registers = Arc::new(Mutex::new((Gicd::new(), Gicc::new())));
+        vec![
+            MemoryRegion::new_io(
+                MemorySize::new(0x10000).unwrap(),
+                dist,
+                Box::new(GicV2MemoryOps {
+                    device_id,
+                    registers: registers.clone(),
+                }),
+            )
+            .unwrap(),
+            MemoryRegion::new_io(
+                MemorySize::new(0x10000).unwrap(),
+                cpu_if,
+                Box::new(GicV2MemoryOps {
+                    device_id,
+                    registers,
+                }),
+            )
+            .unwrap(),
+        ]
     }
 }
 

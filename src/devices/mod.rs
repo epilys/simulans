@@ -7,14 +7,14 @@
 
 pub mod gicv2;
 pub mod pl011;
-use crate::memory::DeviceMemoryOps;
+use crate::memory::MemoryRegion;
 
 /// Trait for device operations.
 pub trait Device: std::fmt::Debug {
     /// Returns device ID.
     fn id(&self) -> u64;
-    /// Returns device operations.
-    fn ops(&self) -> Box<dyn DeviceMemoryOps>;
+    /// Returns device I/O memory regions.
+    fn into_memory_regions(self) -> Vec<MemoryRegion>;
 }
 
 pub mod tube {
@@ -25,7 +25,7 @@ pub mod tube {
         Arc,
     };
 
-    use crate::memory::Width;
+    use crate::memory::{Address, MemoryRegion, MemorySize, Width};
 
     #[derive(Debug)]
     /// Tube testing device (Memory mapped register) to signal shutdown for
@@ -33,15 +33,17 @@ pub mod tube {
     pub struct Tube {
         /// Unique device ID.
         pub device_id: u64,
+        pub address: Address,
         /// Atomic integer to alert machine of exit request.
         pub exit_request: Arc<AtomicU8>,
     }
 
     impl Tube {
         /// Create a new tube device that will write to `exit_request`.
-        pub const fn new(device_id: u64, exit_request: Arc<AtomicU8>) -> Self {
+        pub const fn new(device_id: u64, address: Address, exit_request: Arc<AtomicU8>) -> Self {
             Self {
                 device_id,
+                address,
                 exit_request,
             }
         }
@@ -52,11 +54,21 @@ pub mod tube {
             self.device_id
         }
 
-        fn ops(&self) -> Box<dyn crate::memory::DeviceMemoryOps> {
-            Box::new(TubeOps {
-                device_id: self.device_id,
-                exit_request: Arc::clone(&self.exit_request),
-            })
+        fn into_memory_regions(self) -> Vec<MemoryRegion> {
+            let Self {
+                device_id,
+                address,
+                exit_request,
+            } = self;
+            vec![MemoryRegion::new_io(
+                MemorySize::new(0x100).unwrap(),
+                address,
+                Box::new(TubeOps {
+                    device_id,
+                    exit_request,
+                }),
+            )
+            .unwrap()]
         }
     }
 
