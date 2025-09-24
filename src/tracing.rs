@@ -23,6 +23,57 @@ pub use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::{prelude::*, reload, Layer};
 
 mod helpers {
+    #[derive(Copy, Clone, Ord, Eq, PartialEq, PartialOrd)]
+    #[repr(transparent)]
+    /// Type wrapper for values with hex formatted printing
+    pub struct Hex<T: std::fmt::LowerHex>(pub T);
+
+    impl<T: std::fmt::LowerHex> std::fmt::Display for Hex<T> {
+        fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(fmt, "{:#x}", self.0)
+        }
+    }
+
+    impl<T: std::fmt::LowerHex> std::fmt::Debug for Hex<T> {
+        fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(fmt, "{:#x}", self.0)
+        }
+    }
+
+    #[derive(Copy, Clone, Ord, Eq, PartialEq, PartialOrd)]
+    #[repr(transparent)]
+    /// Type wrapper for values with binary formatted printing
+    pub struct Binary<T: std::fmt::Binary>(pub T);
+
+    impl<T: std::fmt::Binary> std::fmt::Display for Binary<T> {
+        fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(fmt, "{:#b}", self.0)
+        }
+    }
+
+    impl<T: std::fmt::Binary> std::fmt::Debug for Binary<T> {
+        fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(fmt, "{:#b}", self.0)
+        }
+    }
+
+    #[derive(Copy, Clone, Ord, Eq, PartialEq, PartialOrd)]
+    #[repr(transparent)]
+    /// Type wrapper for values with binary and binary formatted printing
+    pub struct BinaryHex<T: std::fmt::Binary + std::fmt::LowerHex + Copy>(pub T);
+
+    impl<T: std::fmt::Binary + std::fmt::LowerHex + Copy> std::fmt::Display for BinaryHex<T> {
+        fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(fmt, "{}={}", Binary(self.0), Hex(self.0))
+        }
+    }
+
+    impl<T: std::fmt::Binary + std::fmt::LowerHex + Copy> std::fmt::Debug for BinaryHex<T> {
+        fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(fmt, "{}={}", Binary(self.0), Hex(self.0))
+        }
+    }
+
     /// Helper method to print register state on block entry/exit for trace item
     /// [`BlockEntry`](crate::tracing::TraceItem::BlockEntry)
     pub extern "C" fn print_registers(machine: &crate::machine::Armv8AMachine) {

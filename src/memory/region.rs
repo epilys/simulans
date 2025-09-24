@@ -531,7 +531,7 @@ pub mod ops {
                     kind = "write",
                     size = stringify!($size),
                     address = ?Address(address_inside_region),
-                    "value {value}=0x{value:x}=0b{value:b}",
+                    value = ?tracing::BinaryHex(value),
                 );
                 match mem_region.backing {
                     MemoryBacking::Mmap(ref mut map @ MmappedMemory { .. }) => {
@@ -591,7 +591,7 @@ pub mod ops {
                             kind = "read",
                             size = stringify!($size),
                             address = ?Address(address_inside_region),
-                            "value {value}=0x{value:x}=0b{value:b}",
+                            value = ?tracing::BinaryHex(value),
                         );
                         value
                     }

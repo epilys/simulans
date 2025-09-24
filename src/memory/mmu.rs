@@ -16,7 +16,7 @@ use crate::{
     get_bits,
     machine::Armv8AMachine,
     memory::{Address, MemoryRegion},
-    tracing::TraceItem,
+    tracing::{self, TraceItem},
 };
 
 fn align(x: u64, y: u64) -> u64 {
@@ -439,7 +439,7 @@ pub extern "C" fn translate_address<'machine>(
                     target: TraceItem::AddressLookup.as_str(),
                     tracing::Level::TRACE,
                     ?base_address,
-                    "table_entry_0 {table_entry_0}=0x{table_entry_0:x}=0b{table_entry_0:b}"
+                    table_entry_0 = ?tracing::BinaryHex(table_entry_0),
                 );
             }
 
@@ -507,7 +507,7 @@ pub extern "C" fn translate_address<'machine>(
                     target: TraceItem::AddressLookup.as_str(),
                     tracing::Level::TRACE,
                     ?base_address,
-                    "table_entry_1 {table_entry_1}=0x{table_entry_1:x}=0b{table_entry_1:b}"
+                    table_entry_1 = ?tracing::BinaryHex(table_entry_1),
                 );
             }
 

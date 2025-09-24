@@ -161,7 +161,7 @@ impl PL011Registers {
             tracing::Level::TRACE,
             kind = "write",
             ?offset,
-            "value {value}=0x{value:x}=0b{value:b}",
+            value = ?tracing::BinaryHex(value),
         );
         match offset {
             DR => {
@@ -437,7 +437,7 @@ impl crate::memory::DeviceMemoryOps for PL011MemoryOps {
                     target: tracing::TraceItem::Pl011.as_str(),
                     tracing::Level::TRACE,
                     kind = "read",
-                    ?offset,
+                    offset = ?tracing::Hex(offset),
                     ?field,
                     ?width,
                     ?result,
