@@ -20,19 +20,32 @@ use crate::{
     memory::{mmu::ResolvedAddress, Width},
 };
 
-impl BlockTranslator<'_> {
-    fn create_resolved_address_stack_slot(&mut self) -> StackSlot {
-        self.builder.create_sized_stack_slot(StackSlotData::new(
+macro_rules! create_stack_slot {
+    ($self:expr, width = $w:expr) => {{
+        match $w {
+            Width::_8 => create_stack_slot!($self, u8),
+            Width::_16 => create_stack_slot!($self, u16),
+            Width::_32 => create_stack_slot!($self, u32),
+            Width::_64 => create_stack_slot!($self, u64),
+            Width::_128 => create_stack_slot!($self, u128),
+        }
+    }};
+    ($self:expr, $t:ty) => {{
+        let stack_slot: StackSlot = $self.builder.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
-            std::mem::size_of::<ResolvedAddress<'_>>()
-                .try_into()
-                .unwrap(),
-            std::mem::align_of::<ResolvedAddress<'_>>()
-                .try_into()
-                .unwrap(),
-        ))
-    }
+            std::mem::size_of::<$t>().try_into().unwrap(),
+            std::mem::align_of::<$t>().try_into().unwrap(),
+        ));
+        let addr = $self.builder.ins().stack_addr(
+            $self.module.target_config().pointer_type(),
+            stack_slot,
+            0,
+        );
+        (stack_slot, addr)
+    }};
+}
 
+impl BlockTranslator<'_> {
     #[inline]
     /// Generates a JIT write access
     pub fn generate_write(&mut self, target_address: Value, value: Value, width: Width) -> Value {
@@ -43,12 +56,8 @@ impl BlockTranslator<'_> {
         self.store_pc(None);
         let preferred_exception_return = self.builder.ins().iconst(I64, self.address as i64);
         let raise_exception = self.builder.ins().iconst(I8, i64::from(true));
-        let resolved_address_slot = self.create_resolved_address_stack_slot();
-        let resolved_address_slot_address = self.builder.ins().stack_addr(
-            self.module.target_config().pointer_type(),
-            resolved_address_slot,
-            0,
-        );
+        let (resolved_address_slot, resolved_address_slot_address) =
+            create_stack_slot!(self, ResolvedAddress<'_>);
         let call = self.builder.ins().call_indirect(
             self.address_lookup_sigref,
             address_lookup_func,
@@ -118,12 +127,8 @@ impl BlockTranslator<'_> {
         self.store_pc(None);
         let preferred_exception_return = self.builder.ins().iconst(I64, self.address as i64);
         let raise_exception = self.builder.ins().iconst(I8, i64::from(true));
-        let resolved_address_slot = self.create_resolved_address_stack_slot();
-        let resolved_address_slot_address = self.builder.ins().stack_addr(
-            self.module.target_config().pointer_type(),
-            resolved_address_slot,
-            0,
-        );
+        let (resolved_address_slot, resolved_address_slot_address) =
+            create_stack_slot!(self, ResolvedAddress<'_>);
         let call = self.builder.ins().call_indirect(
             self.address_lookup_sigref,
             address_lookup_func,
@@ -135,6 +140,7 @@ impl BlockTranslator<'_> {
                 resolved_address_slot_address,
             ],
         );
+        let (read_value_slot, read_value_slot_address) = create_stack_slot!(self, width = width);
         let (success, resolved) = {
             let success = self.builder.inst_results(call)[0];
             let memory_region_ptr = self.builder.ins().stack_load(
@@ -147,7 +153,14 @@ impl BlockTranslator<'_> {
                 resolved_address_slot,
                 std::mem::offset_of!(ResolvedAddress, address_inside_region) as i32,
             );
-            (success, [memory_region_ptr, address_inside_region])
+            (
+                success,
+                [
+                    memory_region_ptr,
+                    address_inside_region,
+                    read_value_slot_address,
+                ],
+            )
         };
         let success_block = self.builder.create_block();
         let failure_block = self.builder.create_block();
@@ -161,11 +174,14 @@ impl BlockTranslator<'_> {
 
         let (read_func, sigref) = self.memops_table.read(width);
         let read_func = self.builder.ins().iconst(I64, read_func);
-        let call = self
+        let _call = self
             .builder
             .ins()
             .call_indirect(*sigref, read_func, &resolved);
-        let read_value = self.builder.inst_results(call)[0];
+        let read_value = self
+            .builder
+            .ins()
+            .stack_load(width.into(), read_value_slot, 0);
         self.builder
             .ins()
             .jump(merge_block, &[BlockArg::from(read_value)]);
@@ -264,7 +280,8 @@ impl MemOpsTable {
                     .push(AbiParam::new(module.target_config().pointer_type()));
                 sig.params
                     .push(AbiParam::new(module.target_config().pointer_type()));
-                sig.returns.push(AbiParam::new($t));
+                sig.params
+                    .push(AbiParam::new(module.target_config().pointer_type()));
                 builder.import_signature(sig)
             }};
         }

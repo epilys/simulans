@@ -514,6 +514,8 @@ impl MemoryRegionDescription {
 pub mod ops {
     //! Helper memory I/O functions for JIT code.
 
+    use std::mem::MaybeUninit;
+
     use super::*;
     use crate::tracing;
 
@@ -566,7 +568,8 @@ pub mod ops {
             pub extern "C" fn $fn(
                 mem_region: &MemoryRegion,
                 address_inside_region: u64,
-            ) -> $size {
+                ret: &mut MaybeUninit<$size>,
+            ) {
                 tracing::event!(
                     target: tracing::TraceItem::Memory.as_str(),
                     tracing::Level::TRACE,
@@ -575,25 +578,15 @@ pub mod ops {
                     address = ?Address(address_inside_region),
                     inside_offset = ?Address(address_inside_region),
                 );
-                match mem_region.backing {
+                let value = match mem_region.backing {
                     MemoryBacking::Mmap(ref map @ MmappedMemory {  .. }) => {
                         let destination =
                         // SAFETY: when resolving the guest address to a memory region, we
                         // essentially performed a bounds check so we know this offset is valid.
                             unsafe { map.as_ptr().add(address_inside_region as usize) };
-                        let value =
                         // SAFETY: this is safe as long as $size width does not exceed the map's
                         // size. We don't check for this, so FIXME
-                            unsafe { std::ptr::read_unaligned(destination.cast::<$size>()) };
-                        tracing::event!(
-                            target: tracing::TraceItem::Memory.as_str(),
-                            tracing::Level::TRACE,
-                            kind = "read",
-                            size = stringify!($size),
-                            address = ?Address(address_inside_region),
-                            value = ?tracing::BinaryHex(value),
-                        );
-                        value
+                        unsafe { std::ptr::read_unaligned(destination.cast::<$size>()) }
                     }
                     #[allow(clippy::cast_lossless)]
                     MemoryBacking::Device(ref ops) => ops.read(
@@ -607,7 +600,17 @@ pub mod ops {
                             _ => unreachable!(),
                         },
                     ) as $size,
-                }
+                };
+                tracing::event!(
+                    target: tracing::TraceItem::Memory.as_str(),
+                    tracing::Level::TRACE,
+                    kind = "read",
+                    size = stringify!($size),
+                    address = ?Address(address_inside_region),
+                    inside_offset = ?Address(address_inside_region),
+                    returning_value = ?tracing::BinaryHex(value),
+                );
+                ret.write(value);
             }
         };
     }

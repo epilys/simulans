@@ -421,10 +421,14 @@ pub extern "C" fn translate_address<'machine>(
             } =
             // SAFETY: we checked the return value
             unsafe { resolved_address.assume_init() };
+            let mut resolved_value = MaybeUninit::uninit();
             crate::memory::region::ops::memory_region_read_64(
                 mem_region.unwrap(),
                 address_inside_region,
-            )
+                &mut resolved_value,
+            );
+            // SAFETY: this is safe
+            unsafe { resolved_value.assume_init() }
         }};
     }
     match params.granule {
