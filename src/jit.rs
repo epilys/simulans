@@ -510,8 +510,8 @@ impl<'j> JitContext<'j> {
                 // Do nothing
             }
             None => {
-                // We are out of code, so halt the machine
-                trans.emit_halt();
+                // We are out of code?
+                _ = trans.throw_undefined();
             }
         }
         let BlockTranslator {
@@ -4328,23 +4328,7 @@ impl BlockTranslator<'_> {
             Op::UCLAMP => todo!(),
             Op::UCVTF => todo!(),
             Op::UDF => {
-                let sigref = {
-                    let mut sig = self.module.make_signature();
-                    sig.params.push(AbiParam::new(self.pointer_type));
-                    sig.params.push(AbiParam::new(self.pointer_type));
-                    self.builder.import_signature(sig)
-                };
-                let func = self.builder.ins().iconst(
-                    I64,
-                    crate::exceptions::aarch64_undefined as usize as u64 as i64,
-                );
-                let pc = self.builder.ins().iconst(I64, self.address as i64);
-                return self.emit_indirect_noreturn(
-                    self.address,
-                    sigref,
-                    func,
-                    &[self.machine_ptr, pc],
-                );
+                return self.throw_undefined();
             }
             Op::UDIVR => todo!(),
             Op::UDOT => todo!(),
@@ -4582,55 +4566,6 @@ impl BlockTranslator<'_> {
         }
     }
 
-    /// Save state but also set `machine.exit_request` to `true` so that we stop
-    /// the emulation instead of fetching the next JIT block.
-    fn emit_halt(&mut self) {
-        {
-            let Self {
-                write_to_sysreg,
-                write_to_simd,
-                ref mut builder,
-                ref registers,
-                ref sys_registers,
-                machine_ptr,
-                ..
-            } = self;
-            ExecutionState::save_cpu_state(
-                *machine_ptr,
-                builder,
-                registers,
-                sys_registers,
-                *write_to_sysreg,
-                *write_to_simd,
-            );
-        }
-        let true_value = self.builder.ins().iconst(I8, 1);
-        let sigref = {
-            let mut sig = self.module.make_signature();
-            sig.params.push(AbiParam::new(self.pointer_type));
-            sig.params.push(AbiParam::new(I8));
-            self.builder.import_signature(sig)
-        };
-        let func = self.builder.ins().iconst(
-            I64,
-            crate::machine::helper_set_exit_request as usize as u64 as i64,
-        );
-        {
-            let call =
-                self.builder
-                    .ins()
-                    .call_indirect(sigref, func, &[self.machine_ptr, true_value]);
-            _ = self.builder.inst_results(call);
-        }
-        let translate_func = self.builder.ins().load(
-            self.pointer_type,
-            MemFlags::trusted(),
-            self.machine_ptr,
-            std::mem::offset_of!(Armv8AMachine, lookup_block_func) as i32,
-        );
-        self.builder.ins().return_(&[translate_func]);
-    }
-
     fn unconditional_jump_epilogue(&mut self, dest_label: Value) -> ControlFlow<Option<BlockExit>> {
         // [ref:can_trap]: Check `dest_label` alignment.
         {
@@ -4661,6 +4596,22 @@ impl BlockTranslator<'_> {
             .iconst(I64, lookup_block as usize as u64 as i64);
         self.builder.ins().return_(&[translate_func]);
         ControlFlow::Break(Some(BlockExit::Exception))
+    }
+
+    /// Throw Undefined exception
+    fn throw_undefined(&mut self) -> ControlFlow<Option<BlockExit>> {
+        let sigref = {
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(self.pointer_type));
+            sig.params.push(AbiParam::new(self.pointer_type));
+            self.builder.import_signature(sig)
+        };
+        let func = self.builder.ins().iconst(
+            I64,
+            crate::exceptions::aarch64_undefined as usize as u64 as i64,
+        );
+        let pc = self.builder.ins().iconst(I64, self.address as i64);
+        self.emit_indirect_noreturn(self.address, sigref, func, &[self.machine_ptr, pc])
     }
 
     /// Save state and call a helper function
