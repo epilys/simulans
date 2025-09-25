@@ -390,6 +390,8 @@ pub struct ExceptionRegisterFile {
     pub vbar_el2: u64,
     /// Vector Base Address Register, EL3
     pub vbar_el3: u64,
+    /// Architectural Feature Trap Register (EL3)
+    pub cptr_el3: u64,
 }
 
 /// Misc control registers.
