@@ -16,7 +16,7 @@ use crate::{
     set_bits, tracing,
 };
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum AccessType {
     /// Instruction FETCH
     IFETCH,
@@ -55,7 +55,7 @@ pub enum AccessType {
 }
 
 /// Fault types
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Fault {
     None,
     AccessFlag,
@@ -84,7 +84,7 @@ pub enum Fault {
 }
 
 /// The Security state of an execution context
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SecurityState {
     NonSecure,
     Root,
@@ -92,7 +92,7 @@ pub enum SecurityState {
     Secure,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// Memory access or translation invocation details that steer architectural
 /// behavior
 pub struct AccessDescriptor {
@@ -212,7 +212,7 @@ impl AccessDescriptor {
 }
 
 /// The allowed error states that can be returned by memory and used by the PE.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ErrorState {
     /// Uncontainable
     UC,
@@ -226,7 +226,7 @@ pub enum ErrorState {
     CE,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct FaultRecord {
     /// Fault Status
     pub statuscode: Fault,
@@ -452,7 +452,7 @@ impl IssType {
 }
 
 /// [`ExceptionRecord`] field.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct FullAddress {
     /// PA space
     pub paspace: PASpace,
@@ -468,7 +468,7 @@ impl FullAddress {
 }
 
 /// Physical address spaces
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PASpace {
     /// Unknown
     UNKNOWN = 0,

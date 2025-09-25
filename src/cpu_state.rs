@@ -209,7 +209,7 @@ pub enum Exception {
     FIQ,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// Exit request to be serviced on main execution loop
 pub enum ExitRequest {
     /// Shut down the machine
