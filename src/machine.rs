@@ -7,10 +7,7 @@ use std::{
     collections::BTreeSet,
     num::NonZero,
     pin::Pin,
-    sync::{
-        atomic::{AtomicU8, Ordering},
-        Arc,
-    },
+    sync::{atomic::AtomicU8, Arc},
 };
 
 use crate::{
@@ -25,11 +22,6 @@ mod translation_blocks;
 
 pub use translation_blocks::{TranslationBlock, TranslationBlocks};
 
-/// JIT Helper function to set [`Armv8AMachine::exit_request`] field.
-pub extern "C" fn helper_set_exit_request(machine: &mut Armv8AMachine, exit_request: u8) {
-    machine.exit_request.store(exit_request, Ordering::SeqCst);
-}
-
 /// The state of the emulated machine.
 #[repr(C)]
 pub struct Armv8AMachine {
@@ -43,8 +35,8 @@ pub struct Armv8AMachine {
     pub memory: MemoryMap,
     /// Function to call to look up translated blocks.
     pub lookup_block_func: Entry,
-    /// Exit request field.
-    pub exit_request: Arc<AtomicU8>,
+    /// Poweroff request field.
+    pub poweroff_request: Arc<AtomicU8>,
     /// Whether we have stopped at a breakpoint.
     pub in_breakpoint: bool,
     /// List of breakpoint addresses.
@@ -54,23 +46,33 @@ pub struct Armv8AMachine {
 impl Armv8AMachine {
     /// Returns a new machine with given memory map.
     pub fn new(memory: MemoryMap) -> Pin<Box<Self>> {
-        let exit_request = Arc::new(AtomicU8::new(0));
-        Self::new_with_exit_request(memory, exit_request)
+        let poweroff_request = Arc::new(AtomicU8::new(0));
+        Self::new_with_poweroff_request(memory, poweroff_request)
     }
 
     /// Returns a new machine with given memory map and
-    /// [`Armv8AMachine::exit_request`] field.
-    pub fn new_with_exit_request(memory: MemoryMap, exit_request: Arc<AtomicU8>) -> Pin<Box<Self>> {
+    /// [`Armv8AMachine::poweroff_request`] field.
+    pub fn new_with_poweroff_request(
+        memory: MemoryMap,
+        poweroff_request: Arc<AtomicU8>,
+    ) -> Pin<Box<Self>> {
         Box::pin(Self {
             pc: 0,
             prev_pc: 0,
             cpu_state: ExecutionState::default(),
             memory,
             lookup_block_func: Entry(lookup_block),
-            exit_request,
+            poweroff_request,
             in_breakpoint: false,
             hw_breakpoints: BTreeSet::new(),
         })
+    }
+
+    /// Returns `true` if machine is powered off.
+    pub fn is_powered_off(&self) -> bool {
+        self.poweroff_request
+            .load(std::sync::atomic::Ordering::SeqCst)
+            > 0
     }
 
     /// Generates a flattened device tree

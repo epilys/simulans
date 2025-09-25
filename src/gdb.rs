@@ -6,7 +6,6 @@ use std::{
     os::unix::net::UnixListener,
     pin::Pin,
     sync::{
-        atomic::Ordering,
         mpsc::{channel, sync_channel, Receiver, Sender, SyncSender},
         Arc, Condvar, Mutex,
     },
@@ -833,7 +832,7 @@ impl GdbStubRunner {
             }
             match state {
                 State::Running => {
-                    while self.machine.exit_request.load(Ordering::SeqCst) == 0 {
+                    while !self.machine.is_powered_off() {
                         if let Ok(request) = self.request_receiver.try_recv() {
                             if let Some(new_state) = handle_request(self, request) {
                                 state = new_state;

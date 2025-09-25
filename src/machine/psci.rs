@@ -109,7 +109,8 @@ impl Armv8AMachine {
                 };
             }
             FunctionId::SystemOff => {
-                crate::machine::helper_set_exit_request(self, 1);
+                self.poweroff_request
+                    .store(1, std::sync::atomic::Ordering::SeqCst);
             }
             FunctionId::SystemReset => {
                 self.cpu_state.registers.x0 = ReturnCode::NotSupported as u64;

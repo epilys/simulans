@@ -25,11 +25,14 @@ fn test_uart_write_str() {
     utils::disas(TEST_INPUT, 0);
     let entry_point = Address(0);
     let pl011_addr = Address(4 * TEST_INPUT.len() as u64);
-    let exit_request = Arc::new(AtomicU8::new(0));
+    let poweroff_request = Arc::new(AtomicU8::new(0));
     {
         let pl011 = simulans::devices::pl011::PL011State::new(0, pl011_addr);
-        let tube =
-            simulans::devices::tube::Tube::new(0, Address(0x0d800020), Arc::clone(&exit_request));
+        let tube = simulans::devices::tube::Tube::new(
+            0,
+            Address(0x0d800020),
+            Arc::clone(&poweroff_request),
+        );
         let memory = MemoryMap::builder()
             .with_region(MemoryRegion::new("ram", DRAM_MEMORY_SIZE, entry_point).unwrap())
             .unwrap()
@@ -38,7 +41,7 @@ fn test_uart_write_str() {
             .with_region(tube.into_memory_regions().pop().unwrap())
             .unwrap()
             .build();
-        let mut machine = Armv8AMachine::new_with_exit_request(memory, exit_request);
+        let mut machine = Armv8AMachine::new_with_poweroff_request(memory, poweroff_request);
         machine.cpu_state.registers.x0 = pl011_addr.0;
         machine.cpu_state.registers.x2 = "Hello world\n".len() as u64;
 

@@ -34,17 +34,21 @@ pub mod tube {
         /// Unique device ID.
         pub device_id: u64,
         pub address: Address,
-        /// Atomic integer to alert machine of exit request.
-        pub exit_request: Arc<AtomicU8>,
+        /// Atomic integer to alert machine of poweroff request.
+        pub poweroff_request: Arc<AtomicU8>,
     }
 
     impl Tube {
-        /// Create a new tube device that will write to `exit_request`.
-        pub const fn new(device_id: u64, address: Address, exit_request: Arc<AtomicU8>) -> Self {
+        /// Create a new tube device that will write to `poweroff_request`.
+        pub const fn new(
+            device_id: u64,
+            address: Address,
+            poweroff_request: Arc<AtomicU8>,
+        ) -> Self {
             Self {
                 device_id,
                 address,
-                exit_request,
+                poweroff_request,
             }
         }
     }
@@ -58,14 +62,14 @@ pub mod tube {
             let Self {
                 device_id,
                 address,
-                exit_request,
+                poweroff_request,
             } = self;
             vec![MemoryRegion::new_io(
                 MemorySize::new(0x100).unwrap(),
                 address,
                 Box::new(TubeOps {
                     device_id,
-                    exit_request,
+                    poweroff_request,
                 }),
             )
             .unwrap()]
@@ -75,7 +79,7 @@ pub mod tube {
     #[derive(Debug)]
     struct TubeOps {
         device_id: u64,
-        exit_request: Arc<AtomicU8>,
+        poweroff_request: Arc<AtomicU8>,
     }
 
     impl crate::memory::DeviceMemoryOps for TubeOps {
@@ -90,7 +94,7 @@ pub mod tube {
         fn write(&self, offset: u64, value: u64, width: Width) {
             eprintln!("write {offset:x}? {value:?} {width:?}");
             assert_eq!((width, offset), (Width::_8, 0));
-            self.exit_request.store(value as u8, Ordering::SeqCst);
+            self.poweroff_request.store(value as u8, Ordering::SeqCst);
         }
     }
 }

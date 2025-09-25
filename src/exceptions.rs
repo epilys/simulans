@@ -607,11 +607,7 @@ pub fn aarch64_take_exception(
     preferred_exception_return: Address,
     vect_offset: Address,
 ) {
-    if machine
-        .exit_request
-        .load(std::sync::atomic::Ordering::SeqCst)
-        > 0
-    {
+    if machine.is_powered_off() {
         return;
     }
     assert!(machine.cpu_state.have_el(target_el));

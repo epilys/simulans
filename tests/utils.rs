@@ -68,9 +68,9 @@ pub fn make_test_machine(
     memory_size: MemorySize,
     memory_start: Address,
 ) -> Pin<Box<Armv8AMachine>> {
-    let exit_request = Arc::new(AtomicU8::new(0));
+    let poweroff_request = Arc::new(AtomicU8::new(0));
     let tube =
-        simulans::devices::tube::Tube::new(0, Address(0x0d800020), Arc::clone(&exit_request));
+        simulans::devices::tube::Tube::new(0, Address(0x0d800020), Arc::clone(&poweroff_request));
     let mut memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", memory_size, memory_start).unwrap())
         .unwrap();
@@ -79,7 +79,7 @@ pub fn make_test_machine(
         memory.add_region(mem).unwrap();
     }
     let memory = memory.build();
-    Armv8AMachine::new_with_exit_request(memory, exit_request)
+    Armv8AMachine::new_with_poweroff_request(memory, poweroff_request)
 }
 
 #[allow(dead_code)]
