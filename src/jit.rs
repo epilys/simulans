@@ -56,6 +56,7 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
         let mut exit_request_ref = machine.cpu_state.exit_request.lock().unwrap();
         if let Some(exit_request) = exit_request_ref.as_ref() {
             match *exit_request {
+                ExitRequest::Poweroff => {}
                 ExitRequest::Abort {
                     fault,
                     preferred_exception_return,
@@ -64,9 +65,9 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
                     drop(exit_request_ref);
 
                     crate::exceptions::aarch64_abort(machine, fault, preferred_exception_return);
-                    return Entry(lookup_block);
                 }
             }
+            return Entry(lookup_block);
         }
     }
     if tracing::event_enabled!(target: tracing::TraceItem::BlockEntry.as_str(), tracing::Level::TRACE)

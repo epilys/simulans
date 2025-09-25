@@ -20,10 +20,7 @@
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
-use std::{
-    pin::Pin,
-    sync::{atomic::AtomicU8, Arc},
-};
+use std::pin::Pin;
 
 use simulans::{
     devices::Device,
@@ -68,9 +65,7 @@ pub fn make_test_machine(
     memory_size: MemorySize,
     memory_start: Address,
 ) -> Pin<Box<Armv8AMachine>> {
-    let poweroff_request = Arc::new(AtomicU8::new(0));
-    let tube =
-        simulans::devices::tube::Tube::new(0, Address(0x0d800020), Arc::clone(&poweroff_request));
+    let tube = simulans::devices::tube::Tube::new(0, Address(0x0d800020));
     let mut memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", memory_size, memory_start).unwrap())
         .unwrap();
@@ -79,7 +74,7 @@ pub fn make_test_machine(
         memory.add_region(mem).unwrap();
     }
     let memory = memory.build();
-    Armv8AMachine::new_with_poweroff_request(memory, poweroff_request)
+    Armv8AMachine::new(memory)
 }
 
 #[allow(dead_code)]

@@ -212,6 +212,8 @@ pub enum Exception {
 #[derive(Copy, Clone, Debug)]
 /// Exit request to be serviced on main execution loop
 pub enum ExitRequest {
+    /// Shut down the machine
+    Poweroff,
     /// Instruction or data abort
     Abort {
         /// Causing fault

@@ -3,12 +3,7 @@
 
 //! Representation of an emulated machine.
 
-use std::{
-    collections::BTreeSet,
-    num::NonZero,
-    pin::Pin,
-    sync::{atomic::AtomicU8, Arc},
-};
+use std::{collections::BTreeSet, num::NonZero, pin::Pin};
 
 use crate::{
     cpu_state::*,
@@ -40,8 +35,6 @@ pub struct Armv8AMachine {
     pub memory: MemoryMap,
     /// Function to call to look up translated blocks.
     pub lookup_block_func: Entry,
-    /// Poweroff request field.
-    pub poweroff_request: Arc<AtomicU8>,
     /// Whether we have stopped at a breakpoint.
     pub in_breakpoint: bool,
     /// List of breakpoint addresses.
@@ -51,23 +44,12 @@ pub struct Armv8AMachine {
 impl Armv8AMachine {
     /// Returns a new machine with given memory map.
     pub fn new(memory: MemoryMap) -> Pin<Box<Self>> {
-        let poweroff_request = Arc::new(AtomicU8::new(0));
-        Self::new_with_poweroff_request(memory, poweroff_request)
-    }
-
-    /// Returns a new machine with given memory map and
-    /// [`Armv8AMachine::poweroff_request`] field.
-    pub fn new_with_poweroff_request(
-        memory: MemoryMap,
-        poweroff_request: Arc<AtomicU8>,
-    ) -> Pin<Box<Self>> {
         Box::pin(Self {
             pc: 0,
             prev_pc: 0,
             cpu_state: ExecutionState::default(),
             memory,
             lookup_block_func: Entry(lookup_block),
-            poweroff_request,
             in_breakpoint: false,
             hw_breakpoints: BTreeSet::new(),
         })
@@ -75,9 +57,10 @@ impl Armv8AMachine {
 
     /// Returns `true` if machine is powered off.
     pub fn is_powered_off(&self) -> bool {
-        self.poweroff_request
-            .load(std::sync::atomic::Ordering::SeqCst)
-            > 0
+        matches!(
+            *self.cpu_state.exit_request.lock().unwrap(),
+            Some(ExitRequest::Poweroff)
+        )
     }
 
     /// Generates a flattened device tree

@@ -20,13 +20,9 @@ pub trait Device: std::fmt::Debug {
 pub mod tube {
     //! Tube testing device (Memory mapped register)
 
-    use std::sync::{
-        atomic::{AtomicU8, Ordering},
-        Arc,
-    };
-
-    use crate::memory::{
-        Address, DeviceMemoryOps, MemoryRegion, MemorySize, MemoryTxResult, Width,
+    use crate::{
+        cpu_state::ExitRequest,
+        memory::{Address, DeviceMemoryOps, MemoryRegion, MemorySize, MemoryTxResult, Width},
     };
 
     #[derive(Debug)]
@@ -36,22 +32,13 @@ pub mod tube {
         /// Unique device ID.
         pub device_id: u64,
         pub address: Address,
-        /// Atomic integer to alert machine of poweroff request.
-        pub poweroff_request: Arc<AtomicU8>,
     }
 
     impl Tube {
-        /// Create a new tube device that will write to `poweroff_request`.
-        pub const fn new(
-            device_id: u64,
-            address: Address,
-            poweroff_request: Arc<AtomicU8>,
-        ) -> Self {
-            Self {
-                device_id,
-                address,
-                poweroff_request,
-            }
+        /// Create a new tube device that will write request power off if `1` is
+        /// written to it
+        pub const fn new(device_id: u64, address: Address) -> Self {
+            Self { device_id, address }
         }
     }
 
@@ -61,18 +48,11 @@ pub mod tube {
         }
 
         fn into_memory_regions(self) -> Vec<MemoryRegion> {
-            let Self {
-                device_id,
-                address,
-                poweroff_request,
-            } = self;
+            let Self { device_id, address } = self;
             vec![MemoryRegion::new_io(
                 MemorySize::new(0x100).unwrap(),
                 address,
-                Box::new(TubeOps {
-                    device_id,
-                    poweroff_request,
-                }),
+                Box::new(TubeOps { device_id }),
             )
             .unwrap()]
         }
@@ -81,7 +61,6 @@ pub mod tube {
     #[derive(Debug)]
     struct TubeOps {
         device_id: u64,
-        poweroff_request: Arc<AtomicU8>,
     }
 
     impl DeviceMemoryOps for TubeOps {
@@ -95,7 +74,9 @@ pub mod tube {
 
         fn write(&self, offset: u64, value: u64, width: Width) -> MemoryTxResult {
             assert_eq!((width, offset), (Width::_8, 0));
-            self.poweroff_request.store(value as u8, Ordering::SeqCst);
+            if value == 1 {
+                return Err(ExitRequest::Poweroff);
+            }
             Ok(())
         }
     }

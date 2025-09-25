@@ -5,7 +5,7 @@
 
 #![allow(non_camel_case_types)]
 
-use crate::machine::Armv8AMachine;
+use crate::{cpu_state::ExitRequest, machine::Armv8AMachine};
 
 #[repr(u32)]
 enum FunctionId {
@@ -109,8 +109,7 @@ impl Armv8AMachine {
                 };
             }
             FunctionId::SystemOff => {
-                self.poweroff_request
-                    .store(1, std::sync::atomic::Ordering::SeqCst);
+                *self.cpu_state.exit_request.lock().unwrap() = Some(ExitRequest::Poweroff);
             }
             FunctionId::SystemReset => {
                 self.cpu_state.registers.x0 = ReturnCode::NotSupported as u64;
