@@ -10,6 +10,33 @@ use cranelift::{
 
 use crate::{jit::BlockTranslator, memory::Width};
 
+const fn crc32_table<const POLYNOMIAL: u32>() -> [u32; 256] {
+    let poly: u32 = POLYNOMIAL.reverse_bits();
+
+    let mut ret = [0_u32; 256];
+    let mut i = 0;
+    while i < 256 {
+        // remainder from polynomial division
+        let mut rem = i as u32;
+        let mut j = 0;
+        while j < 8 {
+            if rem & 1 > 0 {
+                rem >>= 1;
+                rem ^= poly;
+            } else {
+                rem >>= 1;
+            }
+            j += 1;
+        }
+        ret[i] = rem;
+        i += 1;
+    }
+    ret
+}
+
+pub const CRC32_TABLE: [u32; 256] = crc32_table::<0x04c11db7_u32>();
+pub const CRC32C_TABLE: [u32; 256] = crc32_table::<0x1edc6f41_u32>();
+
 impl BlockTranslator<'_> {
     /// Update CPU state of NZCV flags.
     pub fn update_nzcv(&mut self, [n, z, c, v]: [Value; 4]) {

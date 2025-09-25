@@ -197,3 +197,23 @@ fn test_bit_counts() {
     assert_hex_eq!(machine.cpu_state.registers.x4, 32);
     assert_hex_eq!(machine.cpu_state.registers.x5, 16);
 }
+
+#[test_log::test]
+fn test_crc32() {
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_crc32.bin");
+    utils::disas(TEST_INPUT, 0);
+
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+
+    let entry_point = Address(0);
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+    machine.cpu_state.registers.x0 = 0xffffffff;
+    machine.cpu_state.registers.x1 = 100;
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+
+    assert_hex_eq!(machine.cpu_state.registers.x2, 0x6722b533);
+    assert_hex_eq!(machine.cpu_state.registers.x3, 0xbfb743a3);
+    assert_hex_eq!(machine.cpu_state.registers.x4, 0x6aff40b7);
+    assert_hex_eq!(machine.cpu_state.registers.x5, 0xce7c8ed7);
+}

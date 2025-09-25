@@ -1280,6 +1280,47 @@ impl BlockTranslator<'_> {
                 (result, [n, z, empty, empty])
             }};
         }
+        macro_rules! crc_byte {
+            ($is_c:expr, $acc:expr, $byte:expr) => {{
+                if $is_c {
+                    crc_byte!(_inner $acc, $byte, arithmetic::CRC32C_TABLE.as_ptr())
+                } else {
+                    crc_byte!(_inner $acc, $byte, arithmetic::CRC32_TABLE.as_ptr())
+                }
+            }};
+            (_inner $acc:expr, $byte:expr, $table:expr) => {{
+                // [ref:TODO]: this performs precomputed table lookup, but it'd be faster to
+                // perform polynomial modulus over {0,1} directly
+                let table = $table as usize as i64;
+                let acc: Value = $acc;
+                let byte: Value = $byte;
+                let byte = self.builder.ins().ireduce(I8, byte);
+                // Calculate table index: (acc & 0xff) ^ byte
+                let index = {
+                    let index = self.builder.ins().band_imm(acc, 0xff);
+                    let byte = self.builder.ins().uextend(I32, byte);
+                    let index = self.builder.ins().bxor(index, byte);
+                    let index = self
+                        .builder
+                        .ins()
+                        .imul_imm(index, std::mem::size_of::<u32>() as i64);
+                    self.builder
+                        .ins()
+                        .uextend(self.module.target_config().pointer_type(), index)
+                };
+                let table_ptr = self
+                    .builder
+                    .ins()
+                    .iadd_imm(index, table);
+                let value = self
+                    .builder
+                    .ins()
+                    .load(I32, MemFlags::trusted(), table_ptr, 0);
+                // ((acc >> 8) ^ arithmetic::CRC32_TABLE[((acc & 0xff) ^ byte as u32) as usize])
+                let acc = self.builder.ins().ushr_imm(acc, 8);
+                self.builder.ins().bxor(acc, value)
+            }};
+        }
         macro_rules! condition_holds {
             ($cond:expr) => {{
                 let result = self.condition_holds($cond);
@@ -2491,14 +2532,83 @@ impl BlockTranslator<'_> {
             Op::COMPACT => todo!(),
             Op::CPP => todo!(),
             Op::CPY => todo!(),
-            Op::CRC32B => todo!(),
-            Op::CRC32CB => todo!(),
-            Op::CRC32CH => todo!(),
-            Op::CRC32CW => todo!(),
-            Op::CRC32CX => todo!(),
-            Op::CRC32H => todo!(),
-            Op::CRC32W => todo!(),
-            Op::CRC32X => todo!(),
+            Op::CRC32CB | Op::CRC32B => {
+                let target = get_destination_register!();
+                let acc = self.translate_operand(&instruction.operands()[1]);
+                let byte = self.translate_operand(&instruction.operands()[2]);
+                let value = crc_byte!(matches!(op, Op::CRC32CB), acc, byte);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_32
+                    }
+                );
+            }
+            Op::CRC32CH | Op::CRC32H => {
+                let is_c = matches!(op, Op::CRC32CH);
+                let target = get_destination_register!();
+                let acc = self.translate_operand(&instruction.operands()[1]);
+                let word = self.translate_operand(&instruction.operands()[2]);
+                let acc = crc_byte!(is_c, acc, word);
+                let word = self.builder.ins().ushr_imm(word, 8);
+                let value = crc_byte!(is_c, acc, word);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_32
+                    }
+                );
+            }
+            Op::CRC32CW | Op::CRC32W => {
+                let is_c = matches!(op, Op::CRC32CW);
+                let target = get_destination_register!();
+                let acc = self.translate_operand(&instruction.operands()[1]);
+                let word = self.translate_operand(&instruction.operands()[2]);
+                let acc = crc_byte!(is_c, acc, word);
+                let word = self.builder.ins().ushr_imm(word, 8);
+                let acc = crc_byte!(is_c, acc, word);
+                let word = self.builder.ins().ushr_imm(word, 8);
+                let acc = crc_byte!(is_c, acc, word);
+                let word = self.builder.ins().ushr_imm(word, 8);
+                let value = crc_byte!(is_c, acc, word);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_32
+                    }
+                );
+            }
+            Op::CRC32CX | Op::CRC32X => {
+                let is_c = matches!(op, Op::CRC32CX);
+                let target = get_destination_register!();
+                let acc = self.translate_operand(&instruction.operands()[1]);
+                let word = self.translate_operand(&instruction.operands()[2]);
+                let acc = crc_byte!(is_c, acc, word);
+                let word = self.builder.ins().ushr_imm(word, 8);
+                let acc = crc_byte!(is_c, acc, word);
+                let word = self.builder.ins().ushr_imm(word, 8);
+                let acc = crc_byte!(is_c, acc, word);
+                let word = self.builder.ins().ushr_imm(word, 8);
+                let acc = crc_byte!(is_c, acc, word);
+                let word = self.builder.ins().ushr_imm(word, 8);
+                let acc = crc_byte!(is_c, acc, word);
+                let word = self.builder.ins().ushr_imm(word, 8);
+                let acc = crc_byte!(is_c, acc, word);
+                let word = self.builder.ins().ushr_imm(word, 8);
+                let acc = crc_byte!(is_c, acc, word);
+                let word = self.builder.ins().ushr_imm(word, 8);
+                let value = crc_byte!(is_c, acc, word);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_32
+                    }
+                );
+            }
             Op::CSDB => {
                 // Consumption of speculative data barrier
             }

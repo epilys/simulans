@@ -261,7 +261,8 @@ impl Default for IDRegisterFile {
             const AES: u64 = false as u64;
             const SHA1: u64 = false as u64;
             const SHA2: u64 = false as u64;
-            const CRC32: u64 = false as u64;
+            const CRC32: u64 = true as u64;
+            // [ref:atomics]
             const ATOMIC: u64 = false as u64;
             const TME: u64 = false as u64;
             const RDM: u64 = false as u64;
