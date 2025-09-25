@@ -721,7 +721,7 @@ impl GdbStubRunner {
             "Adding unaligned breakpoint addr 0x{:x}",
             addr
         );
-        self.jit.hw_breakpoints.insert(Address(addr));
+        self.machine.hw_breakpoints.insert(Address(addr));
         self.jit.translation_blocks.invalidate(addr);
     }
 
@@ -732,7 +732,7 @@ impl GdbStubRunner {
             "Removing unaligned breakpoint addr 0x{:x}",
             addr
         );
-        if !self.jit.hw_breakpoints.remove(&Address(addr)) {
+        if !self.machine.hw_breakpoints.remove(&Address(addr)) {
             return false;
         }
         self.jit.translation_blocks.invalidate(addr);
@@ -843,7 +843,11 @@ impl GdbStubRunner {
                             self.ack();
                         }
                         assert!(!self.jit.single_step);
-                        if self.jit.hw_breakpoints.contains(&Address(self.machine.pc)) {
+                        if self
+                            .machine
+                            .hw_breakpoints
+                            .contains(&Address(self.machine.pc))
+                        {
                             if self.machine.in_breakpoint {
                                 // Continue execution after stopping at breakpoint.
                                 self.machine.in_breakpoint = false;
@@ -860,7 +864,11 @@ impl GdbStubRunner {
                         }
                         let entry = crate::jit::lookup_block(&mut self.jit, &mut self.machine);
                         (entry.0)(&mut self.jit, &mut self.machine);
-                        if self.jit.hw_breakpoints.contains(&Address(self.machine.pc)) {
+                        if self
+                            .machine
+                            .hw_breakpoints
+                            .contains(&Address(self.machine.pc))
+                        {
                             let pc = self.machine.pc;
                             self.machine.in_breakpoint = true;
                             self.jit.translation_blocks.invalidate(pc);

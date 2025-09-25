@@ -115,7 +115,7 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
         return Entry(lookup_block);
     };
 
-    let block = JitContext::new(machine_addr, jit)
+    let block = JitContext::new(machine_addr, &machine.hw_breakpoints, jit)
         .compile(code_area, pc)
         .unwrap();
     tracing::event!(
@@ -168,8 +168,6 @@ fn translate_code_address(
 pub struct Jit {
     pub translation_blocks: TranslationBlocks,
     pub single_step: bool,
-    /// List of breakpoint addresses.
-    pub hw_breakpoints: BTreeSet<Address>,
 }
 
 impl Jit {
@@ -177,7 +175,6 @@ impl Jit {
         Self {
             translation_blocks: TranslationBlocks::new(),
             single_step: false,
-            hw_breakpoints: BTreeSet::new(),
         }
     }
 }
@@ -208,7 +205,7 @@ pub struct JitContext<'j> {
 
 impl<'j> JitContext<'j> {
     /// Returns a new [`JitContext`].
-    pub fn new(machine_addr: usize, jit: &'j Jit) -> Self {
+    pub fn new(machine_addr: usize, hw_breakpoints: &'j BTreeSet<Address>, jit: &'j Jit) -> Self {
         let mut flag_builder = settings::builder();
         flag_builder.set("opt_level", "speed").unwrap();
         flag_builder.set("regalloc_checker", "false").unwrap();
@@ -237,7 +234,7 @@ impl<'j> JitContext<'j> {
             cranelift_module::default_libcall_names(),
         ));
         Self {
-            hw_breakpoints: &jit.hw_breakpoints,
+            hw_breakpoints,
             builder_context: FunctionBuilderContext::new(),
             ctx: module.make_context(),
             module,

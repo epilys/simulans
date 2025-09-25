@@ -4,6 +4,7 @@
 //! Representation of an emulated machine.
 
 use std::{
+    collections::BTreeSet,
     num::NonZero,
     pin::Pin,
     sync::{
@@ -46,6 +47,8 @@ pub struct Armv8AMachine {
     pub exit_request: Arc<AtomicU8>,
     /// Whether we have stopped at a breakpoint.
     pub in_breakpoint: bool,
+    /// List of breakpoint addresses.
+    pub hw_breakpoints: BTreeSet<Address>,
 }
 
 impl Armv8AMachine {
@@ -66,6 +69,7 @@ impl Armv8AMachine {
             lookup_block_func: Entry(lookup_block),
             exit_request,
             in_breakpoint: false,
+            hw_breakpoints: BTreeSet::new(),
         })
     }
 
