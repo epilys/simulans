@@ -237,31 +237,58 @@ pub struct IDRegisterFile {
     pub id_aa64mmfr2_el1: u64,
     /// `AArch64` Memory Model Feature Register 3
     pub id_aa64mmfr3_el1: u64,
+    /// `AArch64` Instruction Set Attribute Register 0
+    pub id_aa64isar0_el1: u64,
     /// Data Cache Zero ID Register
     pub dczid_el0: u64,
 }
 
 impl Default for IDRegisterFile {
     fn default() -> Self {
-        let mut id_aa64pfr0_el1 = 0;
-        // EL0, bits [3:0] EL0 Exception level handling.
-        id_aa64pfr0_el1 = crate::set_bits!(id_aa64pfr0_el1, off = 0, len = 4, val = 0b0001); // EL0 can be executed in AArch64 state only.
-                                                                                             // EL1, bits [7:4] EL1 Exception level handling.
-        id_aa64pfr0_el1 = crate::set_bits!(id_aa64pfr0_el1, off = 4, len = 4, val = 0b0001); // EL1 can be executed in AArch64 state only.
+        let id_aa64pfr0_el1 = {
+            const EL0: u64 = 1;
+            const EL1: u64 = 1;
+            const EL2: u64 = 0;
+            const EL3: u64 = 0;
+            const FP: u64 = 0b1111;
+            const ADVSIMD: u64 = 0b1111;
+            const GIC: u64 = 0;
+            const SVE: u64 = 0;
+            EL0 | EL1 << 4 | EL2 << 8 | EL3 << 12 | FP << 16 | ADVSIMD << 20 | GIC << 24 | SVE << 32
+        };
 
-        // EL2, bits [11:8] EL2 is not implemented.
-
-        // EL3, bits [15:12] ditto.
-
-        // FP, bits [19:16]
-        id_aa64pfr0_el1 = crate::set_bits!(id_aa64pfr0_el1, off = 16, len = 4, val = 0b1111); // Floating-point is not implemented.
-
-        // AdvSIMD, bits [23:20]
-        id_aa64pfr0_el1 = crate::set_bits!(id_aa64pfr0_el1, off = 20, len = 4, val = 0b1111); // Advanced SIMD is not implemented.
-
-        // GIC, bits [27:24]
-        id_aa64pfr0_el1 = crate::set_bits!(id_aa64pfr0_el1, off = 24, len = 4, val = 0b0000); // No GIC
-
+        let id_aa64isar0_el1 = {
+            const AES: u64 = false as u64;
+            const SHA1: u64 = false as u64;
+            const SHA2: u64 = false as u64;
+            const CRC32: u64 = false as u64;
+            const ATOMIC: u64 = false as u64;
+            const TME: u64 = false as u64;
+            const RDM: u64 = false as u64;
+            const SHA3: u64 = false as u64;
+            const SM3: u64 = false as u64;
+            const SM4: u64 = false as u64;
+            const DP: u64 = false as u64;
+            const FHM: u64 = false as u64;
+            const TS: u64 = false as u64;
+            const TLB: u64 = false as u64;
+            const RNDR: u64 = true as u64;
+            RNDR << 60
+                | TLB << 56
+                | TS << 52
+                | FHM << 48
+                | DP << 44
+                | SM4 << 40
+                | SM3 << 36
+                | SHA3 << 32
+                | RDM << 28
+                | TME << 24
+                | ATOMIC << 20
+                | CRC32 << 16
+                | SHA2 << 12
+                | SHA1 << 8
+                | AES << 4
+        };
         let dczid_el0 = 0b100;
         Self {
             midr_el1: (0b1111) << 16,
@@ -272,6 +299,7 @@ impl Default for IDRegisterFile {
             id_aa64mmfr1_el1: 0,
             id_aa64mmfr2_el1: 0,
             id_aa64mmfr3_el1: 0,
+            id_aa64isar0_el1,
             dczid_el0,
         }
     }

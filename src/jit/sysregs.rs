@@ -241,7 +241,7 @@ impl BlockTranslator<'_> {
                 o2: 0,
             } => {
                 // ID_AA64ISAR0_EL1, AArch64 Instruction Set Attribute Register 0
-                self.builder.ins().iconst(I64, 0)
+                register_field!(read self, id_registers.id_aa64isar0_el1)
             }
             SysRegEncoding {
                 o0: 0b11,
