@@ -31,14 +31,14 @@ fn align_bits(x: u64, y: u64, n: u32) -> u64 {
 /// A resolved address for a translated block.
 pub struct ResolvedAddress<'a> {
     /// Memory region this block resides.
-    pub mem_region: Option<&'a mut MemoryRegion>,
+    pub mem_region: Option<&'a MemoryRegion>,
     /// The offset inside this region.
     pub address_inside_region: u64,
 }
 
 /// Helper function to look up memory region for given physical address.
 pub extern "C" fn physical_address_lookup<'machine>(
-    machine: &'machine mut Armv8AMachine,
+    machine: &'machine Armv8AMachine,
     address: Address,
     preferred_exception_return: Address,
     raise_exception: bool,
@@ -53,13 +53,13 @@ pub extern "C" fn physical_address_lookup<'machine>(
             pc = ?Address(machine.pc),
         );
     }
-    let Some(mem_region) = machine.memory.find_region_mut(address) else {
+    let Some(mem_region) = machine.memory.find_region(address) else {
         if raise_exception {
             let accessdesc =
                 AccessDescriptor::new(machine.cpu_state.PSTATE().EL(), AccessType::TTW);
             let mut fault = FaultRecord::no_fault(accessdesc, address);
             fault.statuscode = Fault::Translation;
-            machine.cpu_state.exit_request = Some(ExitRequest::Abort {
+            *machine.cpu_state.exit_request.lock().unwrap() = Some(ExitRequest::Abort {
                 fault,
                 preferred_exception_return,
             });
@@ -359,7 +359,7 @@ impl PageDescriptor {
 ///
 /// Merged with `AArch64.FullTranslate`.
 pub extern "C" fn translate_address<'machine>(
-    machine: &'machine mut Armv8AMachine,
+    machine: &'machine Armv8AMachine,
     input_address: Address,
     preferred_exception_return: Address,
     raise_exception: bool,
@@ -490,10 +490,11 @@ pub extern "C" fn translate_address<'machine>(
                     tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
                     if raise_exception {
                         fault.statuscode = Fault::Translation;
-                        machine.cpu_state.exit_request = Some(ExitRequest::Abort {
-                            fault,
-                            preferred_exception_return,
-                        });
+                        *machine.cpu_state.exit_request.lock().unwrap() =
+                            Some(ExitRequest::Abort {
+                                fault,
+                                preferred_exception_return,
+                            });
                     }
                     return false;
                 }
@@ -558,10 +559,11 @@ pub extern "C" fn translate_address<'machine>(
                     tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
                     if raise_exception {
                         fault.statuscode = Fault::Translation;
-                        machine.cpu_state.exit_request = Some(ExitRequest::Abort {
-                            fault,
-                            preferred_exception_return,
-                        });
+                        *machine.cpu_state.exit_request.lock().unwrap() =
+                            Some(ExitRequest::Abort {
+                                fault,
+                                preferred_exception_return,
+                            });
                     }
                     return false;
                 }
@@ -618,10 +620,11 @@ pub extern "C" fn translate_address<'machine>(
                     tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
                     if raise_exception {
                         fault.statuscode = Fault::Translation;
-                        machine.cpu_state.exit_request = Some(ExitRequest::Abort {
-                            fault,
-                            preferred_exception_return,
-                        });
+                        *machine.cpu_state.exit_request.lock().unwrap() =
+                            Some(ExitRequest::Abort {
+                                fault,
+                                preferred_exception_return,
+                            });
                     }
                     return false;
                 }
@@ -680,11 +683,12 @@ pub extern "C" fn mem_zero(
             } =
             // SAFETY: we checked the return value
             unsafe { resolved_address.assume_init() };
-        crate::memory::region::ops::memory_region_write_8(
-            mem_region.unwrap(),
-            address_inside_region,
-            0,
-        );
+        let mem_region = mem_region.unwrap();
+        let mem_region = machine
+            .memory
+            .find_region_mut(mem_region.phys_offset)
+            .unwrap();
+        crate::memory::region::ops::memory_region_write_8(mem_region, address_inside_region, 0);
     }
     true
 }

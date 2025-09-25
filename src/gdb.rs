@@ -228,7 +228,7 @@ impl GdbStubRunner {
 
     #[inline(always)]
     fn read_addrs(
-        &mut self,
+        &self,
         start_address: <AArch64 as Arch>::Usize,
         max_bytes: usize,
     ) -> TargetResult<Box<[u8]>, GdbStub> {
@@ -242,7 +242,7 @@ impl GdbStubRunner {
         );
         let mut resolved_address = MaybeUninit::uninit();
         if !crate::memory::mmu::translate_address(
-            &mut self.machine,
+            &self.machine,
             start_address,
             start_address,
             false,
@@ -290,7 +290,7 @@ impl GdbStubRunner {
 
         let mut resolved_address = MaybeUninit::uninit();
         if !crate::memory::mmu::translate_address(
-            &mut self.machine,
+            &self.machine,
             start_address,
             start_address,
             false,
@@ -308,7 +308,14 @@ impl GdbStubRunner {
             } =
             // SAFETY: we checked the return value
             unsafe { resolved_address.assume_init( )};
-        let Some(mmapped_region) = mem_region.unwrap().as_mmap_mut() else {
+        let phys_offset = mem_region.unwrap().phys_offset;
+        let Some(mmapped_region) = self
+            .machine
+            .memory
+            .find_region_mut(phys_offset)
+            .unwrap()
+            .as_mmap_mut()
+        else {
             tracing::error!(
                 "Cannot write to address {} which is mapped to device memory",
                 start_address

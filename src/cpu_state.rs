@@ -5,6 +5,8 @@
 
 #![allow(non_snake_case)]
 
+use std::sync::{Arc, Mutex};
+
 use codegen::ir::types::{I128, I64};
 use cranelift::prelude::*;
 use indexmap::IndexMap;
@@ -457,7 +459,7 @@ pub struct ExecutionState {
     /// Control registers
     pub control_registers: ControlRegisterFile,
     /// Exit request to be serviced on main execution loop.
-    pub exit_request: Option<ExitRequest>,
+    pub exit_request: Arc<Mutex<Option<ExitRequest>>>,
     /// Architectural features this CPU supports.
     pub arch_features: ArchFeatures,
 }

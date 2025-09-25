@@ -52,14 +52,20 @@ pub struct Entry(
 /// ([`Jit::translation_blocks`]).
 pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> Entry {
     let pc: u64 = machine.pc;
-    if let Some(exit_request) = machine.cpu_state.exit_request.take() {
-        match exit_request {
-            ExitRequest::Abort {
-                fault,
-                preferred_exception_return,
-            } => {
-                crate::exceptions::aarch64_abort(machine, fault, preferred_exception_return);
-                return Entry(lookup_block);
+    {
+        let mut exit_request_ref = machine.cpu_state.exit_request.lock().unwrap();
+        if let Some(exit_request) = exit_request_ref.as_ref() {
+            match *exit_request {
+                ExitRequest::Abort {
+                    fault,
+                    preferred_exception_return,
+                } => {
+                    let _ = exit_request_ref.take();
+                    drop(exit_request_ref);
+
+                    crate::exceptions::aarch64_abort(machine, fault, preferred_exception_return);
+                    return Entry(lookup_block);
+                }
             }
         }
     }
@@ -126,7 +132,7 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
 }
 
 fn translate_code_address(
-    machine: &mut Armv8AMachine,
+    machine: &Armv8AMachine,
     program_counter: u64,
 ) -> Result<&[u8], Box<dyn std::error::Error>> {
     let mut resolved_pc_address = MaybeUninit::uninit();
@@ -149,8 +155,7 @@ fn translate_code_address(
             } =
             // SAFETY: we checked the return value
             unsafe { resolved_pc_address.assume_init( )};
-    let mem_region: &crate::memory::MemoryRegion = &*mem_region.unwrap();
-    let Some(mmapped_region) = mem_region.as_mmap() else {
+    let Some(mmapped_region) = mem_region.unwrap().as_mmap() else {
         return Err(format!(
             "Received program counter {} which is mapped in device memory.",
             Address(program_counter),

@@ -564,7 +564,7 @@ pub mod ops {
         (read $fn:ident: $size:ty) => {
             /// Helper memory read struct called from JIT code.
             pub extern "C" fn $fn(
-                mem_region: &mut MemoryRegion,
+                mem_region: &MemoryRegion,
                 address_inside_region: u64,
             ) -> $size {
                 tracing::event!(
