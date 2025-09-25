@@ -291,14 +291,16 @@ mod macos {
     }
 }
 
+pub type MemoryTxResult<T = ()> = Result<T, crate::cpu_state::ExitRequest>;
+
 /// Trait for device memory operations.
 pub trait DeviceMemoryOps: std::fmt::Debug + Send + Sync {
     /// Returns unique device ID.
     fn id(&self) -> u64;
     /// Performs a read.
-    fn read(&self, address_inside_region: u64, width: Width) -> u64;
+    fn read(&self, address_inside_region: u64, width: Width) -> MemoryTxResult<u64>;
     /// Performs a write.
-    fn write(&self, address_inside_region: u64, value: u64, width: Width);
+    fn write(&self, address_inside_region: u64, value: u64, width: Width) -> MemoryTxResult;
 }
 
 impl PartialEq for &dyn DeviceMemoryOps {
@@ -517,7 +519,7 @@ pub mod ops {
     use std::mem::MaybeUninit;
 
     use super::*;
-    use crate::tracing;
+    use crate::{cpu_state::ExitRequest, tracing};
 
     macro_rules! def_op {
         (write $fn:ident: $size:ty) => {
@@ -526,7 +528,8 @@ pub mod ops {
                 mem_region: &mut MemoryRegion,
                 address_inside_region: u64,
                 value: $size,
-            ) {
+                exception: &mut MaybeUninit<ExitRequest>,
+            ) -> bool {
                 tracing::event!(
                     target: tracing::TraceItem::Memory.as_str(),
                     tracing::Level::TRACE,
@@ -535,7 +538,7 @@ pub mod ops {
                     address = ?Address(address_inside_region),
                     value = ?tracing::BinaryHex(value),
                 );
-                match mem_region.backing {
+                let result = match mem_region.backing {
                     MemoryBacking::Mmap(ref mut map @ MmappedMemory { .. }) => {
                         let destination =
                         // SAFETY: when resolving the guest address to a memory region, we
@@ -543,7 +546,7 @@ pub mod ops {
                             unsafe { map.as_mut_ptr().add(address_inside_region as usize) };
                         // SAFETY: this is safe as long as $size width does not exceed the map's
                         // size. We don't check for this, so FIXME
-                        unsafe { std::ptr::write_unaligned(destination.cast::<$size>(), value) };
+                        Ok(unsafe { std::ptr::write_unaligned(destination.cast::<$size>(), value) })
                     }
                     MemoryBacking::Device(ref ops) => {
                         ops.write(
@@ -558,7 +561,15 @@ pub mod ops {
                                 16 => Width::_128,
                                 _ => unreachable!(),
                             },
-                        );
+                        )
+                    }
+                };
+
+                match result {
+                    Ok(()) => true,
+                    Err(err) => {
+                        exception.write(err);
+                        false
                     }
                 }
             }
@@ -569,7 +580,8 @@ pub mod ops {
                 mem_region: &MemoryRegion,
                 address_inside_region: u64,
                 ret: &mut MaybeUninit<$size>,
-            ) {
+                exception: &mut MaybeUninit<ExitRequest>,
+            ) -> bool {
                 tracing::event!(
                     target: tracing::TraceItem::Memory.as_str(),
                     tracing::Level::TRACE,
@@ -578,7 +590,7 @@ pub mod ops {
                     address = ?Address(address_inside_region),
                     inside_offset = ?Address(address_inside_region),
                 );
-                let value = match mem_region.backing {
+                let result = match mem_region.backing {
                     MemoryBacking::Mmap(ref map @ MmappedMemory {  .. }) => {
                         let destination =
                         // SAFETY: when resolving the guest address to a memory region, we
@@ -586,10 +598,10 @@ pub mod ops {
                             unsafe { map.as_ptr().add(address_inside_region as usize) };
                         // SAFETY: this is safe as long as $size width does not exceed the map's
                         // size. We don't check for this, so FIXME
-                        unsafe { std::ptr::read_unaligned(destination.cast::<$size>()) }
+                        Ok(unsafe { std::ptr::read_unaligned(destination.cast::<$size>()) })
                     }
                     #[allow(clippy::cast_lossless)]
-                    MemoryBacking::Device(ref ops) => ops.read(
+                    MemoryBacking::Device(ref ops) => match ops.read(
                         address_inside_region,
                         match std::mem::size_of::<$size>() {
                             1 => Width::_8,
@@ -599,7 +611,17 @@ pub mod ops {
                             16 => Width::_128,
                             _ => unreachable!(),
                         },
-                    ) as $size,
+                    ) {
+                        Ok(v) => Ok(v as $size),
+                        Err(err) => Err(err),
+                    }
+                };
+                let value = match result {
+                    Ok(v) => v,
+                    Err(err) => {
+                        exception.write(err);
+                        return false;
+                    }
                 };
                 tracing::event!(
                     target: tracing::TraceItem::Memory.as_str(),
@@ -611,6 +633,7 @@ pub mod ops {
                     returning_value = ?tracing::BinaryHex(value),
                 );
                 ret.write(value);
+                true
             }
         };
     }

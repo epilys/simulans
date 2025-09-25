@@ -343,6 +343,11 @@ impl<'j> JitContext<'j> {
             self.module.target_config().pointer_type(),
             self.machine_addr as i64,
         );
+        let set_exception_func = builder.ins().iconst(
+            I64,
+            crate::machine::helper_set_exit_request as usize as u64 as i64,
+        );
+
         // Declare variables for each register.
         // Emit code to load register values into variables.
         ExecutionState::load_cpu_state(
@@ -376,6 +381,7 @@ impl<'j> JitContext<'j> {
             pointer_type: self.module.target_config().pointer_type(),
             memops_table,
             machine_ptr,
+            set_exception_func,
             address_lookup_sigref,
             builder,
             module: &self.module,
@@ -434,7 +440,6 @@ impl<'j> JitContext<'j> {
             }
         }
         let mut next_pc = None;
-        let mut prev_pc = program_counter;
         let mut last_pc = program_counter;
         // Translate each decoded instruction
         let mut decoded_iter = bad64::disasm(code_area, program_counter);
@@ -448,10 +453,8 @@ impl<'j> JitContext<'j> {
                 "{first:?}",
             );
             if let ControlFlow::Break(jump_pc) = trans.translate_instruction(&first) {
-                prev_pc = first.address();
                 next_pc = jump_pc;
             } else if self.single_step {
-                prev_pc = last_pc;
                 next_pc = Some(BlockExit::Branch(
                     trans.builder.ins().iconst(I64, (last_pc + 4) as i64),
                 ));
@@ -476,7 +479,6 @@ impl<'j> JitContext<'j> {
                             last_pc = insn.address();
                             if let ControlFlow::Break(jump_pc) = trans.translate_instruction(&insn)
                             {
-                                prev_pc = insn.address();
                                 next_pc = jump_pc;
                                 break;
                             }
@@ -502,18 +504,12 @@ impl<'j> JitContext<'j> {
                 );
             }
         }
-        match next_pc {
-            Some(BlockExit::Branch(next_pc)) => {
-                trans.emit_jump(prev_pc, next_pc);
-            }
-            Some(BlockExit::Exception) => {
-                // Do nothing
-            }
-            None => {
-                // We are out of code?
-                _ = trans.throw_undefined();
-            }
-        }
+        let block_exit = next_pc.unwrap_or_else(|| {
+            // We are out of code?
+            _ = trans.throw_undefined();
+            BlockExit::Exception
+        });
+        trans.direct_exit(block_exit);
         let BlockTranslator {
             mut builder,
             loopback_blocks,
@@ -537,6 +533,7 @@ struct BlockTranslator<'a> {
     builder: FunctionBuilder<'a>,
     module: &'a JITModule,
     machine_ptr: Value,
+    set_exception_func: Value,
     pointer_type: Type,
     memops_table: MemOpsTable,
     address_lookup_sigref: codegen::ir::SigRef,
@@ -581,7 +578,7 @@ impl BlockTranslator<'_> {
             self.builder.ins().jump(loopback_block, &[]);
         } else {
             let label_value = self.builder.ins().iconst(I64, label as i64);
-            self.emit_jump(self.address, label_value);
+            self.direct_exit(BlockExit::Branch(label_value));
         }
         self.builder.switch_to_block(branch_not_taken_block);
         self.builder.seal_block(branch_not_taken_block);
@@ -2808,11 +2805,8 @@ impl BlockTranslator<'_> {
                             .brif(success, success_block, &[], failure_block, &[]);
                         self.builder.switch_to_block(failure_block);
                         self.builder.seal_block(failure_block);
-                        let translate_func = self
-                            .builder
-                            .ins()
-                            .iconst(I64, lookup_block as usize as u64 as i64);
-                        self.builder.ins().return_(&[translate_func]);
+                        self.store_pc(None);
+                        self.direct_exit(BlockExit::Exception);
                         self.builder.switch_to_block(success_block);
                         self.builder.seal_block(success_block);
                         self.builder.ins().jump(merge_block, &[]);
@@ -4517,55 +4511,7 @@ impl BlockTranslator<'_> {
         ControlFlow::Continue(())
     }
 
-    /// Save state and resolve the next entry block.
-    fn emit_jump(&mut self, prev_pc: u64, next_pc_value: Value) {
-        {
-            {
-                let Self {
-                    write_to_sysreg,
-                    write_to_simd,
-                    ref mut builder,
-                    ref registers,
-                    ref sys_registers,
-                    machine_ptr,
-                    ..
-                } = self;
-                ExecutionState::save_cpu_state(
-                    *machine_ptr,
-                    builder,
-                    registers,
-                    sys_registers,
-                    *write_to_sysreg,
-                    *write_to_simd,
-                );
-            }
-            {
-                let prev_pc = self.builder.ins().iconst(I64, prev_pc as i64);
-                self.builder.ins().store(
-                    MemFlags::trusted(),
-                    prev_pc,
-                    self.machine_ptr,
-                    std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
-                );
-            }
-            self.store_pc(Some(next_pc_value));
-            // We don't change the lookup_block_func so just use the function pointer of
-            // `lookup_block` directly.
-            //
-            // let translate_func = self.builder.ins().load(
-            //     self.pointer_type,
-            //     MemFlags::trusted(),
-            //     self.machine_ptr,
-            //     std::mem::offset_of!(Armv8AMachine, lookup_block_func) as i32,
-            // );
-            let translate_func = self
-                .builder
-                .ins()
-                .iconst(I64, lookup_block as usize as u64 as i64);
-            self.builder.ins().return_(&[translate_func]);
-        }
-    }
-
+    /// Save state and exit to lookup function
     fn unconditional_jump_epilogue(&mut self, dest_label: Value) -> ControlFlow<Option<BlockExit>> {
         // [ref:can_trap]: Check `dest_label` alignment.
         {
@@ -4589,12 +4535,8 @@ impl BlockTranslator<'_> {
         callee: codegen::ir::Value,
         args: &[Value],
     ) -> ControlFlow<Option<BlockExit>> {
+        self.store_pc(None);
         _ = self.indirect_call(pc, sig, callee, args);
-        let translate_func = self
-            .builder
-            .ins()
-            .iconst(I64, lookup_block as usize as u64 as i64);
-        self.builder.ins().return_(&[translate_func]);
         ControlFlow::Break(Some(BlockExit::Exception))
     }
 
@@ -4651,5 +4593,42 @@ impl BlockTranslator<'_> {
         self.store_pc(Some(pc));
         let call = self.builder.ins().call_indirect(sig, callee, args);
         self.builder.inst_results(call)
+    }
+
+    fn direct_exit(&mut self, block_exit: BlockExit) {
+        {
+            let Self {
+                write_to_sysreg,
+                write_to_simd,
+                ref mut builder,
+                ref registers,
+                ref sys_registers,
+                machine_ptr,
+                ..
+            } = self;
+            ExecutionState::save_cpu_state(
+                *machine_ptr,
+                builder,
+                registers,
+                sys_registers,
+                *write_to_sysreg,
+                *write_to_simd,
+            );
+        }
+        let prev_pc = self.builder.ins().iconst(I64, self.address as i64);
+        self.builder.ins().store(
+            MemFlags::trusted(),
+            prev_pc,
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
+        );
+        if let BlockExit::Branch(v) = block_exit {
+            self.store_pc(Some(v));
+        }
+        let translate_func = self
+            .builder
+            .ins()
+            .iconst(I64, lookup_block as usize as u64 as i64);
+        self.builder.ins().return_(&[translate_func]);
     }
 }

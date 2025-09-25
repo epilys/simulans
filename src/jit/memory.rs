@@ -16,7 +16,8 @@ use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
 use crate::{
-    jit::{lookup_block, BlockTranslator},
+    cpu_state::ExitRequest,
+    jit::{BlockExit, BlockTranslator},
     memory::{mmu::ResolvedAddress, Width},
 };
 
@@ -47,6 +48,36 @@ macro_rules! create_stack_slot {
 
 impl BlockTranslator<'_> {
     #[inline]
+    fn merge_mem_op(
+        &mut self,
+        exception_addr: Value,
+        merge_block: Block,
+        success: Value,
+        success_value: Option<Value>,
+    ) {
+        let success_block = self.builder.create_block();
+        let failure_block = self.builder.create_block();
+        self.builder
+            .ins()
+            .brif(success, success_block, &[], failure_block, &[]);
+        self.builder.switch_to_block(failure_block);
+        self.builder.seal_block(failure_block);
+        _ = self.builder.ins().call_indirect(
+            self.memops_table.set_exception_sigref,
+            self.set_exception_func,
+            &[self.machine_ptr, exception_addr],
+        );
+        self.store_pc(None);
+        self.direct_exit(BlockExit::Exception);
+        self.builder.switch_to_block(success_block);
+        self.builder.seal_block(success_block);
+        self.builder.ins().jump(
+            merge_block,
+            &[BlockArg::from(success_value.unwrap_or(success))],
+        );
+    }
+
+    #[inline]
     /// Generates a JIT write access
     pub fn generate_write(&mut self, target_address: Value, value: Value, width: Width) -> Value {
         let address_lookup_func = self.builder.ins().iconst(
@@ -69,6 +100,7 @@ impl BlockTranslator<'_> {
                 resolved_address_slot_address,
             ],
         );
+        let (_exception_slot, exception_slot_address) = create_stack_slot!(self, ExitRequest);
         let (success, memory_region_ptr, address_inside_region) = {
             let success = self.builder.inst_results(call)[0];
             let memory_region_ptr = self.builder.ins().stack_load(
@@ -98,19 +130,19 @@ impl BlockTranslator<'_> {
         let call = self.builder.ins().call_indirect(
             *sigref,
             write_func,
-            &[memory_region_ptr, address_inside_region, value],
+            &[
+                memory_region_ptr,
+                address_inside_region,
+                value,
+                exception_slot_address,
+            ],
         );
-        self.builder.inst_results(call);
-        self.builder
-            .ins()
-            .jump(merge_block, &[BlockArg::from(success)]);
+        let success = self.builder.inst_results(call)[0];
+        self.merge_mem_op(exception_slot_address, merge_block, success, None);
         self.builder.switch_to_block(failure_block);
         self.builder.seal_block(failure_block);
-        let translate_func = self
-            .builder
-            .ins()
-            .iconst(I64, lookup_block as usize as u64 as i64);
-        self.builder.ins().return_(&[translate_func]);
+        self.store_pc(None);
+        self.direct_exit(BlockExit::Exception);
         self.builder.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
         let success = self.builder.block_params(merge_block)[0];
@@ -141,6 +173,7 @@ impl BlockTranslator<'_> {
             ],
         );
         let (read_value_slot, read_value_slot_address) = create_stack_slot!(self, width = width);
+        let (_exception_slot, exception_slot_address) = create_stack_slot!(self, ExitRequest);
         let (success, resolved) = {
             let success = self.builder.inst_results(call)[0];
             let memory_region_ptr = self.builder.ins().stack_load(
@@ -159,6 +192,7 @@ impl BlockTranslator<'_> {
                     memory_region_ptr,
                     address_inside_region,
                     read_value_slot_address,
+                    exception_slot_address,
                 ],
             )
         };
@@ -174,24 +208,25 @@ impl BlockTranslator<'_> {
 
         let (read_func, sigref) = self.memops_table.read(width);
         let read_func = self.builder.ins().iconst(I64, read_func);
-        let _call = self
+        let call = self
             .builder
             .ins()
             .call_indirect(*sigref, read_func, &resolved);
+        let success = self.builder.inst_results(call)[0];
         let read_value = self
             .builder
             .ins()
             .stack_load(width.into(), read_value_slot, 0);
-        self.builder
-            .ins()
-            .jump(merge_block, &[BlockArg::from(read_value)]);
+        self.merge_mem_op(
+            exception_slot_address,
+            merge_block,
+            success,
+            Some(read_value),
+        );
         self.builder.switch_to_block(failure_block);
         self.builder.seal_block(failure_block);
-        let translate_func = self
-            .builder
-            .ins()
-            .iconst(I64, lookup_block as usize as u64 as i64);
-        self.builder.ins().return_(&[translate_func]);
+        self.store_pc(None);
+        self.direct_exit(BlockExit::Exception);
         self.builder.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
         self.builder.block_params(merge_block)[0]
@@ -201,6 +236,7 @@ impl BlockTranslator<'_> {
 /// Helper struct to hold signatures for memory operation callbacks (see
 /// [`crate::memory::ops`])
 pub struct MemOpsTable {
+    set_exception_sigref: codegen::ir::SigRef,
     write_sigrefs: [codegen::ir::SigRef; 5],
     read_sigrefs: [codegen::ir::SigRef; 5],
 }
@@ -272,6 +308,9 @@ impl MemOpsTable {
                 sig.params
                     .push(AbiParam::new(module.target_config().pointer_type()));
                 sig.params.push(AbiParam::new($t));
+                sig.params
+                    .push(AbiParam::new(module.target_config().pointer_type()));
+                sig.returns.push(AbiParam::new(I8));
                 builder.import_signature(sig)
             }};
             (read $t:expr) => {{
@@ -282,6 +321,9 @@ impl MemOpsTable {
                     .push(AbiParam::new(module.target_config().pointer_type()));
                 sig.params
                     .push(AbiParam::new(module.target_config().pointer_type()));
+                sig.params
+                    .push(AbiParam::new(module.target_config().pointer_type()));
+                sig.returns.push(AbiParam::new(I8));
                 builder.import_signature(sig)
             }};
         }
@@ -301,7 +343,16 @@ impl MemOpsTable {
             sigref! { read I128 },
         ];
 
+        let set_exception_sigref = {
+            let mut sig = module.make_signature();
+            sig.params
+                .push(AbiParam::new(module.target_config().pointer_type()));
+            sig.params
+                .push(AbiParam::new(module.target_config().pointer_type()));
+            builder.import_signature(sig)
+        };
         Self {
+            set_exception_sigref,
             write_sigrefs,
             read_sigrefs,
         }

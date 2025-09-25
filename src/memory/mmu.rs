@@ -422,12 +422,22 @@ pub extern "C" fn translate_address<'machine>(
             // SAFETY: we checked the return value
             unsafe { resolved_address.assume_init() };
             let mut resolved_value = MaybeUninit::uninit();
-            crate::memory::region::ops::memory_region_read_64(
+            let mut exception = MaybeUninit::uninit();
+            if !crate::memory::region::ops::memory_region_read_64(
                 mem_region.unwrap(),
                 address_inside_region,
                 &mut resolved_value,
-            );
-            // SAFETY: this is safe
+                &mut exception,
+            ) {
+                // SAFETY: read returned false, so this is initialized
+                let exception = unsafe { exception.assume_init() };
+                if raise_exception {
+                    *machine.cpu_state.exit_request.lock().unwrap() =
+                        Some(exception);
+                }
+                return false;
+            }
+            // SAFETY: read returned true, so this is initialized
             unsafe { resolved_value.assume_init() }
         }};
     }
@@ -692,7 +702,18 @@ pub extern "C" fn mem_zero(
             .memory
             .find_region_mut(mem_region.phys_offset)
             .unwrap();
-        crate::memory::region::ops::memory_region_write_8(mem_region, address_inside_region, 0);
+        let mut exception = MaybeUninit::uninit();
+        if !crate::memory::region::ops::memory_region_write_8(
+            mem_region,
+            address_inside_region,
+            0,
+            &mut exception,
+        ) {
+            // SAFETY: write returned false, so this is initialized
+            let exception = unsafe { exception.assume_init() };
+            *machine.cpu_state.exit_request.lock().unwrap() = Some(exception);
+            return false;
+        }
     }
     true
 }

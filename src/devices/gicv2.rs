@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    memory::{Address, MemoryRegion, MemorySize, Width},
+    memory::{Address, DeviceMemoryOps, MemoryRegion, MemorySize, MemoryTxResult, Width},
     tracing,
 };
 
@@ -77,12 +77,12 @@ struct GicV2DistMemoryOps {
     registers: Arc<Mutex<(Gicd, Gicc)>>,
 }
 
-impl crate::memory::DeviceMemoryOps for GicV2DistMemoryOps {
+impl DeviceMemoryOps for GicV2DistMemoryOps {
     fn id(&self) -> u64 {
         self.device_id
     }
 
-    fn read(&self, offset: u64, width: Width) -> u64 {
+    fn read(&self, offset: u64, width: Width) -> MemoryTxResult<u64> {
         // [ref:TODO]: return Error
         assert_eq!(width, Width::_32);
         let gicd = &self.registers.lock().unwrap().0;
@@ -252,10 +252,10 @@ impl crate::memory::DeviceMemoryOps for GicV2DistMemoryOps {
             value = ?tracing::BinaryHex(value),
         );
 
-        value
+        Ok(value)
     }
 
-    fn write(&self, offset: u64, value: u64, width: Width) {
+    fn write(&self, offset: u64, value: u64, width: Width) -> MemoryTxResult {
         // [ref:TODO]: return Error
         assert_eq!(width, Width::_32);
         let value = value as u32;
@@ -409,6 +409,7 @@ impl crate::memory::DeviceMemoryOps for GicV2DistMemoryOps {
             field,
             value = ?tracing::BinaryHex(value),
         );
+        Ok(())
     }
 }
 
@@ -418,12 +419,12 @@ struct GicV2CPUMemoryOps {
     registers: Arc<Mutex<(Gicd, Gicc)>>,
 }
 
-impl crate::memory::DeviceMemoryOps for GicV2CPUMemoryOps {
+impl DeviceMemoryOps for GicV2CPUMemoryOps {
     fn id(&self) -> u64 {
         self.device_id
     }
 
-    fn read(&self, offset: u64, width: Width) -> u64 {
+    fn read(&self, offset: u64, width: Width) -> MemoryTxResult<u64> {
         // [ref:TODO]: return Error
         assert_eq!(width, Width::_32);
         let gicc = &self.registers.lock().unwrap().1;
@@ -539,10 +540,10 @@ impl crate::memory::DeviceMemoryOps for GicV2CPUMemoryOps {
             value = ?tracing::BinaryHex(value)
         );
 
-        value
+        Ok(value)
     }
 
-    fn write(&self, offset: u64, value: u64, width: Width) {
+    fn write(&self, offset: u64, value: u64, width: Width) -> MemoryTxResult {
         // [ref:TODO]: return Error
         assert_eq!(width, Width::_32);
         let value = value as u32;
@@ -643,6 +644,7 @@ impl crate::memory::DeviceMemoryOps for GicV2CPUMemoryOps {
             field,
             value = ?tracing::BinaryHex(value),
         );
+        Ok(())
     }
 }
 

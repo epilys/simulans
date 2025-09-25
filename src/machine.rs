@@ -22,6 +22,11 @@ mod translation_blocks;
 
 pub use translation_blocks::{TranslationBlock, TranslationBlocks};
 
+/// JIT Helper function to set [`ExecutionState::exit_request`] field.
+pub extern "C" fn helper_set_exit_request(machine: &mut Armv8AMachine, exit_request: &ExitRequest) {
+    *machine.cpu_state.exit_request.lock().unwrap() = Some(*exit_request);
+}
+
 /// The state of the emulated machine.
 #[repr(C)]
 pub struct Armv8AMachine {

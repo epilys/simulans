@@ -25,7 +25,9 @@ pub mod tube {
         Arc,
     };
 
-    use crate::memory::{Address, MemoryRegion, MemorySize, Width};
+    use crate::memory::{
+        Address, DeviceMemoryOps, MemoryRegion, MemorySize, MemoryTxResult, Width,
+    };
 
     #[derive(Debug)]
     /// Tube testing device (Memory mapped register) to signal shutdown for
@@ -82,19 +84,19 @@ pub mod tube {
         poweroff_request: Arc<AtomicU8>,
     }
 
-    impl crate::memory::DeviceMemoryOps for TubeOps {
+    impl DeviceMemoryOps for TubeOps {
         fn id(&self) -> u64 {
             self.device_id
         }
 
-        fn read(&self, _offset: u64, _width: Width) -> u64 {
-            0
+        fn read(&self, _offset: u64, _width: Width) -> MemoryTxResult<u64> {
+            Ok(0)
         }
 
-        fn write(&self, offset: u64, value: u64, width: Width) {
-            eprintln!("write {offset:x}? {value:?} {width:?}");
+        fn write(&self, offset: u64, value: u64, width: Width) -> MemoryTxResult {
             assert_eq!((width, offset), (Width::_8, 0));
             self.poweroff_request.store(value as u8, Ordering::SeqCst);
+            Ok(())
         }
     }
 }

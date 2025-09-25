@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    memory::{Address, MemoryRegion, MemorySize, Width},
+    memory::{Address, DeviceMemoryOps, MemoryRegion, MemorySize, MemoryTxResult, Width},
     tracing,
 };
 
@@ -413,13 +413,13 @@ struct PL011MemoryOps {
     regs: Arc<Mutex<PL011Registers>>,
 }
 
-impl crate::memory::DeviceMemoryOps for PL011MemoryOps {
+impl DeviceMemoryOps for PL011MemoryOps {
     fn id(&self) -> u64 {
         self.device_id
     }
 
-    fn read(&self, offset: u64, width: Width) -> u64 {
-        match RegisterOffset::try_from(offset) {
+    fn read(&self, offset: u64, width: Width) -> MemoryTxResult<u64> {
+        Ok(match RegisterOffset::try_from(offset) {
             Err(v) if (0x3f8..0x400).contains(&(v >> 2)) => {
                 let device_id = PL011State::DEVICE_ID;
                 u64::from(device_id[(offset - 0xfe0) >> 2])
@@ -454,10 +454,10 @@ impl crate::memory::DeviceMemoryOps for PL011MemoryOps {
                 );
                 result.into()
             }
-        }
+        })
     }
 
-    fn write(&self, offset: u64, value: u64, _width: Width) {
+    fn write(&self, offset: u64, value: u64, _width: Width) -> MemoryTxResult {
         if let Ok(field) = RegisterOffset::try_from(offset) {
             let mut char_backend = self.char_backend.lock();
             if field == RegisterOffset::DR {
@@ -474,6 +474,7 @@ impl crate::memory::DeviceMemoryOps for PL011MemoryOps {
         } else {
             tracing::error!("write bad offset 0x{offset:x} value 0x{value:x}");
         }
+        Ok(())
     }
 }
 
