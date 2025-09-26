@@ -134,7 +134,12 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     for mem in pl011.into_memory_regions() {
         memory_map_builder.add_region(mem)?;
     }
-    let gicv2 = simulans::devices::gicv2::GicV2::new(1, Address(0x08000000), Address(0x08010000));
+    let gicv2 = simulans::devices::gicv2::GicV2::new(
+        1,
+        Address(0x08000000),
+        Address(0x08010000),
+        &mut interrupts,
+    );
     for mem in gicv2.into_memory_regions() {
         memory_map_builder.add_region(mem)?;
     }
