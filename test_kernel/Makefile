@@ -42,16 +42,16 @@ clean:
 
 qemu-tcg: $(kernel_bin)
 	qemu-system-aarch64 $(QEMU_ARGS) \
-		-machine virt,memory-backend=mem0,accel=tcg \
+		-machine virt,memory-backend=mem0,accel=tcg,gic-version=2,acpi=off \
 		-m 4G \
-		-cpu max \
+		-cpu cortex-a76 \
 		-kernel $(kernel_bin) \
 		-object memory-backend-memfd,share=on,id=mem0,size=4G, \
 		-nic none \
 		-vga none \
 		-nographic \
 		-serial mon:stdio \
-		-d in_asm,int,guest_errors,invalid_mem \
+		-d in_asm,int,guest_errors,invalid_mem,trace:'arm_gt*',trace:'gic*' \
 		-D qemu.log
 
 all: $(kernel_bin)
