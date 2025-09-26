@@ -7,12 +7,26 @@ mod exceptions;
 
 use core::panic::PanicInfo;
 
+use arm_gic::{
+    gicv2::{
+        registers::{Gicc, Gicd},
+        GicV2,
+    },
+    irq_enable, IntId, UniqueMmioPointer,
+};
 use buddy_system_allocator::LockedHeap;
+use core::ptr::NonNull;
 use flat_device_tree::{Error as FdtError, Fdt};
 use smccc::{psci::system_off, Hvc};
 
+use aarch64_cpu::{asm, registers::*};
+
 /// Base memory-mapped address of the primary PL011 UART device.
 pub const UART_BASE_ADDRESS: *mut u32 = 0x900_0000 as _;
+
+// Base addresses of the GICv2 distributor and redistributor.
+const GICD_BASE_ADDRESS: *mut Gicd = 0x800_0000 as _;
+const GICC_BASE_ADDRESS: *mut Gicc = 0x801_0000 as _;
 
 #[global_allocator]
 static HEAP_ALLOCATOR: LockedHeap<32> = LockedHeap::new();
@@ -41,6 +55,32 @@ extern "C" fn main(x0: u64, _x1: u64, _x2: u64, _x3: u64) {
     let mut uart = unsafe { Uart::new(UART_BASE_ADDRESS) };
     uart.init(PL011_CLK_IN_HZ, PL011_BAUD_RATE);
     write!(&mut uart, "Hello world!\n").unwrap();
+
+    // let gicd = unsafe { UniqueMmioPointer::new(NonNull::new(GICD_BASE_ADDRESS).unwrap()) };
+    // let gicc = unsafe { NonNull::new(GICC_BASE_ADDRESS).unwrap() };
+
+    let mut gic = unsafe { GicV2::new(GICD_BASE_ADDRESS, GICC_BASE_ADDRESS) };
+    let gic_typer = gic.typer();
+    writeln!(&mut uart, "gic typer: lockable_spi_count {:?} has_security_extension: {:?} cpu_count: {:?} num_irqs: {:?}", gic_typer.lockable_spi_count(), gic_typer.has_security_extension(), gic_typer.cpu_count(), gic_typer.num_irqs()).unwrap();
+
+    gic.setup();
+    gic.set_priority_mask(0xff);
+    let timer_irqid = IntId::ppi(30 - 16);
+    gic.enable_interrupt(timer_irqid, true);
+    gic.set_interrupt_priority(timer_irqid, 0);
+    gic.set_trigger(timer_irqid, arm_gic::Trigger::Level);
+    let second = CNTFRQ_EL0.get() * 5;
+    CNTP_TVAL_EL0.set(second);
+    let ctl = CNTP_CTL_EL0.get();
+    write!(&mut uart, "ctl = {ctl:#x}\n",).unwrap();
+    irq_enable();
+    CNTP_CTL_EL0.write(CNTP_CTL_EL0::ENABLE::SET);
+    let ctl = CNTP_CTL_EL0.get();
+    write!(&mut uart, "ctl = {ctl:#x}\n",).unwrap();
+    asm::wfi();
+
+    let status = CNTP_CTL_EL0.read(CNTP_CTL_EL0::ISTATUS);
+    write!(&mut uart, "second: {second} status = {status:?}\n",).unwrap();
     let s = alloc::string::String::from(" A heap allocated string ");
     assert_eq!(&s, " A heap allocated string ");
     write!(
