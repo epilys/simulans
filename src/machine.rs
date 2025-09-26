@@ -17,6 +17,10 @@ mod translation_blocks;
 
 pub use translation_blocks::{TranslationBlock, TranslationBlocks};
 
+pub mod interrupts;
+
+pub use interrupts::Interrupts;
+
 /// JIT Helper function to set [`ExecutionState::exit_request`] field.
 pub extern "C" fn helper_set_exit_request(machine: &mut Armv8AMachine, exit_request: &ExitRequest) {
     *machine.cpu_state.exit_request.lock().unwrap() = Some(*exit_request);
@@ -39,11 +43,13 @@ pub struct Armv8AMachine {
     pub in_breakpoint: bool,
     /// List of breakpoint addresses.
     pub hw_breakpoints: BTreeSet<Address>,
+    /// Interrupt generators and subscribers/handlers
+    pub interrupts: Interrupts,
 }
 
 impl Armv8AMachine {
     /// Returns a new machine with given memory map.
-    pub fn new(memory: MemoryMap) -> Pin<Box<Self>> {
+    pub fn new(memory: MemoryMap, interrupts: Interrupts) -> Pin<Box<Self>> {
         Box::pin(Self {
             pc: 0,
             prev_pc: 0,
@@ -52,6 +58,7 @@ impl Armv8AMachine {
             lookup_block_func: Entry(lookup_block),
             in_breakpoint: false,
             hw_breakpoints: BTreeSet::new(),
+            interrupts,
         })
     }
 
