@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 // Copyright Contributors to the simulans project.
 
+#![allow(clippy::significant_drop_tightening)]
+
 //! # ARM ® Generic Interrupt Controller Architecture version 2.0
+
+// Questions:
+//
+// - When should the IRQ/FIQ signals be cleared?
 
 use std::sync::{Arc, Mutex};
 
 use crate::{
     get_bits,
+    machine::interrupts::{FiqSignal, InterruptRequest, Interrupts, IrqSignal},
     memory::{Address, DeviceMemoryOps, MemoryRegion, MemorySize, MemoryTxResult, Width},
-    tracing,
+    set_bits, tracing,
 };
 
 #[derive(Debug, Copy, Clone)]
@@ -23,13 +30,6 @@ const MINIMUM_BINARY_POINT: u8 = 0x3;
 const NS_ACCESS: bool = true;
 const SPURIOUS_INTERRUPT: u16 = 1023;
 
-// timer interrupts, architecturally defined
-const ARCH_TIMER_NS_EL2_IRQ: u16 = 26;
-const ARCH_TIMER_VIRT_IRQ: u16 = 27;
-const ARCH_TIMER_NS_EL2_VIRT_IRQ: u16 = 28;
-const ARCH_TIMER_S_EL1_IRQ: u16 = 29;
-const ARCH_TIMER_NS_EL1_IRQ: u16 = 30;
-
 // Helper functions
 // ================
 // bits(3) SGI_CpuID(integer InterruptID, cpu_id)
@@ -38,13 +38,10 @@ const ARCH_TIMER_NS_EL1_IRQ: u16 = 30;
 // // CPU. If there are multiple source CPUs, the one
 // // chosen is IMPLEMENTATION SPECIFIC.
 
-// Calculate the Binary Point (group) mask.
-//
-// Returns the priority mask to be used for priority grouping as part of interrupt prioritization
-//
-// NOTE: where the Security Extensions are not supported, NS_mask = '0'
 #[doc(alias("GIC_PriorityMask"))]
-fn gic_priority_mask(mut n: u8, ns_mask: bool) -> u8 {
+/// Returns the priority mask to be used for priority grouping as part of interrupt prioritization
+// NOTE: where the Security Extensions are not supported, NS_mask = '0'
+fn priority_mask(mut n: u8, ns_mask: bool) -> u8 {
     // Range check for the priority mask.
     assert!((0..=7).contains(&n));
     if ns_mask {
@@ -59,58 +56,7 @@ fn gic_priority_mask(mut n: u8, ns_mask: bool) -> u8 {
     (0b1111111100000000_u32 >> (7 - n)) as u8
 }
 
-#[doc(alias("GIC_GenerateExceptions"))]
-#[doc(alias("GenerateExceptions"))]
-fn generate_exceptions(gicc: &[Gicc; 8], gicd: &Gicd, system_fiq: bool, system_irq: bool) {
-    let cpu_count = gicd.cpu_count();
-
-    for cpu_id in 0..cpu_count {
-        let gicc = &gicc[cpu_id as usize];
-
-        // Returns pending interrupts, masked by distributor enables but not cpu i/f enables
-        let (next_int, next_grp0) = update_exception_state(gicc, gicd, cpu_id);
-
-        // IRQ signal to CPU
-        let mut cpu_irq = false;
-        // FIQ signal to CPU
-        let mut cpu_fiq = false;
-
-        if next_int {
-            if next_grp0 && gicc.fiq_en() {
-                if gicc.group0_enabled() {
-                    cpu_fiq = true;
-                }
-            } else if next_grp0 && gicc.group0_enabled() || !next_grp0 && gicc.group1_enabled() {
-                cpu_irq = true;
-            }
-        }
-
-        // Optional bypass logic
-        if !gicc.group0_enabled()
-            || !gicc.fiq_en() && !gicc.fiq_byp_dis_grp0()
-            || (!gicc.fiq_byp_dis_grp1() && !gicc.fiq_en())
-        {
-            // Set FIQ to bypass
-            cpu_fiq = system_fiq;
-        }
-        if !gicc.group1_enabled()
-            && (!gicc.group0_enabled() || gicc.fiq_en())
-            && !gicc.irq_byp_dis_grp1()
-            || (!gicc.irq_byp_dis_grp0() && gicc.fiq_en())
-        {
-            // Set IRQ to bypass
-            cpu_irq = system_irq;
-        }
-        // End, optional bypass logic
-
-        // Update driven status of FIQ.
-        gicd.signal_fiq(cpu_fiq, cpu_id);
-        // Update driven status of IRQ.
-        gicd.signal_irq(cpu_irq, cpu_id);
-    }
-}
-
-/// Returns pending interrupts, masked by distributor enables but not cpu i/f enables
+/// Returns pending interrupts, masked by distributor enables but not cpu if enables
 fn update_exception_state(gicc: &Gicc, gicd: &Gicd, cpu_id: u8) -> (bool, bool) {
     let sbp = gicc.bpr; // Secure version of this register.
     let nsbp = gicc.abpr;
@@ -122,12 +68,12 @@ fn update_exception_state(gicc: &Gicc, gicd: &Gicd, cpu_id: u8) -> (bool, bool) 
     if priority_is_higher(gicd.priority(int_id, cpu_id), gicc.pmr as u8)
         && gicd.is_pending(int_id, cpu_id)
     {
-        let smsk = gic_priority_mask(sbp as u8, false);
+        let smsk = priority_mask(sbp as u8, false);
 
         let nsmsk = if gicc.cbpr() {
             smsk
         } else {
-            gic_priority_mask(nsbp as u8, true)
+            priority_mask(nsbp as u8, true)
         };
         // Highest pending interrupt is secure
         //// and secure interrupts are enabled
@@ -200,10 +146,16 @@ pub struct GicV2 {
     device_id: u64,
     dist: Address,
     cpu_if: Address,
+    state: Arc<Mutex<State>>,
 }
 
 impl GicV2 {
-    pub fn new(device_id: u64, dist: Address, cpu_if: Address) -> Self {
+    pub fn new(
+        device_id: u64,
+        dist: Address,
+        cpu_if: Address,
+        interrupts: &mut Interrupts,
+    ) -> Self {
         if (dist < cpu_if && dist + 0x10000_u64 > cpu_if)
             || (cpu_if < dist && cpu_if + 0x10000_u64 > dist)
         {
@@ -212,10 +164,36 @@ impl GicV2 {
                  {cpu_if} (each is sized  0x10000 bytes)"
             );
         }
+        let fiq_signal = interrupts.fiq_signal();
+        let irq_signal = interrupts.irq_signal();
+        let state = Arc::new(Mutex::new(State::new()));
+        let handler = Box::new({
+            let state = Arc::clone(&state);
+            move |irq: InterruptRequest| {
+                tracing::event!(
+                    target: tracing::TraceItem::GicV2.as_str(),
+                    tracing::Level::TRACE,
+                    kind = "interrupt request",
+                    req = ?irq
+                );
+                let mut state_lck = state.lock().unwrap();
+                if let Some(cpu_id) = irq.cpu_id {
+                    state_lck.gicd.set_pending(irq.interrupt_id, cpu_id, true);
+                } else {
+                    for cpu_id in 0..8 {
+                        state_lck.gicd.set_pending(irq.interrupt_id, cpu_id, true);
+                    }
+                }
+                state_lck.generate_exceptions(&fiq_signal, &irq_signal);
+            }
+        });
+        interrupts.subscribe(device_id, handler);
+
         Self {
             device_id,
             dist,
             cpu_if,
+            state,
         }
     }
 }
@@ -231,8 +209,8 @@ impl crate::devices::Device for GicV2 {
             device_id,
             dist,
             cpu_if,
+            state,
         } = self;
-        let registers = Arc::new(Mutex::new((Gicd::new(), Giccs::new())));
         vec![
             MemoryRegion::new_io(
                 MemorySize::new(0x10000).unwrap(),
@@ -240,7 +218,7 @@ impl crate::devices::Device for GicV2 {
                 Box::new(GicV2DistMemoryOps {
                     cpu_id: 0,
                     device_id,
-                    registers: registers.clone(),
+                    state: state.clone(),
                 }),
             )
             .unwrap(),
@@ -250,7 +228,7 @@ impl crate::devices::Device for GicV2 {
                 Box::new(GicV2CPUMemoryOps {
                     cpu_id: 0,
                     device_id,
-                    registers,
+                    state,
                 }),
             )
             .unwrap(),
@@ -262,7 +240,7 @@ impl crate::devices::Device for GicV2 {
 struct GicV2DistMemoryOps {
     cpu_id: u8,
     device_id: u64,
-    registers: Arc<Mutex<(Gicd, Giccs)>>,
+    state: Arc<Mutex<State>>,
 }
 
 impl DeviceMemoryOps for GicV2DistMemoryOps {
@@ -273,7 +251,8 @@ impl DeviceMemoryOps for GicV2DistMemoryOps {
     fn read(&self, offset: u64, width: Width) -> MemoryTxResult<u64> {
         // [ref:TODO]: Some registers are byte addressible
         assert_eq!(width, Width::_32);
-        let gicd = &self.registers.lock().unwrap().0;
+        let state = self.state.lock().unwrap();
+        let gicd = &state.gicd;
         let field: &'static str;
         let value = match offset {
             (0x000..0x004) => {
@@ -398,8 +377,10 @@ impl DeviceMemoryOps for GicV2DistMemoryOps {
                 // Registers
                 field = "GICD_ITARGETSR";
                 let idx = (offset - 0x800) / 0x04;
-                if idx == 0 {
-                    gicd.itargetsr0[self.cpu_id as usize]
+                if idx < 8 {
+                    // GICD_ITARGETSR0 to GICD_ITARGETSR7 are read-only, and each field returns a
+                    // value that corresponds only to the processor reading the register.
+                    (1 << self.cpu_id) as u32
                 } else {
                     gicd.itargetsr[idx as usize]
                 }
@@ -489,7 +470,8 @@ impl DeviceMemoryOps for GicV2DistMemoryOps {
         assert_eq!(width, Width::_32);
         let value = value as u32;
 
-        let gicd = &mut self.registers.lock().unwrap().0;
+        let mut state = self.state.lock().unwrap();
+        let gicd = &mut state.gicd;
         let field: &'static str;
         match offset {
             (0x000..0x004) => {
@@ -533,7 +515,7 @@ impl DeviceMemoryOps for GicV2DistMemoryOps {
             (0x100..0x180) => {
                 // GICD_ISENABLER RW IMPLEMENTATION DEFINED Interrupt Set-Enable Registers
                 field = "GICD_ISENABLER";
-                let idx = (offset - 0x100) / 0x04;
+                let idx = (offset - 0x100) / 4;
                 gicd.write_isenabler(idx as usize, value, self.cpu_id);
             }
             (0x180..0x200) => {
@@ -659,7 +641,7 @@ impl DeviceMemoryOps for GicV2DistMemoryOps {
 struct GicV2CPUMemoryOps {
     device_id: u64,
     cpu_id: u8,
-    registers: Arc<Mutex<(Gicd, Giccs)>>,
+    state: Arc<Mutex<State>>,
 }
 
 impl DeviceMemoryOps for GicV2CPUMemoryOps {
@@ -667,13 +649,15 @@ impl DeviceMemoryOps for GicV2CPUMemoryOps {
         self.device_id
     }
 
-    #[allow(clippy::significant_drop_tightening)]
     fn read(&self, offset: u64, width: Width) -> MemoryTxResult<u64> {
         // [ref:TODO]: return Error
         assert_eq!(width, Width::_32);
-        let registers = &self.registers.lock().unwrap();
-        let gicc = &registers.1.giccs[0];
-        let gicd = &registers.0;
+        let mut state = self.state.lock().unwrap();
+        let State {
+            ref giccs,
+            ref mut gicd,
+        } = *state;
+        let gicc = &giccs[self.cpu_id as usize];
         let field: &'static str;
         let value = match offset {
             (0x0000..0x0004) => {
@@ -795,7 +779,8 @@ impl DeviceMemoryOps for GicV2CPUMemoryOps {
         assert_eq!(width, Width::_32);
         let value = value as u32;
 
-        let gicc = &mut self.registers.lock().unwrap().1.giccs[0];
+        let mut state = self.state.lock().unwrap();
+        let gicc = &mut state.giccs[self.cpu_id as usize];
         let field: &'static str;
         match offset {
             (0x0000..0x0004) => {
@@ -939,7 +924,6 @@ pub struct Gicd {
     pub ipriorityr0: [u32; 8],
     /// Interrupt Processor Targets Registers.
     pub itargetsr: [u32; 0x100],
-    pub itargetsr0: [u32; 8],
     /// Interrupt Configuration Registers.
     pub icfgr: [u32; 0x40],
     /// Banked `GICD_ICFGR1` for each processor
@@ -968,7 +952,6 @@ impl Gicd {
             ipriorityr: [0; 0x100],
             ipriorityr0: [0; 8],
             itargetsr: [0; 0x100],
-            itargetsr0: [0; 8],
             icfgr: [0; 0x40],
             icfgr1: [0; 8],
             _reserved_1: [0; 0x80],
@@ -979,17 +962,6 @@ impl Gicd {
     const fn cpu_count(&self) -> u8 {
         get_bits!(self.typer, off = 5, len = 2) as u8 + 1
     }
-
-    // SignalFIQ(boolean next_fiq, integer cpu_id)
-    #[doc(alias("SignalFIQ"))]
-    /// Signals an interrupt on the FIQ input to the processor, according to the value of `next_fiq`.
-    fn signal_fiq(&self, next_fiq: bool, cpu_id: u8) {}
-
-    // SignalIRQ(boolean next_irq, integer cpu_id) // Signals an interrupt on the IRQ input to the
-    // processor, according to the value of next_irq.
-    #[doc(alias("SignalIRQ"))]
-    /// Signals an interrupt on the IRQ input to the processor, according to the value of `next_irq.`
-    fn signal_irq(&self, next_irq: bool, cpu_id: u8) {}
 
     #[doc(alias("AnyActiveInterrupts"))]
     /// Return `true` if any interrupt is in the active state
@@ -1022,8 +994,7 @@ impl Gicd {
     // // GICD_ISENABLERn or GICD_ICENABLERn register.
     pub const fn is_enabled(&self, interrupt_id: u16, cpu_id: u8) -> bool {
         assert!(interrupt_id < 1024);
-        let n = interrupt_id / 4;
-        let idx = n * 4;
+        let idx = interrupt_id / 32;
         let bit = interrupt_id % 32;
         if idx == 0 {
             assert!(interrupt_id < 32);
@@ -1040,16 +1011,27 @@ impl Gicd {
     /// Returns `true` if the interrupt specified by argument `interrupt_id`
     // is pending for the CPU specified by argument `cpu_id`
     pub const fn is_pending(&self, interrupt_id: u16, cpu_id: u8) -> bool {
+        assert!(interrupt_id < 1024);
+        let idx = interrupt_id / 32;
+        let bit = interrupt_id % 32;
+
         let target_cpus = self.read_itargets_for_id(interrupt_id, cpu_id);
-        let interrupt_state = self.interrupt_state(interrupt_id, cpu_id);
-        get_bits!(target_cpus, off = cpu_id, len = 1) == 1
-            && matches!(interrupt_state, InterruptState::Pending)
+        let pending = if idx == 0 {
+            assert!(interrupt_id < 32);
+            get_bits!(
+                self.pending_interrupts0[cpu_id as usize],
+                off = bit,
+                len = 1
+            ) == 1
+        } else {
+            get_bits!(self.pending_interrupts[idx as usize], off = bit, len = 1) == 1
+        };
+        get_bits!(target_cpus, off = cpu_id, len = 1) == 1 && pending
     }
 
     pub const fn is_active(&self, interrupt_id: u16, cpu_id: u8) -> bool {
         assert!(interrupt_id < 1024);
-        let n = interrupt_id / 4;
-        let idx = n * 4;
+        let idx = interrupt_id / 32;
         let bit = interrupt_id % 32;
         if idx == 0 {
             assert!(interrupt_id < 32);
@@ -1059,13 +1041,61 @@ impl Gicd {
         }
     }
 
+    pub const fn set_active(&mut self, interrupt_id: u16, cpu_id: u8) {
+        assert!(interrupt_id < 1024);
+        let idx = interrupt_id / 32;
+        let bit = interrupt_id % 32;
+
+        if idx == 0 {
+            assert!(interrupt_id < 32);
+            self.active_interrupts0[cpu_id as usize] = set_bits!(
+                self.active_interrupts0[cpu_id as usize],
+                off = bit,
+                len = 1,
+                val = 1
+            );
+        } else {
+            self.active_interrupts[idx as usize] = set_bits!(
+                self.active_interrupts[idx as usize],
+                off = bit,
+                len = 1,
+                val = 1
+            );
+        }
+    }
+
+    pub const fn set_pending(&mut self, interrupt_id: u16, cpu_id: u8, value: bool) {
+        assert!(interrupt_id < 1024);
+        let idx = interrupt_id / 32;
+        let bit = interrupt_id % 32;
+
+        if idx == 0 {
+            assert!(interrupt_id < 32);
+            self.pending_interrupts0[cpu_id as usize] = set_bits!(
+                self.pending_interrupts0[cpu_id as usize],
+                off = bit,
+                len = 1,
+                val = value as u32
+            );
+        } else {
+            self.pending_interrupts[idx as usize] = set_bits!(
+                self.pending_interrupts[idx as usize],
+                off = bit,
+                len = 1,
+                val = value as u32
+            );
+        }
+    }
+
     /// Returns the 8-bit priority field from the `GICD_IPRIORITYR` associated with the argument
     /// `interrupt_id`.
     #[doc(alias("ReadGICD_IPRIORITYR"))]
     pub const fn priority(&self, interrupt_id: u16, cpu_id: u8) -> u8 {
+        if interrupt_id == SPURIOUS_INTERRUPT {
+            return u8::MAX;
+        }
         // banked
-        let n = interrupt_id / 4;
-        let idx = n * 4;
+        let idx = interrupt_id / 4;
         let byte_offset = interrupt_id % 4;
         if idx == 0 {
             assert!(interrupt_id < 32);
@@ -1079,8 +1109,7 @@ impl Gicd {
     /// Updates the priority field in the `GICD_IPRIORITYR` associated with the argument `interrupt_id` with the 8-bit value.
     pub const fn write_priority(&mut self, interrupt_id: u16, cpu_id: u8, value: u8) {
         // banked
-        let n = interrupt_id / 4;
-        let idx = n * 4;
+        let idx = interrupt_id / 4;
         let byte_offset = interrupt_id % 4;
         if idx == 0 {
             assert!(interrupt_id < 32);
@@ -1104,13 +1133,12 @@ impl Gicd {
     #[doc(alias("IsGrp0Int"))]
     pub const fn is_grp0_int(&self, interrupt_id: u16, cpu_id: u8) -> bool {
         assert!(interrupt_id < 1024);
-        let n = interrupt_id / 32;
-        let idx = n * 4;
+        let idx = interrupt_id / 32;
         let bit = interrupt_id % 32;
         if idx == 0 {
-            get_bits!(self.igroupr0[cpu_id as usize], off = bit, len = 1) == 1
+            get_bits!(self.igroupr0[cpu_id as usize], off = bit, len = 1) == 0
         } else {
-            get_bits!(self.igroupr[idx as usize], off = bit, len = 1) == 1
+            get_bits!(self.igroupr[idx as usize], off = bit, len = 1) == 0
         }
     }
 
@@ -1119,12 +1147,11 @@ impl Gicd {
     #[doc(alias("ReadGICD_ITARGETSR"))]
     pub const fn read_itargets_for_id(&self, interrupt_id: u16, cpu_id: u8) -> u8 {
         // banked
-        let n = interrupt_id / 4;
-        let idx = n * 4;
+        let idx = interrupt_id / 4;
         let byte_offset = interrupt_id % 4;
-        if idx == 0 {
+        if idx < 8 {
             assert!(interrupt_id < 32);
-            self.itargetsr0[cpu_id as usize].to_le_bytes()[byte_offset as usize]
+            1 << cpu_id
         } else {
             self.itargetsr[idx as usize].to_le_bytes()[byte_offset as usize]
         }
@@ -1179,6 +1206,14 @@ impl Gicd {
             self.active_interrupts[idx] &= !value;
         }
     }
+
+    /// Set the active state and attempt to clear the pending state for the interrupt associated
+    /// with the argument `interrupt_id`
+    #[doc(alias("AcknowledgeInterrupt"))]
+    fn acknowledge_interrupt(&mut self, interrupt_id: u16, cpu_id: u8) {
+        self.set_active(interrupt_id, cpu_id);
+        self.set_pending(interrupt_id, cpu_id, false);
+    }
 }
 
 impl Default for Gicd {
@@ -1188,13 +1223,15 @@ impl Default for Gicd {
 }
 
 #[derive(Debug)]
-pub struct Giccs {
+pub struct State {
+    gicd: Gicd,
     giccs: [Gicc; 8],
 }
 
-impl Giccs {
-    pub const fn new() -> Self {
+impl State {
+    pub fn new() -> Self {
         Self {
+            gicd: Gicd::new(),
             giccs: const {
                 let mut val = [const { Gicc::new(0) }; 8];
                 let mut cpu_id = 1;
@@ -1207,17 +1244,63 @@ impl Giccs {
         }
     }
 
-    /// Set the active state and attempt to clear the pending state for the interrupt associated
-    /// with the argument `interrupt_id`
-    #[doc(alias("AcknowledgeInterrupt"))]
-    fn acknowledge_interrupt(&mut self, interrupt_id: u16, cpu_id: u8) {
-        assert!((0..=7).contains(&cpu_id));
-        let gicc = &mut self.giccs[cpu_id as usize];
-        gicc.acknowledge_interrupt(interrupt_id);
+    #[doc(alias("GIC_GenerateExceptions"))]
+    #[doc(alias("GenerateExceptions"))]
+    fn generate_exceptions(&self, fiq_signal: &FiqSignal, irq_signal: &IrqSignal) {
+        let gicd = &self.gicd;
+
+        let cpu_count = gicd.cpu_count();
+
+        for cpu_id in 0..cpu_count {
+            let gicc = &self.giccs[cpu_id as usize];
+
+            // Returns pending interrupts, masked by distributor enables but not cpu i/f enables
+            let (next_int, next_grp0) = update_exception_state(gicc, gicd, cpu_id);
+
+            // IRQ signal to CPU
+            let mut cpu_irq = false;
+            // FIQ signal to CPU
+            let mut cpu_fiq = false;
+
+            if next_int {
+                if next_grp0 && gicc.fiq_en() {
+                    if gicc.group0_enabled() {
+                        cpu_fiq = true;
+                    }
+                } else if next_grp0 && gicc.group0_enabled() || !next_grp0 && gicc.group1_enabled()
+                {
+                    cpu_irq = true;
+                }
+            }
+
+            // Update driven status of FIQ.
+            self.signal_fiq(cpu_fiq, cpu_id, fiq_signal);
+            // Update driven status of IRQ.
+            self.signal_irq(cpu_irq, cpu_id, irq_signal);
+        }
+    }
+
+    // SignalFIQ(boolean next_fiq, integer cpu_id)
+    #[doc(alias("SignalFIQ"))]
+    /// Signals an interrupt on the FIQ input to the processor, according to the value of `next_fiq`.
+    fn signal_fiq(&self, next_fiq: bool, cpu_id: u8, fiq_signal: &FiqSignal) {
+        if next_fiq {
+            fiq_signal.send(cpu_id);
+        }
+    }
+
+    // SignalIRQ(boolean next_irq, integer cpu_id) // Signals an interrupt on the IRQ input to the
+    // processor, according to the value of next_irq.
+    #[doc(alias("SignalIRQ"))]
+    /// Signals an interrupt on the IRQ input to the processor, according to the value of `next_irq.`
+    fn signal_irq(&self, next_irq: bool, cpu_id: u8, irq_signal: &IrqSignal) {
+        if next_irq {
+            irq_signal.send(cpu_id);
+        }
     }
 }
 
-impl Default for Giccs {
+impl Default for State {
     fn default() -> Self {
         Self::new()
     }
@@ -1334,7 +1417,7 @@ impl Gicc {
 
     #[doc(alias("ReadGICC_IAR"))]
     /// Value of `GICC_IAR` read by a CPU access
-    fn read_iar(&self, gicd: &Gicd, cpu_id: u8) -> u32 {
+    fn read_iar(&self, gicd: &mut Gicd, cpu_id: u8) -> u32 {
         let mut pend_id = highest_priority_pending_interrupt(gicd, cpu_id);
         if (gicd.is_grp0_int(pend_id, cpu_id) && (!gicd.group0_enabled() || !self.group0_enabled()))
             || (!gicd.is_grp0_int(pend_id, cpu_id)
@@ -1367,13 +1450,8 @@ impl Gicc {
         // Check that it is not a spurious interrupt
         if pend_id < 1020 {
             // Set active and attempt to clear pending
-            self.acknowledge_interrupt(pend_id);
+            gicd.acknowledge_interrupt(pend_id, cpu_id);
         }
         (sgi_id << 10 | pend_id).into()
     }
-
-    /// Set the active state and attempt to clear the pending state for the interrupt associated
-    /// with the argument `interrupt_id`
-    #[doc(alias("AcknowledgeInterrupt"))]
-    fn acknowledge_interrupt(&self, interrupt_id: u16) {}
 }
