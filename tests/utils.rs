@@ -74,7 +74,7 @@ pub fn make_test_machine(
         memory.add_region(mem).unwrap();
     }
     let memory = memory.build();
-    Armv8AMachine::new(memory)
+    Armv8AMachine::new(memory, Default::default())
 }
 
 #[allow(dead_code)]

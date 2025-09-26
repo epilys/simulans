@@ -33,7 +33,7 @@ fn test_uart_write_str() {
             .with_region(tube.into_memory_regions().pop().unwrap())
             .unwrap()
             .build();
-        let mut machine = Armv8AMachine::new(memory);
+        let mut machine = Armv8AMachine::new(memory, Default::default());
         machine.cpu_state.registers.x0 = pl011_addr.0;
         machine.cpu_state.registers.x2 = "Hello world\n".len() as u64;
 
