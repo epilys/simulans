@@ -3,11 +3,19 @@
 
 #![allow(non_camel_case_types, clippy::upper_case_acronyms)]
 
-use codegen::ir::types::{I64, I8};
+use codegen::ir::{
+    instructions::BlockArg,
+    types::{I64, I8},
+};
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use crate::{cpu_state::SysReg, devices::timer, jit::BlockTranslator, machine::Armv8AMachine};
+use crate::{
+    cpu_state::{ExceptionLevel, SysReg},
+    devices::timer,
+    jit::BlockTranslator,
+    machine::Armv8AMachine,
+};
 
 macro_rules! register_field {
     (read $jit:ident, $($field:tt)*) => {{
@@ -44,6 +52,10 @@ impl BlockTranslator<'_> {
             SysReg::DAIF => DAIF::generate_read(self),
             SysReg::CurrentEL => CurrentEl::generate_read(self),
             SysReg::SpSel => SPSel::generate_read(self),
+            SysReg::SP_EL0 => SP_EL0::generate_read(self),
+            SysReg::SP_EL1 => SP_EL1::generate_read(self),
+            SysReg::SP_EL2 => SP_EL2::generate_read(self),
+            SysReg::SP_EL3 => SP_EL3::generate_read(self),
             // PMUSERENR_EL0, Performance Monitors User Enable Register
             SysReg::PMUSERENR_EL0 => self.builder.ins().iconst(I64, 0),
             // AMUSERENR_EL0, Activity Monitors User Enable Register
@@ -218,6 +230,10 @@ impl BlockTranslator<'_> {
             SysReg::DAIFClr => DAIFClr::generate_write(self, value),
             SysReg::CurrentEL => CurrentEl::generate_write(self, value),
             SysReg::SpSel => SPSel::generate_write(self, value),
+            SysReg::SP_EL0 => SP_EL0::generate_write(self, value),
+            SysReg::SP_EL1 => SP_EL1::generate_write(self, value),
+            SysReg::SP_EL2 => SP_EL2::generate_write(self, value),
+            SysReg::SP_EL3 => SP_EL3::generate_write(self, value),
             // PMUSERENR_EL0, Performance Monitors User Enable Register
             SysReg::PMUSERENR_EL0 => {}
             // AMUSERENR_EL0, Activity Monitors User Enable Register
@@ -340,6 +356,131 @@ macro_rules! pstate_field {
     }};
 }
 
+/// Not used as a system register, but rather to load and store the `SP` value
+/// to `SP_ELx` according to `PSTATE.SP`
+pub struct SP;
+
+impl SystemRegister for SP {
+    fn generate_read(jit: &mut BlockTranslator<'_>) -> Value {
+        extern "C" fn read_sp(machine: &Armv8AMachine) -> u64 {
+            match machine.cpu_state.PSTATE().SP() {
+                crate::cpu_state::SpSel::Current => machine.cpu_state.sp_elx(),
+                crate::cpu_state::SpSel::SpEl0 => machine.cpu_state.registers.sp_el0,
+            }
+        }
+        let sigref = {
+            let mut sig = jit.module.make_signature();
+            sig.params.push(AbiParam::new(jit.pointer_type));
+            sig.returns.push(AbiParam::new(I64));
+            jit.builder.import_signature(sig)
+        };
+        let callee = jit.builder.ins().iconst(I64, read_sp as usize as i64);
+        let call = jit
+            .builder
+            .ins()
+            .call_indirect(sigref, callee, &[jit.machine_ptr]);
+        jit.builder.inst_results(call)[0]
+    }
+
+    fn generate_write(jit: &mut BlockTranslator<'_>, value: Value) {
+        extern "C" fn write_sp(machine: &mut Armv8AMachine, value: u64) {
+            match machine.cpu_state.PSTATE().SP() {
+                crate::cpu_state::SpSel::Current => machine.cpu_state.set_sp_elx(value),
+                crate::cpu_state::SpSel::SpEl0 => machine.cpu_state.registers.sp_el0 = value,
+            }
+        }
+        let sigref = {
+            let mut sig = jit.module.make_signature();
+            sig.params.push(AbiParam::new(jit.pointer_type));
+            sig.params.push(AbiParam::new(I64));
+            jit.builder.import_signature(sig)
+        };
+        let callee = jit.builder.ins().iconst(I64, write_sp as usize as i64);
+        let call = jit
+            .builder
+            .ins()
+            .call_indirect(sigref, callee, &[jit.machine_ptr, value]);
+        jit.builder.inst_results(call);
+    }
+}
+
+macro_rules! impl_sp_elx {
+    ($(($name:ident, $el:expr, $field:ident)),*$(,)?) => {
+        $(
+            pub struct $name;
+            impl SystemRegister for $name {
+                fn generate_read(jit: &mut BlockTranslator<'_>) -> Value {
+                    extern "C" fn read_sp_elx(machine: &Armv8AMachine, sp: u64) -> u64 {
+                        // If spsel == current and el == current_el we need to return SP value
+                        let pstate = machine.cpu_state.PSTATE();
+                        match pstate.SP() {
+                            crate::cpu_state::SpSel::Current if pstate.EL() == $el => sp,
+                            crate::cpu_state::SpSel::SpEl0 if $el == ExceptionLevel::EL0 => sp,
+                            _ => machine.cpu_state.registers.$field,
+                        }
+                    }
+                    let sigref = {
+                        let mut sig = jit.module.make_signature();
+                        sig.params.push(AbiParam::new(jit.pointer_type));
+                        sig.params.push(AbiParam::new(I64));
+                        sig.returns.push(AbiParam::new(I64));
+                        jit.builder.import_signature(sig)
+                    };
+                    let callee = jit.builder.ins().iconst(I64, read_sp_elx as usize as i64);
+                    let sp_var = jit.registers[&bad64::Reg::SP];
+                    let sp_val = jit.builder.use_var(sp_var);
+                    let call = jit
+                        .builder
+                        .ins()
+                        .call_indirect(sigref, callee, &[jit.machine_ptr, sp_val]);
+                    jit.builder.inst_results(call)[0]
+                }
+
+                fn generate_write(jit: &mut BlockTranslator<'_>, value: Value) {
+                    extern "C" fn write_sp_elx(machine: &mut Armv8AMachine, value: u64) -> bool {
+                        // If spsel == current and el == current_el we need to update the SP value
+                        machine.cpu_state.registers.$field = value;
+                        let pstate = machine.cpu_state.PSTATE();
+                        matches!(pstate.SP(), crate::cpu_state::SpSel::Current if pstate.EL() == $el)
+                            || matches!(pstate.SP(), crate::cpu_state::SpSel::SpEl0 if $el == ExceptionLevel::EL0)
+                    }
+                    let sigref = {
+                        let mut sig = jit.module.make_signature();
+                        sig.params.push(AbiParam::new(jit.pointer_type));
+                        sig.params.push(AbiParam::new(I64));
+                        sig.returns.push(AbiParam::new(I8));
+                        jit.builder.import_signature(sig)
+                    };
+                    let callee = jit.builder.ins().iconst(I64, write_sp_elx as usize as i64);
+                    let call = jit
+                        .builder
+                        .ins()
+                        .call_indirect(sigref, callee, &[jit.machine_ptr, value]);
+                    let should_update_sp = jit.builder.inst_results(call)[0];
+                    let phi_block = jit.builder.create_block();
+                    jit.builder.append_block_param(phi_block, I64);
+                    let sp_var = jit.registers[&bad64::Reg::SP];
+                    let sp_val = jit.builder.use_var(sp_var);
+                    jit.builder
+                        .ins()
+                        .brif(should_update_sp, phi_block, &[BlockArg::from(value)], phi_block, &[BlockArg::from(sp_val)]);
+                    jit.builder.switch_to_block(phi_block);
+                    jit.builder.seal_block(phi_block);
+                    let phi = jit.builder.block_params(phi_block)[0];
+                    jit.builder.def_var(sp_var, phi);
+                }
+            }
+        )*
+    };
+}
+
+impl_sp_elx! {
+    (SP_EL0, ExceptionLevel::EL0, sp_el0),
+    (SP_EL1, ExceptionLevel::EL1, sp_el1),
+    (SP_EL2, ExceptionLevel::EL2, sp_el2),
+    (SP_EL3, ExceptionLevel::EL3, sp_el3),
+}
+
 pub struct NZCV;
 
 impl SystemRegister for NZCV {
@@ -413,7 +554,54 @@ impl SystemRegister for SPSel {
         pstate_field!(read jit, mask = 0b1)
     }
 
-    fn generate_write(_: &mut BlockTranslator<'_>, _: Value) {}
+    fn generate_write(jit: &mut BlockTranslator<'_>, value: Value) {
+        let prev_value = pstate_field!(read jit, mask = 0b1);
+        let not_equal = jit.builder.ins().icmp(IntCC::NotEqual, value, prev_value);
+        let not_equal_block = jit.builder.create_block();
+        let merge_block = jit.builder.create_block();
+        jit.builder
+            .ins()
+            .brif(not_equal, not_equal_block, &[], merge_block, &[]);
+        jit.builder.switch_to_block(not_equal_block);
+        jit.builder.seal_block(not_equal_block);
+
+        extern "C" fn update_sp(machine: &mut Armv8AMachine, prev_value: u64, sp: u64) -> u64 {
+            if prev_value == 0 {
+                // prev_value == SpSel::SpEl0
+                machine.cpu_state.registers.sp_el0 = sp;
+                machine.cpu_state.sp_elx()
+            } else {
+                // prev_value == SpSel::Current
+                debug_assert_eq!(prev_value, 1);
+                machine.cpu_state.set_sp_elx(sp);
+                machine.cpu_state.registers.sp_el0
+            }
+        }
+        let sigref = {
+            let mut sig = jit.module.make_signature();
+            sig.params.push(AbiParam::new(jit.pointer_type));
+            sig.params.push(AbiParam::new(I64));
+            sig.params.push(AbiParam::new(I64));
+            sig.returns.push(AbiParam::new(I64));
+            jit.builder.import_signature(sig)
+        };
+        let callee = jit.builder.ins().iconst(I64, update_sp as usize as i64);
+        let sp_var = jit.registers[&bad64::Reg::SP];
+        let sp_val = jit.builder.use_var(sp_var);
+        let new_sp = jit.indirect_call(
+            jit.address,
+            sigref,
+            callee,
+            &[jit.machine_ptr, prev_value, sp_val],
+        )[0];
+        jit.builder.def_var(sp_var, new_sp);
+
+        jit.builder.ins().jump(merge_block, &[]);
+
+        jit.builder.switch_to_block(merge_block);
+        jit.builder.seal_block(merge_block);
+        pstate_field!(write jit, value, mask = 0b1)
+    }
 }
 
 pub struct RNDRRS;

@@ -4623,6 +4623,19 @@ impl BlockTranslator<'_> {
 
         use crate::cpu_state::RegisterFile;
 
+        {
+            let var = if declare {
+                assert!(!self.registers.contains_key(&Reg::SP));
+                let var = self.builder.declare_var(I64);
+                self.registers.insert(Reg::SP, var);
+                var
+            } else {
+                self.registers[&Reg::SP]
+            };
+            let value = sysregs::SP::generate_read(self);
+            self.builder.def_var(var, value);
+        }
+
         macro_rules! reg_field {
             ($($field:ident => $bad_reg:expr),*$(,)?) => {{
                 $(
@@ -4658,10 +4671,6 @@ impl BlockTranslator<'_> {
             }};
         }
         reg_field! { sys
-            sp_el0 => SysReg::SP_EL0,
-            sp_el1 => SysReg::SP_EL1,
-            sp_el2 => SysReg::SP_EL2,
-            sp_el3 => SysReg::SP_EL3,
             spsr_el3 =>  SysReg::SPSR_EL3,
             spsr_el1 => SysReg::SPSR_EL1,
         }
@@ -4697,7 +4706,6 @@ impl BlockTranslator<'_> {
             x28 => Reg::X28,
             x29 => Reg::X29,
             x30 => Reg::X30,
-            sp => Reg::SP,
         }
         {
             let zero = self.builder.ins().iconst(I64, 0);
@@ -4743,6 +4751,12 @@ impl BlockTranslator<'_> {
 
         use crate::cpu_state::RegisterFile;
 
+        {
+            let var = self.registers[&Reg::SP];
+            let var_value = self.builder.use_var(var);
+            sysregs::SP::generate_write(self, var_value);
+        }
+
         macro_rules! reg_field {
             ($($field:ident => $bad_reg:expr),*$(,)?) => {{
                 $(
@@ -4768,10 +4782,6 @@ impl BlockTranslator<'_> {
 
         if self.write_to_sysreg {
             reg_field! { sys
-                sp_el0 => SysReg::SP_EL0,
-                sp_el1 => SysReg::SP_EL1,
-                sp_el2 => SysReg::SP_EL2,
-                sp_el3 => SysReg::SP_EL3,
                 spsr_el3 =>  SysReg::SPSR_EL3,
                 spsr_el1 => SysReg::SPSR_EL1,
             };
@@ -4808,7 +4818,6 @@ impl BlockTranslator<'_> {
             x28 => Reg::X28,
             x29 => Reg::X29,
             x30 => Reg::X30,
-            sp => Reg::SP,
         }
         if self.write_to_simd {
             let vector_addr = self.builder.ins().iadd_imm(

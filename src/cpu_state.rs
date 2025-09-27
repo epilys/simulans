@@ -55,8 +55,6 @@ pub struct RegisterFile {
     pub x29: u64,
     // Link Register can be referred to as LR
     pub x30: u64,
-    /// Selected `SP` based on current Exception Level and PSTATE's [`SpSel`].
-    pub sp: u64,
     pub sp_el0: u64,
     pub sp_el1: u64,
     pub sp_el2: u64,
@@ -101,7 +99,6 @@ impl Default for RegisterFile {
             x28: 0,
             x29: 0,
             x30: 0,
-            sp: 0,
             sp_el0: 0,
             sp_el1: 0,
             sp_el2: 0,

@@ -97,7 +97,7 @@ mod helpers {
                     $(f.field(stringify!($reg), &format_args!("0x{:x}", self.0.$reg));)*
                 }};
             }
-            print_reg! {x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30, sp, pstate};
+            print_reg! {x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30, sp_el0, sp_el1, sp_el2, pstate};
             let pstate: crate::cpu_state::PSTATE = self.0.pstate.into();
             f.field("PSTATE", &pstate);
             f.finish()
