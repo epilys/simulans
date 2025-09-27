@@ -18,7 +18,7 @@ use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
 use crate::{
-    cpu_state::{ExecutionState, ExitRequest, ExitRequestID, SysReg, SysRegEncoding},
+    cpu_state::{ExitRequest, ExitRequestID, SysReg, SysRegEncoding},
     machine::{Armv8AMachine, TranslationBlock, TranslationBlocks},
     memory::{mmu::ResolvedAddress, Address, Width},
     tracing,
@@ -31,6 +31,8 @@ mod sysregs;
 use memory::MemOpsTable;
 use sysregs::SystemRegister;
 
+const TRUSTED_MEMFLAGS: MemFlags =
+    MemFlags::trusted().with_endianness(codegen::ir::Endianness::Little);
 const MEMFLAG_LITTLE_ENDIAN: MemFlags = MemFlags::new().with_endianness(Endianness::Little);
 
 enum BlockExit {
@@ -335,9 +337,6 @@ impl<'j> JitContext<'j> {
         // predecessors.
         builder.seal_block(entry_block);
 
-        let mut registers = IndexMap::new();
-        let mut sys_registers = IndexMap::new();
-
         let machine_ptr = builder.ins().iconst(
             self.module.target_config().pointer_type(),
             self.machine_addr as i64,
@@ -348,14 +347,6 @@ impl<'j> JitContext<'j> {
         );
 
         // Declare variables for each register.
-        // Emit code to load register values into variables.
-        ExecutionState::load_cpu_state(
-            machine_ptr,
-            true,
-            &mut builder,
-            &mut registers,
-            &mut sys_registers,
-        );
         let address_lookup_sigref = {
             let mut sig = self.module.make_signature();
             // machine: &mut Armv8AMachine,
@@ -385,10 +376,12 @@ impl<'j> JitContext<'j> {
             address_lookup_sigref,
             builder,
             module: &self.module,
-            registers,
-            sys_registers,
+            registers: IndexMap::new(),
+            sys_registers: IndexMap::new(),
             loopback_blocks: IndexMap::default(),
         };
+        // Emit code to load register values into variables.
+        trans.load_cpu_state(true);
         if !self.single_step {
             for ins in bad64::disasm(code_area, program_counter) {
                 let Ok(ins) = ins else {
@@ -1169,7 +1162,7 @@ impl BlockTranslator<'_> {
         let pc_value =
             pc_value.unwrap_or_else(|| self.builder.ins().iconst(I64, self.address as i64));
         self.builder.ins().store(
-            MemFlags::trusted(),
+            TRUSTED_MEMFLAGS,
             pc_value,
             self.machine_ptr,
             std::mem::offset_of!(Armv8AMachine, pc) as i32,
@@ -1315,7 +1308,7 @@ impl BlockTranslator<'_> {
                 let value = self
                     .builder
                     .ins()
-                    .load(I32, MemFlags::trusted(), table_ptr, 0);
+                    .load(I32, TRUSTED_MEMFLAGS, table_ptr, 0);
                 // ((acc >> 8) ^ arithmetic::CRC32_TABLE[((acc & 0xff) ^ byte as u32) as usize])
                 let acc = self.builder.ins().ushr_imm(acc, 8);
                 self.builder.ins().bxor(acc, value)
@@ -3739,7 +3732,7 @@ impl BlockTranslator<'_> {
             Op::SEV | Op::SEVL => {
                 let true_val = self.builder.ins().iconst(I8, i64::from(true));
                 self.builder.ins().store(
-                    MemFlags::trusted(),
+                    TRUSTED_MEMFLAGS,
                     true_val,
                     self.machine_ptr,
                     std::mem::offset_of!(Armv8AMachine, cpu_state.event_register) as i32,
@@ -4466,7 +4459,7 @@ impl BlockTranslator<'_> {
                 // [ref:FIXME]
                 let false_val = self.builder.ins().iconst(I8, i64::from(false));
                 self.builder.ins().store(
-                    MemFlags::trusted(),
+                    TRUSTED_MEMFLAGS,
                     false_val,
                     self.machine_ptr,
                     std::mem::offset_of!(Armv8AMachine, cpu_state.event_register) as i32,
@@ -4517,7 +4510,7 @@ impl BlockTranslator<'_> {
         {
             let pc = self.builder.ins().iconst(I64, self.address as i64);
             self.builder.ins().store(
-                MemFlags::trusted(),
+                TRUSTED_MEMFLAGS,
                 pc,
                 self.machine_ptr,
                 std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
@@ -4587,71 +4580,26 @@ impl BlockTranslator<'_> {
         callee: codegen::ir::Value,
         args: &[Value],
     ) -> &[Value] {
-        {
-            let Self {
-                write_to_sysreg,
-                write_to_simd,
-                ref mut builder,
-                ref registers,
-                ref sys_registers,
-                machine_ptr,
-                ..
-            } = self;
-            ExecutionState::save_cpu_state(
-                *machine_ptr,
-                builder,
-                registers,
-                sys_registers,
-                *write_to_sysreg,
-                *write_to_simd,
-            );
-        }
+        self.save_cpu_state();
         let pc = self.builder.ins().iconst(I64, pc as i64);
         self.builder.ins().store(
-            MemFlags::trusted(),
+            TRUSTED_MEMFLAGS,
             pc,
             self.machine_ptr,
             std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
         );
         self.store_pc(Some(pc));
         let call = self.builder.ins().call_indirect(sig, callee, args);
-        {
-            // Restore state
-            let Self {
-                ref mut builder,
-                ref mut registers,
-                ref mut sys_registers,
-                machine_ptr,
-                ..
-            } = self;
-            ExecutionState::load_cpu_state(*machine_ptr, false, builder, registers, sys_registers);
-        }
+        // Restore state
+        self.load_cpu_state(false);
         self.builder.inst_results(call)
     }
 
     fn direct_exit(&mut self, block_exit: BlockExit) {
-        {
-            let Self {
-                write_to_sysreg,
-                write_to_simd,
-                ref mut builder,
-                ref registers,
-                ref sys_registers,
-                machine_ptr,
-                ..
-            } = self;
-            ExecutionState::save_cpu_state(
-                *machine_ptr,
-                builder,
-                registers,
-                sys_registers,
-                *write_to_sysreg,
-                *write_to_simd,
-            );
-        }
+        self.save_cpu_state();
         let prev_pc = self.builder.ins().iconst(I64, self.address as i64);
         self.builder.ins().store(
-            MemFlags::trusted(),
+            TRUSTED_MEMFLAGS,
             prev_pc,
             self.machine_ptr,
             std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
@@ -4664,5 +4612,220 @@ impl BlockTranslator<'_> {
             .ins()
             .iconst(I64, lookup_block as usize as u64 as i64);
         self.builder.ins().return_(&[translate_func]);
+    }
+
+    /// Generate JIT instructions to assign a variable for each register and set
+    /// it with its value.
+    ///
+    /// Used as a preamble to a translation block.
+    fn load_cpu_state(&mut self, declare: bool) {
+        use bad64::Reg;
+
+        use crate::cpu_state::RegisterFile;
+
+        macro_rules! reg_field {
+            ($($field:ident => $bad_reg:expr),*$(,)?) => {{
+                $(
+                    let addr = self.builder.ins().iadd_imm(self.machine_ptr, std::mem::offset_of!(Armv8AMachine, cpu_state.registers) as i64);
+                    let offset = core::mem::offset_of!(RegisterFile, $field);
+                    let value = self.builder.ins().load(I64, TRUSTED_MEMFLAGS, addr, i32::try_from(offset).unwrap());
+                    let var = if declare {
+                        assert!(!self.registers.contains_key(&$bad_reg));
+                        let var = self.builder.declare_var(I64);
+                        self.registers.insert($bad_reg, var);
+                        var
+                    } else {
+                        self.registers[&$bad_reg]
+                    };
+                    self.builder.def_var(var, value);
+                )*
+            }};
+            (sys $($field:ident => $bad_sys_reg:expr),*$(,)?) => {{
+                $(
+                    let addr = self.builder.ins().iadd_imm(self.machine_ptr, std::mem::offset_of!(Armv8AMachine, cpu_state.registers) as i64);
+                    let offset = core::mem::offset_of!(RegisterFile, $field);
+                    let value = self.builder.ins().load(I64, TRUSTED_MEMFLAGS, addr, i32::try_from(offset).unwrap());
+                    let var = if declare {
+                        assert!(!self.sys_registers.contains_key(&$bad_sys_reg));
+                        let var = self.builder.declare_var(I64);
+                        self.sys_registers.insert($bad_sys_reg, var);
+                        var
+                    } else {
+                        self.sys_registers[&$bad_sys_reg]
+                    };
+                    self.builder.def_var(var, value);
+                )*
+            }};
+        }
+        reg_field! { sys
+            sp_el0 => SysReg::SP_EL0,
+            sp_el1 => SysReg::SP_EL1,
+            sp_el2 => SysReg::SP_EL2,
+            sp_el3 => SysReg::SP_EL3,
+            spsr_el3 =>  SysReg::SPSR_EL3,
+            spsr_el1 => SysReg::SPSR_EL1,
+        }
+        reg_field! {
+            x0 => Reg::X0,
+            x1 => Reg::X1,
+            x2 => Reg::X2,
+            x3 => Reg::X3,
+            x4 => Reg::X4,
+            x5 => Reg::X5,
+            x6 => Reg::X6,
+            x7 => Reg::X7,
+            x8 => Reg::X8,
+            x9 => Reg::X9,
+            x10 => Reg::X10,
+            x11 => Reg::X11,
+            x12 => Reg::X12,
+            x13 => Reg::X13,
+            x14 => Reg::X14,
+            x15 => Reg::X15,
+            x16 => Reg::X16,
+            x17 => Reg::X17,
+            x18 => Reg::X18,
+            x19 => Reg::X19,
+            x20 => Reg::X20,
+            x21 => Reg::X21,
+            x22 => Reg::X22,
+            x23 => Reg::X23,
+            x24 => Reg::X24,
+            x25 => Reg::X25,
+            x26 => Reg::X26,
+            x27 => Reg::X27,
+            x28 => Reg::X28,
+            x29 => Reg::X29,
+            x30 => Reg::X30,
+            sp => Reg::SP,
+        }
+        {
+            let zero = self.builder.ins().iconst(I64, 0);
+            let var = if declare {
+                debug_assert!(!self.registers.contains_key(&Reg::XZR));
+                let var = self.builder.declare_var(I64);
+                self.registers.insert(Reg::XZR, var);
+                var
+            } else {
+                self.registers[&Reg::XZR]
+            };
+            self.builder.def_var(var, zero);
+        }
+        let vector_addr = self.builder.ins().iadd_imm(
+            self.machine_ptr,
+            std::mem::offset_of!(Armv8AMachine, cpu_state.vector_registers) as i64,
+        );
+        for i in 0_u32..=31 {
+            let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
+            let offset = i * std::mem::size_of::<u128>() as u32;
+            let offset = i32::try_from(offset).unwrap();
+            let v_value =
+                self.builder
+                    .ins()
+                    .load(I128, TRUSTED_MEMFLAGS, vector_addr, offset as i32);
+            let v_var = if declare {
+                assert!(!self.registers.contains_key(&v_reg));
+                let v_var = self.builder.declare_var(I128);
+                self.registers.insert(v_reg, v_var);
+                v_var
+            } else {
+                self.registers[&v_reg]
+            };
+            self.builder.def_var(v_var, v_value);
+        }
+    }
+
+    /// Generate JIT instructions to store register values back to `self`.
+    ///
+    /// Used as an epilogue of a translation block.
+    pub fn save_cpu_state(&mut self) {
+        use bad64::Reg;
+
+        use crate::cpu_state::RegisterFile;
+
+        macro_rules! reg_field {
+            ($($field:ident => $bad_reg:expr),*$(,)?) => {{
+                $(
+                    let addr = self.builder.ins().iadd_imm(self.machine_ptr, std::mem::offset_of!(Armv8AMachine, cpu_state.registers) as i64);
+                    let offset = core::mem::offset_of!(RegisterFile, $field);
+                    assert!(self.registers.contains_key(&$bad_reg));
+                    let var = &self.registers[&$bad_reg];
+                    let var_value = self.builder.use_var(*var);
+                    self.builder.ins().store(TRUSTED_MEMFLAGS, var_value, addr, i32::try_from(offset).unwrap());
+                )*
+            }};
+            (sys $($field:ident$($conversion:expr)? => $bad_sys_reg:expr),*$(,)?) => {{
+                $(
+                    let addr = self.builder.ins().iadd_imm(self.machine_ptr, std::mem::offset_of!(Armv8AMachine, cpu_state.registers) as i64);
+                    let offset = core::mem::offset_of!(RegisterFile, $field);
+                    assert!(self.sys_registers.contains_key(&$bad_sys_reg));
+                    let var = &self.sys_registers[&$bad_sys_reg];
+                    let var_value = self.builder.use_var(*var);
+                    self.builder.ins().store(TRUSTED_MEMFLAGS, var_value, addr, i32::try_from(offset).unwrap());
+                )*
+            }};
+        }
+
+        if self.write_to_sysreg {
+            reg_field! { sys
+                sp_el0 => SysReg::SP_EL0,
+                sp_el1 => SysReg::SP_EL1,
+                sp_el2 => SysReg::SP_EL2,
+                sp_el3 => SysReg::SP_EL3,
+                spsr_el3 =>  SysReg::SPSR_EL3,
+                spsr_el1 => SysReg::SPSR_EL1,
+            };
+        }
+        reg_field! {
+            x0 => Reg::X0,
+            x1 => Reg::X1,
+            x2 => Reg::X2,
+            x3 => Reg::X3,
+            x4 => Reg::X4,
+            x5 => Reg::X5,
+            x6 => Reg::X6,
+            x7 => Reg::X7,
+            x8 => Reg::X8,
+            x9 => Reg::X9,
+            x10 => Reg::X10,
+            x11 => Reg::X11,
+            x12 => Reg::X12,
+            x13 => Reg::X13,
+            x14 => Reg::X14,
+            x15 => Reg::X15,
+            x16 => Reg::X16,
+            x17 => Reg::X17,
+            x18 => Reg::X18,
+            x19 => Reg::X19,
+            x20 => Reg::X20,
+            x21 => Reg::X21,
+            x22 => Reg::X22,
+            x23 => Reg::X23,
+            x24 => Reg::X24,
+            x25 => Reg::X25,
+            x26 => Reg::X26,
+            x27 => Reg::X27,
+            x28 => Reg::X28,
+            x29 => Reg::X29,
+            x30 => Reg::X30,
+            sp => Reg::SP,
+        }
+        if self.write_to_simd {
+            let vector_addr = self.builder.ins().iadd_imm(
+                self.machine_ptr,
+                std::mem::offset_of!(Armv8AMachine, cpu_state.vector_registers) as i64,
+            );
+            for i in 0_u32..=31 {
+                let offset = i * std::mem::size_of::<u128>() as u32;
+                let offset = i32::try_from(offset).unwrap();
+                let v_reg = bad64::Reg::from_u32(bad64::Reg::V0 as u32 + i).unwrap();
+                assert!(self.registers.contains_key(&v_reg));
+                let var = &self.registers[&v_reg];
+                let value = self.builder.use_var(*var);
+                self.builder
+                    .ins()
+                    .store(TRUSTED_MEMFLAGS, value, vector_addr, offset);
+            }
+        }
     }
 }
