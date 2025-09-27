@@ -162,6 +162,18 @@ fn translation_size(d128: bool, tgx: Granule, level: u8) -> u64 {
     u64::from(granulebits) + blockbits
 }
 
+// `AArch64.S1MinTxSZ`
+fn s1_min_tx_sz(_regime: Regime, _d128: bool, _ds: bool, _tgx: Granule) -> u8 {
+    16
+}
+
+// `AArch64.MaxTxSZ`
+// Retrieve the maximum value of TxSZ indicating minimum input address size for
+// both stages of translation
+fn max_tx_sz(_tgx: Granule) -> u8 {
+    39
+}
+
 impl IAParameters {
     fn new(machine: &Armv8AMachine, input_address: &Address) -> Self {
         let regime = translation_regime(machine);
@@ -178,10 +190,18 @@ impl IAParameters {
             (VARange::Upper, Regime::EL10) => machine.cpu_state.mmu_registers.ttbr1_el1,
         });
 
-        let (granule, tsz, ds): (_, u8, _) = match va_range {
+        let (granule, mut tsz, ds): (_, u8, _) = match va_range {
             VARange::Upper => (tcr.ttbr1_granule(), tcr.T1SZ().into(), tcr.DS().into()),
             VARange::Lower => (tcr.ttbr0_granule(), tcr.T0SZ().into(), tcr.DS().into()),
         };
+
+        let s1mintxsz = s1_min_tx_sz(regime, false, ds, granule);
+        let s1maxtxsz = max_tx_sz(granule);
+        if tsz < s1mintxsz {
+            tsz = s1mintxsz;
+        } else if tsz > s1maxtxsz {
+            tsz = s1maxtxsz;
+        }
 
         // Determine initial lookup level
         // `AArch64.S1StartLevel`
