@@ -351,6 +351,7 @@ impl<'j> JitContext<'j> {
         // Emit code to load register values into variables.
         ExecutionState::load_cpu_state(
             machine_ptr,
+            true,
             &mut builder,
             &mut registers,
             &mut sys_registers,
@@ -4614,6 +4615,17 @@ impl BlockTranslator<'_> {
         );
         self.store_pc(Some(pc));
         let call = self.builder.ins().call_indirect(sig, callee, args);
+        {
+            // Restore state
+            let Self {
+                ref mut builder,
+                ref mut registers,
+                ref mut sys_registers,
+                machine_ptr,
+                ..
+            } = self;
+            ExecutionState::load_cpu_state(*machine_ptr, false, builder, registers, sys_registers);
+        }
         self.builder.inst_results(call)
     }
 
