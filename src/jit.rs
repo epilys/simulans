@@ -536,7 +536,7 @@ struct BlockTranslator<'a> {
     loopback_blocks: IndexMap<u64, Block>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 struct TypedRegisterView {
     var: Variable,
     width: Width,
@@ -702,22 +702,22 @@ impl BlockTranslator<'_> {
                 match imm {
                     Imm::Unsigned(imm) => {
                         let value = self.builder.ins().iadd_imm(reg_val, *imm as i64);
-                        let reg_var = self.reg_to_var(reg, None, true);
-                        self.builder.def_var(reg_var.var, value);
+                        let reg_view = self.reg_to_var(reg, None, true);
+                        self.def_view(&reg_view, value);
                         self.reg_to_value(reg, None)
                     }
                     Imm::Signed(imm) if *imm < 0 => {
                         let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
                         let (value, _overflow_flag) =
                             self.builder.ins().usub_overflow(reg_val, imm_value);
-                        let reg_var = self.reg_to_var(reg, None, true);
-                        self.builder.def_var(reg_var.var, value);
+                        let reg_view = self.reg_to_var(reg, None, true);
+                        self.def_view(&reg_view, value);
                         self.reg_to_value(reg, None)
                     }
                     Imm::Signed(imm) => {
                         let value = self.builder.ins().iadd_imm(reg_val, *imm);
-                        let reg_var = self.reg_to_var(reg, None, true);
-                        self.builder.def_var(reg_var.var, value);
+                        let reg_view = self.reg_to_var(reg, None, true);
+                        self.def_view(&reg_view, value);
                         self.reg_to_value(reg, None)
                     }
                 }
@@ -727,20 +727,20 @@ impl BlockTranslator<'_> {
                 match imm {
                     Imm::Unsigned(imm) => {
                         let post_value = self.builder.ins().iadd_imm(reg_val, *imm as i64);
-                        let reg_var = self.reg_to_var(reg, None, true);
-                        self.builder.def_var(reg_var.var, post_value);
+                        let reg_view = self.reg_to_var(reg, None, true);
+                        self.def_view(&reg_view, post_value);
                     }
                     Imm::Signed(imm) if *imm < 0 => {
                         let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
                         let (post_value, _overflow_flag) =
                             self.builder.ins().usub_overflow(reg_val, imm_value);
-                        let reg_var = self.reg_to_var(reg, None, true);
-                        self.builder.def_var(reg_var.var, post_value);
+                        let reg_view = self.reg_to_var(reg, None, true);
+                        self.def_view(&reg_view, post_value);
                     }
                     Imm::Signed(imm) => {
                         let post_value = self.builder.ins().iadd_imm(reg_val, *imm);
-                        let reg_var = self.reg_to_var(reg, None, true);
-                        self.builder.def_var(reg_var.var, post_value);
+                        let reg_view = self.reg_to_var(reg, None, true);
+                        self.def_view(&reg_view, post_value);
                     }
                 }
                 reg_val
@@ -1189,59 +1189,47 @@ impl BlockTranslator<'_> {
         macro_rules! write_to_register {
             ($target:expr, $val:expr$(,)?) => {{
                 let val: TypedValue = $val;
-                let TypedRegisterView {
-                    var,
-                    width,
-                    shift,
-                    extend_to,
-                    element: _,
-                } = $target;
+                let target: TypedRegisterView = $target;
 
                 let mut value = val.value;
 
                 let mut current_width = val.width;
 
-                if let Some(extend_to) = extend_to {
+                if let Some(extend_to) = target.extend_to {
                     if extend_to > current_width {
                         value = self.builder.ins().uextend(extend_to.into(), value);
                         current_width = extend_to;
                     }
                 }
-                if let Some(shift) = shift {
+                if let Some(shift) = target.shift {
                     value = self.builder.ins().ishl_imm(value, shift as i64);
                 }
-                if width > current_width {
-                    value = self.builder.ins().uextend(width.into(), value);
+                if target.width > current_width {
+                    value = self.builder.ins().uextend(target.width.into(), value);
                 }
-                self.builder.def_var(var, value);
+                self.def_view(&target, value);
             }};
             (signed $target:expr, $val:expr$(,)?) => {{
                 let val: TypedValue = $val;
-                let TypedRegisterView {
-                    var,
-                    width,
-                    extend_to,
-                    shift,
-                    element: _,
-                } = $target;
+                let target: TypedRegisterView = $target;
 
                 let mut value = val.value;
 
                 let mut current_width = val.width;
 
-                if let Some(extend_to) = extend_to {
+                if let Some(extend_to) = target.extend_to {
                     if extend_to > current_width {
                         value = self.builder.ins().sextend(extend_to.into(), value);
                         current_width = extend_to;
                     }
                 }
-                if let Some(shift) = shift {
+                if let Some(shift) = target.shift {
                     value = self.builder.ins().ishl_imm(value, shift as i64);
                 }
-                if width > current_width {
-                    value = self.builder.ins().sextend(width.into(), value);
+                if target.width > current_width {
+                    value = self.builder.ins().sextend(target.width.into(), value);
                 }
-                self.builder.def_var(var, value);
+                self.def_view(&target, value);
             }};
         }
         // Common implementations
@@ -2246,7 +2234,7 @@ impl BlockTranslator<'_> {
             Op::BL => {
                 let link_pc = self.builder.ins().iconst(I64, (self.address + 4) as i64);
                 let link_register = self.reg_to_var(&bad64::Reg::X30, None, true);
-                self.builder.def_var(link_register.var, link_pc);
+                self.def_view(&link_register, link_pc);
                 let label = match instruction.operands()[0] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     other => unexpected_operand!(other),
@@ -2257,7 +2245,7 @@ impl BlockTranslator<'_> {
             Op::BLR => {
                 let link_pc = self.builder.ins().iconst(I64, (self.address + 4) as i64);
                 let link_register = self.reg_to_var(&bad64::Reg::X30, None, true);
-                self.builder.def_var(link_register.var, link_pc);
+                self.def_view(&link_register, link_pc);
                 let next_pc = self.translate_operand(&instruction.operands()[0]);
                 return self.unconditional_jump_epilogue(next_pc);
             }
@@ -4836,5 +4824,10 @@ impl BlockTranslator<'_> {
                     .store(TRUSTED_MEMFLAGS, value, vector_addr, offset);
             }
         }
+    }
+
+    #[inline]
+    fn def_view(&mut self, view: &TypedRegisterView, value: Value) {
+        self.builder.def_var(view.var, value);
     }
 }
