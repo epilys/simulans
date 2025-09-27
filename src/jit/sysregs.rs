@@ -3,11 +3,11 @@
 
 #![allow(non_camel_case_types, clippy::upper_case_acronyms)]
 
-use codegen::ir::types::I64;
+use codegen::ir::types::{I64, I8};
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use crate::{cpu_state::SysReg, jit::BlockTranslator, machine::Armv8AMachine};
+use crate::{cpu_state::SysReg, devices::timer, jit::BlockTranslator, machine::Armv8AMachine};
 
 macro_rules! register_field {
     (read $jit:ident, $($field:tt)*) => {{
@@ -77,10 +77,14 @@ impl BlockTranslator<'_> {
             SysReg::CPACR_EL1 => register_field!(read self, control_registers.cpacr_el1),
             SysReg::HCR_EL2 => register_field!(read self, control_registers.hcr_el2),
             SysReg::SCR_EL3 => register_field!(read self, control_registers.scr_el3),
-            SysReg::CNTFRQ_EL0 => register_field!(read self, timer_registers.cntfrq_el0),
+            SysReg::CNTFRQ_EL0 => self.timer_read(timer::RegisterID::CNTFRQ_EL0),
             SysReg::CNTKCTL_EL1 => register_field!(read self, timer_registers.cntkctl_el1),
-            SysReg::CNTV_CTL_EL0 => register_field!(read self, timer_registers.cntv_ctl_el0),
-            SysReg::CNTV_CVAL_EL0 => register_field!(read self, timer_registers.cntv_cval_el0),
+            SysReg::CNTV_CTL_EL0 => self.timer_read(timer::RegisterID::CNTV_CTL_EL0),
+            SysReg::CNTV_CVAL_EL0 => self.timer_read(timer::RegisterID::CNTV_CVAL_EL0),
+            SysReg::CNTP_CTL_EL0 => self.timer_read(timer::RegisterID::CNTP_CTL_EL0),
+            SysReg::CNTP_CVAL_EL0 => self.timer_read(timer::RegisterID::CNTP_CVAL_EL0),
+            SysReg::CNTP_TVAL_EL0 => self.timer_read(timer::RegisterID::CNTP_TVAL_EL0),
+            SysReg::CNTVCT_EL0 => self.timer_read(timer::RegisterID::CNTVCT_EL0),
             SysReg::OSLAR_EL1 | SysReg::OSDLR_EL1 => {
                 // Debugger locks, ignore
                 self.builder.ins().iconst(I64, 0)
@@ -164,6 +168,48 @@ impl BlockTranslator<'_> {
         }
     }
 
+    fn timer_read(&mut self, reg: timer::RegisterID) -> Value {
+        let sigref = {
+            let mut sig = self.module.make_signature();
+            sig.params
+                .push(AbiParam::new(self.module.target_config().pointer_type()));
+            sig.params.push(AbiParam::new(I8));
+            sig.returns.push(AbiParam::new(I64));
+            self.builder.import_signature(sig)
+        };
+        let reg = self.builder.ins().iconst(I8, i64::from(reg as u8));
+        let callee = self
+            .builder
+            .ins()
+            .iconst(I64, timer::timer_register_read as usize as i64);
+        let call = self
+            .builder
+            .ins()
+            .call_indirect(sigref, callee, &[self.machine_ptr, reg]);
+        self.builder.inst_results(call)[0]
+    }
+
+    fn timer_write(&mut self, reg: timer::RegisterID, value: Value) {
+        let sigref = {
+            let mut sig = self.module.make_signature();
+            sig.params
+                .push(AbiParam::new(self.module.target_config().pointer_type()));
+            sig.params.push(AbiParam::new(I8));
+            sig.params.push(AbiParam::new(I64));
+            self.builder.import_signature(sig)
+        };
+        let reg = self.builder.ins().iconst(I8, i64::from(reg as u8));
+        let callee = self
+            .builder
+            .ins()
+            .iconst(I64, timer::timer_register_write as usize as i64);
+        let call =
+            self.builder
+                .ins()
+                .call_indirect(sigref, callee, &[self.machine_ptr, reg, value]);
+        self.builder.inst_results(call);
+    }
+
     pub fn write_sysreg(&mut self, reg: &SysReg, value: Value) {
         self.write_to_sysreg = true;
         match reg {
@@ -210,12 +256,11 @@ impl BlockTranslator<'_> {
             SysReg::CNTKCTL_EL1 => {
                 register_field!(write self, value, timer_registers.cntkctl_el1)
             }
-            SysReg::CNTV_CTL_EL0 => {
-                register_field!(write self, value, timer_registers.cntv_ctl_el0)
-            }
-            SysReg::CNTV_CVAL_EL0 => {
-                register_field!(write self, value, timer_registers.cntv_cval_el0)
-            }
+            SysReg::CNTV_CTL_EL0 => self.timer_write(timer::RegisterID::CNTV_CTL_EL0, value),
+            SysReg::CNTV_CVAL_EL0 => self.timer_write(timer::RegisterID::CNTV_CVAL_EL0, value),
+            SysReg::CNTP_CTL_EL0 => self.timer_write(timer::RegisterID::CNTP_CTL_EL0, value),
+            SysReg::CNTP_CVAL_EL0 => self.timer_write(timer::RegisterID::CNTP_CVAL_EL0, value),
+            SysReg::CNTP_TVAL_EL0 => self.timer_write(timer::RegisterID::CNTP_TVAL_EL0, value),
             SysReg::APDAKEYHI_EL1
             | SysReg::APDAKEYLO_EL1
             | SysReg::APDBKEYHI_EL1

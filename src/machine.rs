@@ -7,6 +7,7 @@ use std::{collections::BTreeSet, num::NonZero, pin::Pin};
 
 use crate::{
     cpu_state::*,
+    devices::timer::GenericTimer,
     jit::{lookup_block, Entry},
     memory::*,
     tracing,
@@ -45,11 +46,14 @@ pub struct Armv8AMachine {
     pub hw_breakpoints: BTreeSet<Address>,
     /// Interrupt generators and subscribers/handlers
     pub interrupts: Interrupts,
+    /// Generic timer
+    pub timer: GenericTimer,
 }
 
 impl Armv8AMachine {
     /// Returns a new machine with given memory map.
     pub fn new(memory: MemoryMap, interrupts: Interrupts) -> Pin<Box<Self>> {
+        let timer = GenericTimer::new(&interrupts);
         Box::pin(Self {
             pc: 0,
             prev_pc: 0,
@@ -59,15 +63,44 @@ impl Armv8AMachine {
             in_breakpoint: false,
             hw_breakpoints: BTreeSet::new(),
             interrupts,
+            timer,
         })
     }
 
     /// Returns `true` if machine is powered off.
-    pub fn is_powered_off(&self) -> bool {
-        matches!(
-            *self.cpu_state.exit_request.lock().unwrap(),
-            Some(ExitRequest::Poweroff)
-        )
+    pub fn is_powered_off(&mut self) -> bool {
+        let mut exit_request = self.cpu_state.exit_request.lock().unwrap();
+        match *exit_request {
+            None => false,
+            Some(ExitRequest::Poweroff) => true,
+            Some(ExitRequest::WaitForEvent | ExitRequest::Yield) => {
+                let (f_mask, i_mask) = {
+                    let daif = self.cpu_state.PSTATE().DAIF();
+                    (daif.F(), daif.I())
+                };
+                self.interrupts.rcv(f_mask && i_mask);
+                exit_request.take();
+                drop(exit_request);
+                if !f_mask && self.interrupts.fiq() {
+                    let preferred_exception_return = Address(self.pc);
+                    crate::exceptions::aarch64_take_physical_fiq_exception(
+                        self,
+                        preferred_exception_return,
+                    );
+                } else if !i_mask && self.interrupts.irq() {
+                    let preferred_exception_return = Address(self.pc);
+                    crate::exceptions::aarch64_take_physical_irq_exception(
+                        self,
+                        preferred_exception_return,
+                    );
+                } else {
+                    let sleep_dur = std::time::Duration::from_millis(100);
+                    std::thread::sleep(sleep_dur);
+                }
+                false
+            }
+            Some(_) => false,
+        }
     }
 
     /// Generates a flattened device tree
