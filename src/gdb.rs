@@ -253,6 +253,7 @@ impl GdbStubRunner {
             start_address,
             start_address,
             false,
+            false,
             &mut resolved_address,
         ) {
             tracing::error!(
@@ -300,6 +301,7 @@ impl GdbStubRunner {
             &self.machine,
             start_address,
             start_address,
+            false,
             false,
             &mut resolved_address,
         ) {

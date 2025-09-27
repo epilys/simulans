@@ -142,6 +142,7 @@ fn translate_code_address(
         Address(program_counter),
         Address(program_counter),
         true,
+        false,
         &mut resolved_pc_address,
     ) {
         return Err(format!(
@@ -357,6 +358,8 @@ impl<'j> JitContext<'j> {
             // preferred_exception_return: Address,
             sig.params.push(AbiParam::new(I64));
             // raise_exception: bool,
+            sig.params.push(AbiParam::new(I8));
+            // unprivileged: bool,
             sig.params.push(AbiParam::new(I8));
             // ret: &mut ResolvedAddress<'_>
             sig.params
@@ -1575,10 +1578,15 @@ impl BlockTranslator<'_> {
             }
             Op::LDRH => {
                 let target = get_destination_register!();
-                let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_16);
-                write_to_register!(target, TypedValue { value, width });
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_16
+                    }
+                );
             }
             Op::LDUR => {
                 let target = get_destination_register!();
@@ -3228,12 +3236,61 @@ impl BlockTranslator<'_> {
             Op::LDSMINL => todo!(),
             Op::LDSMINLB => todo!(),
             Op::LDSMINLH => todo!(),
-            Op::LDTR => todo!(),
-            Op::LDTRB => todo!(),
-            Op::LDTRH => todo!(),
-            Op::LDTRSB => todo!(),
-            Op::LDTRSH => todo!(),
-            Op::LDTRSW => todo!(),
+            Op::LDTR => {
+                let target = get_destination_register!();
+                let width = self.operand_width(&instruction.operands()[0]);
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read_unprivileged(source_address, width);
+                write_to_register!(target, TypedValue { value, width });
+            }
+            Op::LDTRB => {
+                let target = get_destination_register!();
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read_unprivileged(source_address, Width::_8);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_8
+                    },
+                );
+            }
+            Op::LDTRH => {
+                let target = get_destination_register!();
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read_unprivileged(source_address, Width::_16);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_16
+                    }
+                );
+            }
+            Op::LDTRSB => {
+                let target = get_destination_register!();
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read_unprivileged(source_address, Width::_8);
+                write_to_register!(signed target, TypedValue {
+                    value,
+                    width: Width::_8,
+                })
+            }
+            Op::LDTRSH => {
+                let target = get_destination_register!();
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read_unprivileged(source_address, Width::_16);
+                write_to_register!(signed target, TypedValue { value, width: Width::_16 });
+            }
+            Op::LDTRSW => {
+                let target = get_destination_register!();
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                let value = self.generate_read_unprivileged(source_address, Width::_32);
+                write_to_register!(signed target, TypedValue {
+                    value,
+                    width: Width::_32
+                })
+            }
             Op::LDUMAX => todo!(),
             Op::LDUMAXA => todo!(),
             Op::LDUMAXAB => todo!(),
@@ -4036,9 +4093,25 @@ impl BlockTranslator<'_> {
             Op::STSMINL => todo!(),
             Op::STSMINLB => todo!(),
             Op::STSMINLH => todo!(),
-            Op::STTR => todo!(),
-            Op::STTRB => todo!(),
-            Op::STTRH => todo!(),
+            Op::STTR => {
+                let value = self.translate_operand(&instruction.operands()[0]);
+                let target = self.translate_operand(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[0]);
+                self.generate_write_unprivileged(target, value, width);
+            }
+            Op::STTRB => {
+                let value = self.translate_operand(&instruction.operands()[0]);
+                let target = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().ireduce(I8, value);
+                self.generate_write_unprivileged(target, value, Width::_8);
+            }
+            Op::STTRH => {
+                let value = self.translate_operand(&instruction.operands()[0]);
+                // Reduce 32-bit register to least significant halfword.
+                let value = self.builder.ins().ireduce(I16, value);
+                let target = self.translate_operand(&instruction.operands()[1]);
+                self.generate_write_unprivileged(target, value, Width::_16);
+            }
             Op::STUMAX => todo!(),
             Op::STUMAXB => todo!(),
             Op::STUMAXH => todo!(),
