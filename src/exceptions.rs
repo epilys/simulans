@@ -10,6 +10,7 @@ use bilge::prelude::*;
 use crate::{
     cpu_state::{
         ArchMode, DAIFFields, Exception, ExceptionLevel, Mode, SavedProgramStatusRegister, SpSel,
+        PSTATE,
     },
     get_bits,
     memory::Address,
@@ -174,10 +175,14 @@ pub struct AccessDescriptor {
 impl AccessDescriptor {
     /// Create a new [`AccessDescriptor`] with initialised fields
     /// `NewAccDesc`
-    pub fn new(el: ExceptionLevel, acctype: AccessType) -> Self {
+    pub fn new(privileged: bool, pstate: &PSTATE, acctype: AccessType) -> Self {
         Self {
             acctype,
-            el,
+            el: if !privileged {
+                ExceptionLevel::EL0
+            } else {
+                pstate.EL()
+            },
             ss: SecurityState::NonSecure, // TODO SecurityStateAtEL(PSTATE.EL),
             // acqsc: false,
             // acqpc: false,

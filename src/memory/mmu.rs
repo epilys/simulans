@@ -10,7 +10,7 @@ use bilge::prelude::*;
 use crate::{
     cpu_state::{
         ExceptionLevel, ExitRequest, Granule, TranslationControlRegister,
-        TranslationTableBaseRegister,
+        TranslationTableBaseRegister, PSTATE,
     },
     exceptions::{AccessDescriptor, AccessType, Fault, FaultRecord},
     get_bits,
@@ -56,7 +56,7 @@ pub extern "C" fn physical_address_lookup<'machine>(
     let Some(mem_region) = machine.memory.find_region(address) else {
         if raise_exception {
             let accessdesc =
-                AccessDescriptor::new(machine.cpu_state.PSTATE().EL(), AccessType::TTW);
+                AccessDescriptor::new(true, &machine.cpu_state.PSTATE(), AccessType::TTW);
             let mut fault = FaultRecord::no_fault(accessdesc, address);
             fault.statuscode = Fault::Translation;
             *machine.cpu_state.exit_request.lock().unwrap() = Some(ExitRequest::Abort {
@@ -355,6 +355,20 @@ impl PageDescriptor {
     }
 }
 
+/// Returns `true` if an unprivileged access is privileged, and `false`
+/// otherwise.
+// `AArch64.IsUnprivAccessPriv`
+fn is_unpriv_access_priv(pstate: &PSTATE) -> bool {
+    match pstate.EL() {
+        ExceptionLevel::EL0 => false,
+        // when EL1 privileged = EffectiveHCR_EL2_NVx()<1:0> == '11';
+        // when EL2 privileged = !ELIsInHost(EL0);
+        _ => true,
+        // if IsFeatureImplemented(FEAT_UAO) && PSTATE.UAO == '1' then
+        //     privileged = PSTATE.EL != EL0;
+    }
+}
+
 /// `AArch64.TranslateAddress`
 ///
 /// Merged with `AArch64.FullTranslate`.
@@ -363,11 +377,17 @@ pub extern "C" fn translate_address<'machine>(
     input_address: Address,
     preferred_exception_return: Address,
     raise_exception: bool,
+    unprivileged: bool,
     ret: &mut MaybeUninit<ResolvedAddress<'machine>>,
 ) -> bool {
     // [ref:TODO]: rename to S1 translation and add S2 stub
     let pstate = machine.cpu_state.PSTATE();
     let sctlr = machine.cpu_state.sctlr_elx();
+    let privileged = if unprivileged {
+        is_unpriv_access_priv(&pstate)
+    } else {
+        pstate.EL() != ExceptionLevel::EL0
+    };
 
     if sctlr & 0x1 == 0 {
         // stage 1 MMU disabled
@@ -380,6 +400,7 @@ pub extern "C" fn translate_address<'machine>(
         );
     }
 
+    let accessdesc = AccessDescriptor::new(privileged, &pstate, AccessType::TTW);
     let mut params = IAParameters::new(machine, &input_address);
     let page_table_base_address: Address =
         TranslationTableBaseRegister::from(params.ttbr.0).base_address(&params);
@@ -392,11 +413,12 @@ pub extern "C" fn translate_address<'machine>(
             address = ?input_address,
             pc = ?Address(machine.pc),
             EL = ?pstate.EL(),
+            ?unprivileged,
             ?params,
+            ?accessdesc,
             ?page_table_base_address
         );
     }
-    let accessdesc = AccessDescriptor::new(pstate.EL(), AccessType::TTW);
     let mut fault = FaultRecord::no_fault(accessdesc, input_address);
 
     macro_rules! read_table_entry {
@@ -698,6 +720,8 @@ pub extern "C" fn mem_zero(
             Address(vaddress + i),
             preferred_exception_return,
             true,
+            /* unprivileged */
+            false,
             &mut resolved_address,
         ) {
             return false;

@@ -78,8 +78,31 @@ impl BlockTranslator<'_> {
     }
 
     #[inline]
-    /// Generates a JIT write access
+    /// Generates a privileged JIT write access
     pub fn generate_write(&mut self, target_address: Value, value: Value, width: Width) -> Value {
+        self.generate_write_inner(target_address, value, width, false)
+    }
+
+    #[inline]
+    /// Generates an unprivileged JIT write access
+    pub fn generate_write_unprivileged(
+        &mut self,
+        target_address: Value,
+        value: Value,
+        width: Width,
+    ) -> Value {
+        self.generate_write_inner(target_address, value, width, true)
+    }
+
+    #[inline]
+    /// Generates a JIT write access
+    fn generate_write_inner(
+        &mut self,
+        target_address: Value,
+        value: Value,
+        width: Width,
+        unprivileged: bool,
+    ) -> Value {
         let address_lookup_func = self.builder.ins().iconst(
             I64,
             crate::memory::mmu::translate_address as usize as u64 as i64,
@@ -87,6 +110,7 @@ impl BlockTranslator<'_> {
         self.store_pc(None);
         let preferred_exception_return = self.builder.ins().iconst(I64, self.address as i64);
         let raise_exception = self.builder.ins().iconst(I8, i64::from(true));
+        let unprivileged = self.builder.ins().iconst(I8, i64::from(unprivileged));
         let (resolved_address_slot, resolved_address_slot_address) =
             create_stack_slot!(self, ResolvedAddress<'_>);
         let call = self.builder.ins().call_indirect(
@@ -97,6 +121,7 @@ impl BlockTranslator<'_> {
                 target_address,
                 preferred_exception_return,
                 raise_exception,
+                unprivileged,
                 resolved_address_slot_address,
             ],
         );
@@ -150,8 +175,25 @@ impl BlockTranslator<'_> {
     }
 
     #[inline]
-    /// Generates a JIT read access
+    /// Generates a privileged JIT read access
     pub fn generate_read(&mut self, target_address: Value, width: Width) -> Value {
+        self.generate_read_inner(target_address, width, false)
+    }
+
+    #[inline]
+    /// Generates an unprivileged JIT read access
+    pub fn generate_read_unprivileged(&mut self, target_address: Value, width: Width) -> Value {
+        self.generate_read_inner(target_address, width, true)
+    }
+
+    #[inline]
+    /// Generates a JIT read access
+    fn generate_read_inner(
+        &mut self,
+        target_address: Value,
+        width: Width,
+        unprivileged: bool,
+    ) -> Value {
         let address_lookup_func = self.builder.ins().iconst(
             I64,
             crate::memory::mmu::translate_address as usize as u64 as i64,
@@ -159,6 +201,7 @@ impl BlockTranslator<'_> {
         self.store_pc(None);
         let preferred_exception_return = self.builder.ins().iconst(I64, self.address as i64);
         let raise_exception = self.builder.ins().iconst(I8, i64::from(true));
+        let unprivileged = self.builder.ins().iconst(I8, i64::from(unprivileged));
         let (resolved_address_slot, resolved_address_slot_address) =
             create_stack_slot!(self, ResolvedAddress<'_>);
         let call = self.builder.ins().call_indirect(
@@ -169,6 +212,7 @@ impl BlockTranslator<'_> {
                 target_address,
                 preferred_exception_return,
                 raise_exception,
+                unprivileged,
                 resolved_address_slot_address,
             ],
         );
