@@ -14,6 +14,9 @@ use num_traits::cast::FromPrimitive;
 
 use crate::{machine::Armv8AMachine, memory::Address};
 
+mod sysregs;
+pub use sysregs::*;
+
 mod memory;
 pub use memory::*;
 
@@ -475,9 +478,9 @@ impl ExecutionState {
         machine_ptr: Value,
         builder: &mut FunctionBuilder,
         registers: &mut IndexMap<bad64::Reg, Variable>,
-        sys_registers: &mut IndexMap<bad64::SysReg, Variable>,
+        sys_registers: &mut IndexMap<SysReg, Variable>,
     ) {
-        use bad64::{Reg, SysReg};
+        use bad64::Reg;
 
         macro_rules! reg_field {
             ($($field:ident$([$index:expr])? => $bad_reg:expr),*$(,)?) => {{
@@ -507,8 +510,7 @@ impl ExecutionState {
             sp_el0 => SysReg::SP_EL0,
             sp_el1 => SysReg::SP_EL1,
             sp_el2 => SysReg::SP_EL2,
-            // [ref:FIXME]: bad64 doesn't have an SP_EL3 variant.
-            // sp_el3 => SysReg::SP_EL3,
+            sp_el3 => SysReg::SP_EL3,
             spsr_el3 =>  SysReg::SPSR_EL3,
             spsr_el1 => SysReg::SPSR_EL1,
         }
@@ -578,11 +580,11 @@ impl ExecutionState {
         machine_ptr: Value,
         builder: &mut FunctionBuilder,
         registers: &IndexMap<bad64::Reg, Variable>,
-        sys_registers: &IndexMap<bad64::SysReg, Variable>,
+        sys_registers: &IndexMap<SysReg, Variable>,
         write_to_sysreg: bool,
         write_to_simd: bool,
     ) {
-        use bad64::{Reg, SysReg};
+        use bad64::Reg;
 
         macro_rules! reg_field {
             ($($field:ident$([$index:expr])? => $bad_reg:expr),*$(,)?) => {{
@@ -612,8 +614,7 @@ impl ExecutionState {
                 sp_el0 => SysReg::SP_EL0,
                 sp_el1 => SysReg::SP_EL1,
                 sp_el2 => SysReg::SP_EL2,
-                // sp_el3 => SysReg::SP_EL3,
-                // [ref:FIXME]: bad64 doesn't have an SP_EL3 variant.
+                sp_el3 => SysReg::SP_EL3,
                 spsr_el3 =>  SysReg::SPSR_EL3,
                 spsr_el1 => SysReg::SPSR_EL1,
             };
