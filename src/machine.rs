@@ -7,6 +7,7 @@ use std::{collections::BTreeSet, num::NonZero, pin::Pin};
 
 use crate::{
     cpu_state::*,
+    devices::timer::GenericTimer,
     jit::{lookup_block, Entry},
     memory::*,
     tracing,
@@ -45,11 +46,14 @@ pub struct Armv8AMachine {
     pub hw_breakpoints: BTreeSet<Address>,
     /// Interrupt generators and subscribers/handlers
     pub interrupts: Interrupts,
+    /// Generic timer
+    pub timer: GenericTimer,
 }
 
 impl Armv8AMachine {
     /// Returns a new machine with given memory map.
     pub fn new(memory: MemoryMap, interrupts: Interrupts) -> Pin<Box<Self>> {
+        let timer = GenericTimer::new(&interrupts);
         Box::pin(Self {
             pc: 0,
             prev_pc: 0,
@@ -59,15 +63,65 @@ impl Armv8AMachine {
             in_breakpoint: false,
             hw_breakpoints: BTreeSet::new(),
             interrupts,
+            timer,
         })
     }
 
+    fn poll(&mut self) -> bool {
+        let (f_mask, i_mask) = {
+            let daif = self.cpu_state.PSTATE().DAIF();
+            (daif.F(), daif.I())
+        };
+        self.interrupts.rcv(f_mask && i_mask);
+        if !f_mask && self.interrupts.fiq() {
+            let preferred_exception_return = Address(self.pc);
+            crate::exceptions::aarch64_take_physical_fiq_exception(
+                self,
+                preferred_exception_return,
+            );
+            return true;
+        } else if !i_mask && self.interrupts.irq() {
+            let preferred_exception_return = Address(self.pc);
+            crate::exceptions::aarch64_take_physical_irq_exception(
+                self,
+                preferred_exception_return,
+            );
+            return true;
+        } else if f_mask && i_mask {
+            return true;
+        }
+        false
+    }
+
     /// Returns `true` if machine is powered off.
-    pub fn is_powered_off(&self) -> bool {
-        matches!(
-            *self.cpu_state.exit_request.lock().unwrap(),
-            Some(ExitRequest::Poweroff)
-        )
+    pub fn is_powered_off(&mut self) -> bool {
+        let mut exit_request = self.cpu_state.exit_request.lock().unwrap();
+        let retval = match *exit_request {
+            None => false,
+            Some(ExitRequest::Poweroff) => true,
+            Some(ExitRequest::WaitForEvent) => {
+                exit_request.take();
+                drop(exit_request);
+                while !self.poll() {}
+                return false;
+            }
+            Some(ExitRequest::Yield) => {
+                exit_request.take();
+                drop(exit_request);
+                let sleep_dur = std::time::Duration::from_millis(100);
+                let mut ctr = 0;
+                while !self.poll() && ctr < 5 {
+                    std::thread::sleep(sleep_dur);
+                    ctr += 1;
+                }
+                return false;
+            }
+            Some(_) => false,
+        };
+        drop(exit_request);
+        self.poll();
+
+        retval
     }
 
     /// Generates a flattened device tree

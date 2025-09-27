@@ -607,9 +607,6 @@ pub fn aarch64_take_exception(
     preferred_exception_return: Address,
     vect_offset: Address,
 ) {
-    if machine.is_powered_off() {
-        return;
-    }
     assert!(machine.cpu_state.have_el(target_el));
     //assert!(!ELUsingAArch32(target_el));
     assert!(target_el as u32 >= machine.cpu_state.PSTATE().EL() as u32);
@@ -947,6 +944,78 @@ pub fn aarch64_software_breakpoint(
 
     let mut except = ExceptionRecord::exception_syndrome(Exception::SoftwareBreakpoint);
     except.syndrome.set_iss_bits(0, 16, immediate);
+
+    aarch64_take_exception(
+        machine,
+        target_el,
+        except,
+        preferred_exception_return,
+        vect_offset,
+    );
+}
+
+/// Take physical FIQ exception
+///
+/// `AArch64.TakePhysicalFIQException`
+pub fn aarch64_take_physical_fiq_exception(
+    machine: &mut crate::machine::Armv8AMachine,
+    preferred_exception_return: Address,
+) {
+    tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, "AArch64.TakePhysicalFIQException");
+    let current_el = machine.cpu_state.PSTATE().EL();
+    // route_to_el3 = HaveEL(EL3) && SCR_EL3.FIQ == '1'
+    let route_to_el2 = matches!(current_el, ExceptionLevel::EL0 | ExceptionLevel::EL1)
+        && machine.cpu_state.EL2_enabled()
+        && {
+            // HCR_EL2.TGE == '1';
+            machine.cpu_state.control_registers.hcr_el2 & (1 << 27) > 0
+        };
+
+    let target_el = if current_el == ExceptionLevel::EL2 || route_to_el2 {
+        ExceptionLevel::EL2
+    } else {
+        ExceptionLevel::EL1
+    };
+    assert!(machine.cpu_state.have_el(target_el), "{target_el:?}");
+    let vect_offset = Address(0x100);
+
+    let except = ExceptionRecord::exception_syndrome(Exception::FIQ);
+
+    aarch64_take_exception(
+        machine,
+        target_el,
+        except,
+        preferred_exception_return,
+        vect_offset,
+    );
+}
+
+/// Take an enabled physical IRQ exception
+///
+/// `AArch64.TakePhysicalIRQException`
+pub fn aarch64_take_physical_irq_exception(
+    machine: &mut crate::machine::Armv8AMachine,
+    preferred_exception_return: Address,
+) {
+    tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, "AArch64.TakePhysicalIRQException");
+    let current_el = machine.cpu_state.PSTATE().EL();
+    // route_to_el3 = HaveEL(EL3) && SCR_EL3.FIQ == '1'
+    let route_to_el2 = matches!(current_el, ExceptionLevel::EL0 | ExceptionLevel::EL1)
+        && machine.cpu_state.EL2_enabled()
+        && {
+            // HCR_EL2.TGE == '1';
+            machine.cpu_state.control_registers.hcr_el2 & (1 << 27) > 0
+        };
+
+    let target_el = if current_el == ExceptionLevel::EL2 || route_to_el2 {
+        ExceptionLevel::EL2
+    } else {
+        ExceptionLevel::EL1
+    };
+    assert!(machine.cpu_state.have_el(target_el), "{target_el:?}");
+    let vect_offset = Address(0x80);
+
+    let except = ExceptionRecord::exception_syndrome(Exception::IRQ);
 
     aarch64_take_exception(
         machine,

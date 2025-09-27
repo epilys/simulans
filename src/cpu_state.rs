@@ -444,27 +444,10 @@ pub struct ControlRegisterFile {
 }
 
 /// Timer registers.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[repr(C)]
 pub struct TimerRegisterFile {
     pub cntkctl_el1: u64,
-    pub cntfrq_el0: u64,
-    pub cntv_ctl_el0: u64,
-    pub cntv_cval_el0: u64,
-    /// `CNTVCT_EL0`, Counter-timer Virtual Count Register
-    pub cntvct_el0: u64,
-}
-
-impl Default for TimerRegisterFile {
-    fn default() -> Self {
-        Self {
-            cntkctl_el1: 0,
-            cntfrq_el0: 1000000 * 33 * 10,
-            cntv_ctl_el0: 0,
-            cntv_cval_el0: 0,
-            cntvct_el0: 4,
-        }
-    }
 }
 
 /// All execution state of a processing element.
