@@ -18,7 +18,7 @@ use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
 use crate::{
-    cpu_state::{ExecutionState, ExitRequest},
+    cpu_state::{ExecutionState, ExitRequest, SysReg, SysRegEncoding},
     machine::{Armv8AMachine, TranslationBlock, TranslationBlocks},
     memory::{mmu::ResolvedAddress, Address, Width},
     tracing,
@@ -29,7 +29,7 @@ mod memory;
 mod sysregs;
 
 use memory::MemOpsTable;
-use sysregs::{SysRegEncoding, SystemRegister};
+use sysregs::SystemRegister;
 
 const MEMFLAG_LITTLE_ENDIAN: MemFlags = MemFlags::new().with_endianness(Endianness::Little);
 
@@ -539,7 +539,7 @@ struct BlockTranslator<'a> {
     memops_table: MemOpsTable,
     address_lookup_sigref: codegen::ir::SigRef,
     registers: IndexMap<bad64::Reg, Variable>,
-    sys_registers: IndexMap<bad64::SysReg, Variable>,
+    sys_registers: IndexMap<SysReg, Variable>,
     loopback_blocks: IndexMap<u64, Block>,
 }
 
@@ -813,9 +813,9 @@ impl BlockTranslator<'_> {
             Operand::Label(Imm::Signed(imm)) => self.builder.ins().iconst(I64, *imm),
             Operand::ImplSpec { o0, o1, cm, cn, o2 } => {
                 let (o0, o1, cm, cn, o2) = (*o0, *o1, *cm, *cn, *o2);
-                self.read_sysreg_o0_op1_CRn_CRm_op2(SysRegEncoding { o0, o1, cm, cn, o2 })
+                self.read_sysreg(&SysRegEncoding { o0, o1, cm, cn, o2 }.into())
             }
-            Operand::SysReg(reg) => self.read_sysreg(reg),
+            Operand::SysReg(reg) => self.read_sysreg(&reg.into()),
             Operand::MemExt {
                 regs: [ref address_reg, ref offset_reg],
                 shift,
@@ -1497,12 +1497,10 @@ impl BlockTranslator<'_> {
                         value = self.builder.ins().ushr_imm(value, 6);
                         sysregs::DAIF::generate_write(self, value);
                     }
-                    bad64::Operand::SysReg(ref reg) => self.write_sysreg(reg, value),
-                    bad64::Operand::ImplSpec { o0, o1, cm, cn, o2 } => self
-                        .write_sysreg_o0_op1_CRn_CRm_op2(
-                            SysRegEncoding { o0, o1, cm, cn, o2 },
-                            value,
-                        ),
+                    bad64::Operand::SysReg(ref reg) => self.write_sysreg(&reg.into(), value),
+                    bad64::Operand::ImplSpec { o0, o1, cm, cn, o2 } => {
+                        self.write_sysreg(&SysRegEncoding { o0, o1, cm, cn, o2 }.into(), value)
+                    }
                     other => unexpected_operand!(other),
                 }
             }
@@ -2401,7 +2399,7 @@ impl BlockTranslator<'_> {
                     if !matches!(new_nzcv_width, Width::_64) {
                         new_nzcv = self.builder.ins().uextend(I64, new_nzcv);
                     }
-                    self.write_sysreg(&bad64::SysReg::NZCV, new_nzcv);
+                    self.write_sysreg(&SysReg::NZCV, new_nzcv);
                 }
                 self.builder.ins().jump(merge_block, &[]);
                 self.builder.switch_to_block(merge_block);
@@ -2446,7 +2444,7 @@ impl BlockTranslator<'_> {
                     if !matches!(new_nzcv_width, Width::_64) {
                         new_nzcv = self.builder.ins().uextend(I64, new_nzcv);
                     }
-                    self.write_sysreg(&bad64::SysReg::NZCV, new_nzcv);
+                    self.write_sysreg(&SysReg::NZCV, new_nzcv);
                 }
                 self.builder.ins().jump(merge_block, &[]);
                 self.builder.switch_to_block(merge_block);
