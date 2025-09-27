@@ -18,7 +18,7 @@ use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
 use crate::{
-    cpu_state::{ExecutionState, ExitRequest, SysReg, SysRegEncoding},
+    cpu_state::{ExecutionState, ExitRequest, ExitRequestID, SysReg, SysRegEncoding},
     machine::{Armv8AMachine, TranslationBlock, TranslationBlocks},
     memory::{mmu::ResolvedAddress, Address, Width},
     tracing,
@@ -55,17 +55,15 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
     {
         let mut exit_request_ref = machine.cpu_state.exit_request.lock().unwrap();
         if let Some(exit_request) = exit_request_ref.as_ref() {
-            match *exit_request {
-                ExitRequest::Poweroff => {}
-                ExitRequest::Abort {
-                    fault,
-                    preferred_exception_return,
-                } => {
-                    let _ = exit_request_ref.take();
-                    drop(exit_request_ref);
+            if let ExitRequest::Abort {
+                fault,
+                preferred_exception_return,
+            } = *exit_request
+            {
+                let _ = exit_request_ref.take();
+                drop(exit_request_ref);
 
-                    crate::exceptions::aarch64_abort(machine, fault, preferred_exception_return);
-                }
+                crate::exceptions::aarch64_abort(machine, fault, preferred_exception_return);
             }
             return Entry(lookup_block);
         }
@@ -426,6 +424,7 @@ impl<'j> JitContext<'j> {
                     | Op::BLR
                     | Op::RET
                     | Op::UDF
+                    | Op::YIELD
                     | Op::ERET => break,
                     _ => continue,
                 };
@@ -4471,6 +4470,7 @@ impl BlockTranslator<'_> {
                     self.machine_ptr,
                     std::mem::offset_of!(Armv8AMachine, cpu_state.event_register) as i32,
                 );
+                return self.r#yield(ExitRequestID::WaitForEvent);
             }
             Op::WHILEGE => todo!(),
             Op::WHILEGT => todo!(),
@@ -4488,7 +4488,7 @@ impl BlockTranslator<'_> {
             Op::XTN => todo!(),
             Op::XTN2 => todo!(),
             Op::YIELD => {
-                // Hint instruction, ignore.
+                return self.r#yield(ExitRequestID::Yield);
             }
             Op::ZERO => todo!(),
             Op::ZIP1 | Op::ZIP2 => {
@@ -4537,6 +4537,29 @@ impl BlockTranslator<'_> {
         self.store_pc(None);
         _ = self.indirect_call(pc, sig, callee, args);
         ControlFlow::Break(Some(BlockExit::Exception))
+    }
+
+    /// Yield
+    fn r#yield(&mut self, id: ExitRequestID) -> ControlFlow<Option<BlockExit>> {
+        extern "C" fn set_exit_request(machine: &mut Armv8AMachine, id: ExitRequestID) {
+            *machine.cpu_state.exit_request.lock().unwrap() = Some(id.into());
+        }
+
+        let sigref = {
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(self.pointer_type));
+            sig.params.push(AbiParam::new(I8));
+            self.builder.import_signature(sig)
+        };
+        let func = self
+            .builder
+            .ins()
+            .iconst(I64, set_exit_request as usize as u64 as i64);
+        let next_pc = self.builder.ins().iconst(I64, self.address as i64 + 4);
+        let id = self.builder.ins().iconst(I8, i64::from(id as u8));
+        let ret = self.emit_indirect_noreturn(self.address, sigref, func, &[self.machine_ptr, id]);
+        self.store_pc(Some(next_pc));
+        ret
     }
 
     /// Throw Undefined exception

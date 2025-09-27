@@ -213,10 +213,22 @@ pub enum Exception {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// Numeric exit request ID that can be set from JIT code
+#[repr(u8)]
+pub enum ExitRequestID {
+    /// Shut down the machine
+    Poweroff = 0,
+    WaitForEvent,
+    Yield,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// Exit request to be serviced on main execution loop
 pub enum ExitRequest {
     /// Shut down the machine
     Poweroff,
+    WaitForEvent,
+    Yield,
     /// Instruction or data abort
     Abort {
         /// Causing fault
@@ -224,6 +236,18 @@ pub enum ExitRequest {
         /// Return address
         preferred_exception_return: Address,
     },
+}
+
+impl From<ExitRequestID> for ExitRequest {
+    fn from(id: ExitRequestID) -> Self {
+        use ExitRequestID as Id;
+
+        match id {
+            Id::Poweroff => Self::Poweroff,
+            Id::WaitForEvent => Self::WaitForEvent,
+            Id::Yield => Self::Yield,
+        }
+    }
 }
 
 /// ID registers
