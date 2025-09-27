@@ -634,17 +634,6 @@ pub fn aarch64_take_exception(
     } else if matches!(machine.cpu_state.PSTATE().SP(), SpSel::Current) {
         adjusted_vect_offset += 0x200_u64;
     }
-    tracing::event!(
-        target: tracing::TraceItem::Exception.as_str(),
-        tracing::Level::TRACE,
-        current_el = ?machine.cpu_state.PSTATE().EL(),
-        ?target_el,
-        ?vect_offset,
-        ?adjusted_vect_offset,
-        ?preferred_exception_return,
-        "vbar: 0x{:x?}",
-        machine.cpu_state.vbar_elx()
-    );
 
     // bits(64) spsr = GetPSRFromPSTATE(AArch64_NonDebugState, 64);
     let spsr = machine.cpu_state.psr_from_PSTATE();
@@ -674,6 +663,17 @@ pub fn aarch64_take_exception(
         off = 0,
         len = 11,
         val = get_bits!(vect_offset.0, off = 0, len = 11)
+    );
+    tracing::event!(
+        target: tracing::TraceItem::Exception.as_str(),
+        tracing::Level::TRACE,
+        current_el = ?machine.cpu_state.PSTATE().EL(),
+        ?target_el,
+        ?vect_offset,
+        ?adjusted_vect_offset,
+        ?preferred_exception_return,
+        vbar = ?tracing::Hex(vbar_elx),
+        new_pc = ?Address(machine.pc),
     );
 }
 
