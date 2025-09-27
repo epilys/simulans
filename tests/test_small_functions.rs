@@ -45,16 +45,16 @@ fn test_square() {
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
     let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
-    machine.cpu_state.registers.sp = 4 * TEST_INPUT.len() as u64 - 4;
+    machine.cpu_state.registers.sp_el1 = 4 * TEST_INPUT.len() as u64 - 4;
 
-    let stack_pre = machine.cpu_state.registers.sp;
+    let stack_pre = machine.cpu_state.registers.sp_el1;
     // Pass "25" as `num`
     machine.cpu_state.registers.x0 = 25;
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
     assert_hex_eq!(machine.cpu_state.registers.x0, 625);
     assert_hex_eq!(machine.cpu_state.registers.x8, 25);
     assert_hex_eq!(machine.cpu_state.registers.x9, 25);
-    let stack_post = machine.cpu_state.registers.sp;
+    let stack_post = machine.cpu_state.registers.sp_el1;
     assert_hex_eq!(stack_post, stack_pre);
 }
 
@@ -67,12 +67,12 @@ fn test_load_stores() {
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
     let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
-    machine.cpu_state.registers.sp = 4 * TEST_INPUT.len() as u64 - 4;
+    machine.cpu_state.registers.sp_el1 = 4 * TEST_INPUT.len() as u64 - 4;
 
-    let stack_pre = machine.cpu_state.registers.sp;
+    let stack_pre = machine.cpu_state.registers.sp_el1;
     machine.cpu_state.registers.x0 = 0xbadbeef;
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-    let stack_post = machine.cpu_state.registers.sp;
+    let stack_post = machine.cpu_state.registers.sp_el1;
     assert_eq!(stack_post, stack_pre);
     let mem = machine.memory.find_region(entry_point).unwrap();
     let phys_offset = mem.phys_offset.0 as usize;
@@ -103,12 +103,12 @@ fn test_load_stores_2() {
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
     let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
-    machine.cpu_state.registers.sp = 4 * TEST_INPUT.len() as u64 - 4;
+    machine.cpu_state.registers.sp_el1 = 4 * TEST_INPUT.len() as u64 - 4;
 
-    let stack_pre = machine.cpu_state.registers.sp;
+    let stack_pre = machine.cpu_state.registers.sp_el1;
     machine.cpu_state.registers.x0 = 0xbadbeef;
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-    let stack_post = machine.cpu_state.registers.sp;
+    let stack_post = machine.cpu_state.registers.sp_el1;
     assert_eq!(stack_post, stack_pre);
     assert_hex_eq!(machine.cpu_state.registers.x0, 2 * 0x1234);
     assert_hex_eq!(machine.cpu_state.registers.x1, 0x1234);

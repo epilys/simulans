@@ -37,7 +37,7 @@ use gdbstub::{
     },
 };
 
-use crate::{memory::Address, tracing};
+use crate::{cpu_state::SpSel, memory::Address, tracing};
 
 /// Helper struct for memory map xml
 struct GdbMemoryMap {
@@ -171,7 +171,11 @@ impl GdbStubRunner {
             (29, x29),
             (30, x30),
         }
-        regs.sp = self.machine.cpu_state.registers.sp;
+        regs.sp = if matches!(self.machine.cpu_state.PSTATE().SP(), SpSel::SpEl0) {
+            self.machine.cpu_state.registers.sp_el0
+        } else {
+            self.machine.cpu_state.sp_elx()
+        };
         regs.pc = self.machine.pc;
         regs.cpsr = u64::from(self.machine.cpu_state.psr_from_PSTATE()) as u32;
         regs.v = self.machine.cpu_state.vector_registers;
@@ -221,7 +225,11 @@ impl GdbStubRunner {
             (29, x29),
             (30, x30),
         }
-        self.machine.cpu_state.registers.sp = regs.sp;
+        if matches!(self.machine.cpu_state.PSTATE().SP(), SpSel::SpEl0) {
+            self.machine.cpu_state.registers.sp_el0 = regs.sp;
+        } else {
+            self.machine.cpu_state.set_sp_elx(regs.sp);
+        };
         self.machine.pc = regs.pc;
     }
 
@@ -375,7 +383,13 @@ impl GdbStubRunner {
                 tracing::error!("GDB requested read of invalid register x{other}");
                 Err(TargetError::NonFatal)
             }
-            AArch64RegId::Sp => read_reg!(self.machine.cpu_state.registers.sp),
+            AArch64RegId::Sp => {
+                if matches!(self.machine.cpu_state.PSTATE().SP(), SpSel::SpEl0) {
+                    read_reg!(self.machine.cpu_state.registers.sp_el0)
+                } else {
+                    read_reg!(self.machine.cpu_state.sp_elx())
+                }
+            }
             AArch64RegId::Pc => read_reg!(self.machine.pc),
             AArch64RegId::Pstate => {
                 read_reg!(self.machine.cpu_state.registers.pstate)
@@ -578,7 +592,20 @@ impl GdbStubRunner {
                 tracing::error!("GDB requested write of invalid register x{other}");
                 return Err(TargetError::NonFatal);
             }
-            AArch64RegId::Sp => write_reg!(self.machine.cpu_state.registers.sp),
+            AArch64RegId::Sp => {
+                if matches!(self.machine.cpu_state.PSTATE().SP(), SpSel::SpEl0) {
+                    write_reg!(self.machine.cpu_state.registers.sp_el0)
+                } else {
+                    let Some(val_64): Option<[u8; 8]> =
+                        val.get(..8).and_then(|val| <[u8; 8]>::try_from(val).ok())
+                    else {
+                        return Err(TargetError::NonFatal);
+                    };
+                    self.machine
+                        .cpu_state
+                        .set_sp_elx(u64::from_ne_bytes(val_64));
+                }
+            }
             AArch64RegId::Pc => write_reg!(self.machine.pc),
             AArch64RegId::Pstate => {
                 write_reg!(self.machine.cpu_state.registers.pstate)

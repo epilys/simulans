@@ -39,11 +39,11 @@ fn test_div() {
     let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
 
     machine.cpu_state.registers.x0 = 11;
-    machine.cpu_state.registers.sp = 4 * TEST_INPUT.len() as u64 - 4;
+    machine.cpu_state.registers.sp_el1 = 4 * TEST_INPUT.len() as u64 - 4;
 
-    let stack_pre = machine.cpu_state.registers.sp;
+    let stack_pre = machine.cpu_state.registers.sp_el1;
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-    let stack_post = machine.cpu_state.registers.sp;
+    let stack_post = machine.cpu_state.registers.sp_el1;
     assert_eq!(stack_post, stack_pre - 0x10);
     assert_hex_eq!(machine.cpu_state.registers.x8, 0x5);
     assert_hex_eq!(machine.cpu_state.registers.x9, 0x2);

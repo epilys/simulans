@@ -23,7 +23,7 @@
 use std::num::NonZero;
 
 use simulans::{
-    cpu_state::{ExceptionLevel, Mode, SavedProgramStatusRegister},
+    cpu_state::{ExceptionLevel, Mode, SavedProgramStatusRegister, SpSel},
     main_loop,
     memory::{Address, MemorySize},
 };
@@ -40,11 +40,11 @@ fn test_exception_levels() {
         MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
     let entry_point = Address(0);
     let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
-    machine.cpu_state.registers.sp = 4 * TEST_INPUT.len() as u64 - 4;
+    machine.cpu_state.registers.sp_el1 = 4 * TEST_INPUT.len() as u64 - 4;
 
-    let stack_pre = machine.cpu_state.registers.sp;
+    let stack_pre = machine.cpu_state.registers.sp_el1;
     main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
-    let stack_post = machine.cpu_state.registers.sp;
+    let stack_post = machine.cpu_state.registers.sp_el1;
     assert_eq!(stack_post, stack_pre);
     assert_eq!(machine.cpu_state.control_registers.hcr_el2, 0x80000018);
     assert_eq!(machine.cpu_state.control_registers.scr_el3, 0xd0f);
@@ -108,5 +108,30 @@ fn test_pstate_pseudoregisters() {
 
         main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
         assert_hex_eq!(machine.cpu_state.registers.x0, 3 << 2);
+    }
+}
+
+/// Test PSTATE SpSel
+#[test_log::test]
+fn test_pstate_spsel() {
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_pstate_spsel.bin");
+    utils::disas(TEST_INPUT, 0);
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    {
+        let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+        assert_eq!(machine.cpu_state.PSTATE().SP(), SpSel::Current);
+        machine.cpu_state.PSTATE_mut().set_EL(ExceptionLevel::EL1);
+        const SP_EL0: u64 = 0xacab;
+        const SP_EL1: u64 = 0xbeef;
+
+        machine.cpu_state.registers.sp_el0 = SP_EL0;
+        machine.cpu_state.registers.sp_el1 = SP_EL1;
+
+        main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+        assert_hex_eq!(machine.cpu_state.registers.x1, SP_EL1);
+        assert_hex_eq!(machine.cpu_state.registers.x2, SP_EL0);
+        assert_hex_eq!(machine.cpu_state.registers.x3, SP_EL1);
     }
 }

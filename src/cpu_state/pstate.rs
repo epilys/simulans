@@ -38,7 +38,7 @@ pub enum ArchMode {
 }
 
 #[bitsize(1)]
-#[derive(Copy, Clone, Default, FromBits, Debug)]
+#[derive(Copy, Clone, Default, FromBits, Debug, PartialEq, Eq)]
 /// Stack register selector, part of [`PSTATE`].
 pub enum SpSel {
     /// Use `EL0` stack pointer.
@@ -265,6 +265,26 @@ impl ExecutionState {
         spsr.set_nRW(ArchMode::_64);
         spsr.set_M(Mode::EL1h);
         spsr
+    }
+
+    /// Returns `SP_ELx` value depending on current exception level.
+    pub fn sp_elx(&self) -> u64 {
+        match self.PSTATE().EL() {
+            ExceptionLevel::EL0 => self.registers.sp_el0,
+            ExceptionLevel::EL1 => self.registers.sp_el1,
+            ExceptionLevel::EL2 => self.registers.sp_el2,
+            ExceptionLevel::EL3 => self.registers.sp_el3,
+        }
+    }
+
+    /// Sets `SP_ELx` value depending on current exception level.
+    pub fn set_sp_elx(&mut self, value: u64) {
+        match self.PSTATE().EL() {
+            ExceptionLevel::EL0 => self.registers.sp_el0 = value,
+            ExceptionLevel::EL1 => self.registers.sp_el1 = value,
+            ExceptionLevel::EL2 => self.registers.sp_el2 = value,
+            ExceptionLevel::EL3 => self.registers.sp_el3 = value,
+        }
     }
 
     /// Returns `SPSR` value depending on current exception level.

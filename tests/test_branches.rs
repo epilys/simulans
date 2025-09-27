@@ -41,7 +41,7 @@ fn test_simple_if() {
 
             // Pass "10" as `num`
             machine.cpu_state.registers.x0 = 10;
-            machine.cpu_state.registers.sp = 4 * FOOBAR_UNOPT.len() as u64 - 4;
+            machine.cpu_state.registers.sp_el1 = 4 * FOOBAR_UNOPT.len() as u64 - 4;
             main_loop(&mut machine, entry_point, FOOBAR_UNOPT).unwrap();
             assert_hex_eq!(machine.cpu_state.registers.x0, 20);
         }
@@ -50,7 +50,7 @@ fn test_simple_if() {
 
             // Pass "11" as `num`
             machine.cpu_state.registers.x0 = 11;
-            machine.cpu_state.registers.sp = 4 * FOOBAR_UNOPT.len() as u64 - 4;
+            machine.cpu_state.registers.sp_el1 = 4 * FOOBAR_UNOPT.len() as u64 - 4;
             main_loop(&mut machine, entry_point, FOOBAR_UNOPT).unwrap();
             assert_hex_eq!(machine.cpu_state.registers.x0, 11 * 11,);
         }
@@ -65,7 +65,7 @@ fn test_simple_if() {
 
             // Pass "10" as `num`
             machine.cpu_state.registers.x0 = 10;
-            machine.cpu_state.registers.sp = 4 * FOOBAR.len() as u64 - 4;
+            machine.cpu_state.registers.sp_el1 = 4 * FOOBAR.len() as u64 - 4;
             main_loop(&mut machine, entry_point, FOOBAR).unwrap();
             assert_hex_eq!(machine.cpu_state.registers.x0, 20);
         }
@@ -74,7 +74,7 @@ fn test_simple_if() {
 
             // Pass "11" as `num`
             machine.cpu_state.registers.x0 = 11;
-            machine.cpu_state.registers.sp = 4 * FOOBAR.len() as u64 - 4;
+            machine.cpu_state.registers.sp_el1 = 4 * FOOBAR.len() as u64 - 4;
             main_loop(&mut machine, entry_point, FOOBAR).unwrap();
             assert_hex_eq!(machine.cpu_state.registers.x0, 11 * 11,);
         }
