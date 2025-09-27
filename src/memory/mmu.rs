@@ -453,6 +453,7 @@ pub extern "C" fn translate_address<'machine>(
                     target: TraceItem::AddressLookup.as_str(),
                     tracing::Level::TRACE,
                     ?base_address,
+                    level = params.level,
                     table_entry_0 = ?tracing::BinaryHex(table_entry_0),
                 );
             }
@@ -522,6 +523,7 @@ pub extern "C" fn translate_address<'machine>(
                     target: TraceItem::AddressLookup.as_str(),
                     tracing::Level::TRACE,
                     ?base_address,
+                    level = params.level,
                     table_entry_1 = ?tracing::BinaryHex(table_entry_1),
                 );
             }
@@ -586,6 +588,15 @@ pub extern "C" fn translate_address<'machine>(
 
             let table_entry_2 =
                 read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));
+            if raise_exception {
+                tracing::event!(
+                    target: TraceItem::AddressLookup.as_str(),
+                    tracing::Level::TRACE,
+                    ?base_address,
+                    level = params.level,
+                    table_entry_2 = ?tracing::BinaryHex(table_entry_2),
+                );
+            }
 
             base_address = match table_entry_2 & 0b11 {
                 0b11 if params.level == 3 => {
