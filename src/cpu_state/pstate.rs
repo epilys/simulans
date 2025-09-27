@@ -41,9 +41,9 @@ pub enum ArchMode {
 #[derive(Copy, Clone, Default, FromBits, Debug)]
 /// Stack register selector, part of [`PSTATE`].
 pub enum SpSel {
-    #[default]
     /// Use `EL0` stack pointer.
     SpEl0 = 0,
+    #[default]
     /// Use current EL's stack pointer.
     Current = 1,
 }
