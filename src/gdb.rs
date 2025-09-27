@@ -445,6 +445,60 @@ impl GdbStubRunner {
             AArch64RegId::ELR_EL3 => {
                 read_reg!(self.machine.cpu_state.exception_registers.elr_el3)
             }
+            AArch64RegId::CNTP_CTL_EL0 => {
+                read_reg!(crate::devices::timer::timer_register_read(
+                    &self.machine,
+                    crate::devices::timer::RegisterID::CNTP_CTL_EL0
+                ))
+            }
+            AArch64RegId::CNTP_TVAL_EL0 => {
+                read_reg!(crate::devices::timer::timer_register_read(
+                    &self.machine,
+                    crate::devices::timer::RegisterID::CNTP_TVAL_EL0
+                ))
+            }
+            AArch64RegId::CNTP_CVAL_EL0 => {
+                read_reg!(crate::devices::timer::timer_register_read(
+                    &self.machine,
+                    crate::devices::timer::RegisterID::CNTP_CVAL_EL0
+                ))
+            }
+            AArch64RegId::CNTV_CTL_EL0 => {
+                read_reg!(crate::devices::timer::timer_register_read(
+                    &self.machine,
+                    crate::devices::timer::RegisterID::CNTV_CTL_EL0
+                ))
+            }
+            AArch64RegId::CNTV_TVAL_EL0 => {
+                read_reg!(crate::devices::timer::timer_register_read(
+                    &self.machine,
+                    crate::devices::timer::RegisterID::CNTV_TVAL_EL0
+                ))
+            }
+            AArch64RegId::CNTV_CVAL_EL0 => {
+                read_reg!(crate::devices::timer::timer_register_read(
+                    &self.machine,
+                    crate::devices::timer::RegisterID::CNTV_CVAL_EL0
+                ))
+            }
+            AArch64RegId::CNTPCT_EL0 => {
+                read_reg!(crate::devices::timer::timer_register_read(
+                    &self.machine,
+                    crate::devices::timer::RegisterID::CNTPCT_EL0
+                ))
+            }
+            AArch64RegId::CNTVCT_EL0 => {
+                read_reg!(crate::devices::timer::timer_register_read(
+                    &self.machine,
+                    crate::devices::timer::RegisterID::CNTVCT_EL0
+                ))
+            }
+            AArch64RegId::CNTFRQ_EL0 => {
+                read_reg!(crate::devices::timer::timer_register_read(
+                    &self.machine,
+                    crate::devices::timer::RegisterID::CNTFRQ_EL0
+                ))
+            }
             // AArch64RegId::OSDTRRX_EL1 => Ok(0),
             // AArch64RegId::DBGBVR0_EL1 => Ok(0),
             // AArch64RegId::DBGBCR0_EL1 => Ok(0),
@@ -463,6 +517,14 @@ impl GdbStubRunner {
         use gdbstub_arch::aarch64::reg::id::AArch64RegId;
 
         macro_rules! write_reg {
+            (value) => {{
+                let Some(val_64): Option<[u8; 8]> =
+                    val.get(..8).and_then(|val| <[u8; 8]>::try_from(val).ok())
+                else {
+                    return Err(TargetError::NonFatal);
+                };
+                u64::from_ne_bytes(val_64)
+            }};
             ($dest:expr) => {{
                 let Some(val_64): Option<[u8; 8]> =
                     val.get(..8).and_then(|val| <[u8; 8]>::try_from(val).ok())
@@ -589,6 +651,51 @@ impl GdbStubRunner {
             AArch64RegId::ELR_EL3 => {
                 write_reg!(self.machine.cpu_state.exception_registers.elr_el3)
             }
+            AArch64RegId::CNTP_CTL_EL0 => crate::devices::timer::timer_register_write(
+                &self.machine,
+                crate::devices::timer::RegisterID::CNTP_CTL_EL0,
+                write_reg!(value),
+            ),
+            AArch64RegId::CNTP_TVAL_EL0 => crate::devices::timer::timer_register_write(
+                &self.machine,
+                crate::devices::timer::RegisterID::CNTP_TVAL_EL0,
+                write_reg!(value),
+            ),
+            AArch64RegId::CNTP_CVAL_EL0 => crate::devices::timer::timer_register_write(
+                &self.machine,
+                crate::devices::timer::RegisterID::CNTP_CVAL_EL0,
+                write_reg!(value),
+            ),
+            AArch64RegId::CNTV_CTL_EL0 => crate::devices::timer::timer_register_write(
+                &self.machine,
+                crate::devices::timer::RegisterID::CNTV_CTL_EL0,
+                write_reg!(value),
+            ),
+            AArch64RegId::CNTV_TVAL_EL0 => crate::devices::timer::timer_register_write(
+                &self.machine,
+                crate::devices::timer::RegisterID::CNTV_TVAL_EL0,
+                write_reg!(value),
+            ),
+            AArch64RegId::CNTV_CVAL_EL0 => crate::devices::timer::timer_register_write(
+                &self.machine,
+                crate::devices::timer::RegisterID::CNTV_CVAL_EL0,
+                write_reg!(value),
+            ),
+            AArch64RegId::CNTPCT_EL0 => crate::devices::timer::timer_register_write(
+                &self.machine,
+                crate::devices::timer::RegisterID::CNTPCT_EL0,
+                write_reg!(value),
+            ),
+            AArch64RegId::CNTVCT_EL0 => crate::devices::timer::timer_register_write(
+                &self.machine,
+                crate::devices::timer::RegisterID::CNTVCT_EL0,
+                write_reg!(value),
+            ),
+            AArch64RegId::CNTFRQ_EL0 => crate::devices::timer::timer_register_write(
+                &self.machine,
+                crate::devices::timer::RegisterID::CNTFRQ_EL0,
+                write_reg!(value),
+            ),
             _ => return Err(TargetError::NonFatal),
         }
         Ok(())
