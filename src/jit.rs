@@ -563,12 +563,11 @@ fn is_vector(reg: &bad64::Reg) -> bool {
 
 impl BlockTranslator<'_> {
     fn branch_if_non_zero(&mut self, test_value: Value, label: u64) {
-        let branch_not_taken_block = self.builder.create_block();
         let branch_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
         self.builder
             .ins()
-            .brif(test_value, branch_block, &[], branch_not_taken_block, &[]);
+            .brif(test_value, branch_block, &[], merge_block, &[]);
         self.builder.switch_to_block(branch_block);
         self.builder.seal_block(branch_block);
         if let Some(loopback_block) = self.loopback_blocks.get(&label).copied() {
@@ -577,10 +576,6 @@ impl BlockTranslator<'_> {
             let label_value = self.builder.ins().iconst(I64, label as i64);
             self.direct_exit(BlockExit::Branch(label_value));
         }
-        self.builder.switch_to_block(branch_not_taken_block);
-        self.builder.seal_block(branch_not_taken_block);
-        self.builder.ins().nop();
-        self.builder.ins().jump(merge_block, &[]);
         self.builder.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
     }
@@ -2633,30 +2628,20 @@ impl BlockTranslator<'_> {
                 };
                 let result = self.condition_holds(cond);
                 let result = self.builder.ins().uextend(width.into(), result);
-                let true_block = self.builder.create_block();
-                let false_block = self.builder.create_block();
-                let merge_block = self.builder.create_block();
+                let phi_block = self.builder.create_block();
 
-                self.builder.append_block_param(merge_block, width.into());
-                self.builder
-                    .ins()
-                    .brif(result, true_block, &[], false_block, &[]);
-                self.builder.switch_to_block(true_block);
-                self.builder.seal_block(true_block);
-                self.builder
-                    .ins()
-                    .jump(merge_block, &[BlockArg::from(true_value)]);
+                self.builder.append_block_param(phi_block, width.into());
+                self.builder.ins().brif(
+                    result,
+                    phi_block,
+                    &[BlockArg::from(true_value)],
+                    phi_block,
+                    &[BlockArg::from(false_value)],
+                );
+                self.builder.switch_to_block(phi_block);
+                self.builder.seal_block(phi_block);
 
-                self.builder.switch_to_block(false_block);
-                self.builder.seal_block(false_block);
-                self.builder
-                    .ins()
-                    .jump(merge_block, &[BlockArg::from(false_value)]);
-
-                self.builder.switch_to_block(merge_block);
-                self.builder.seal_block(merge_block);
-
-                let phi = self.builder.block_params(merge_block)[0];
+                let phi = self.builder.block_params(phi_block)[0];
                 write_to_register!(target, TypedValue { value: phi, width });
             }
             Op::CSET => {
@@ -2808,19 +2793,15 @@ impl BlockTranslator<'_> {
                             &[self.machine_ptr, vaddress, preferred_exception_return],
                         );
                         let success = self.builder.inst_results(call)[0];
-                        let success_block = self.builder.create_block();
                         let failure_block = self.builder.create_block();
                         let merge_block = self.builder.create_block();
                         self.builder
                             .ins()
-                            .brif(success, success_block, &[], failure_block, &[]);
+                            .brif(success, merge_block, &[], failure_block, &[]);
                         self.builder.switch_to_block(failure_block);
                         self.builder.seal_block(failure_block);
                         self.store_pc(None);
                         self.direct_exit(BlockExit::Exception);
-                        self.builder.switch_to_block(success_block);
-                        self.builder.seal_block(success_block);
-                        self.builder.ins().jump(merge_block, &[]);
                         self.builder.switch_to_block(merge_block);
                         self.builder.seal_block(merge_block);
                     }
