@@ -3557,7 +3557,31 @@ impl BlockTranslator<'_> {
                 let value = self.builder.ins().bswap(value);
                 write_to_register!(target, TypedValue { value, width });
             }
-            Op::REV16 => todo!(),
+            Op::REV16 => {
+                // Reverse bytes in 16-bit words
+                let target = get_destination_register!();
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let width = self.operand_width(&instruction.operands()[1]);
+
+                match width {
+                    Width::_32 => {
+                        let h_1 = self.builder.ins().ireduce(I16, value);
+                        let h_1 = self.builder.ins().bswap(h_1);
+                        let h_1 = self.builder.ins().uextend(I32, h_1);
+
+                        let h_2 = self.builder.ins().ushr_imm(value, 16);
+                        let h_2 = self.builder.ins().ireduce(I16, h_2);
+                        let h_2 = self.builder.ins().bswap(h_2);
+                        let h_2 = self.builder.ins().uextend(I32, h_2);
+                        let h_2 = self.builder.ins().ishl_imm(h_2, 16);
+
+                        let value = self.builder.ins().bor(h_1, h_2);
+
+                        write_to_register!(target, TypedValue { value, width });
+                    }
+                    other => unimplemented!("{other:?}"),
+                }
+            }
             Op::REV32 => {
                 // Reverse bytes in 32-bit words reverses the byte order in each 32-bit word of
                 // a register.
