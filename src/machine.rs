@@ -5,13 +5,7 @@
 
 use std::{collections::BTreeSet, num::NonZero, pin::Pin};
 
-use crate::{
-    cpu_state::*,
-    devices::timer::GenericTimer,
-    jit::{lookup_block, Entry},
-    memory::*,
-    tracing,
-};
+use crate::{cpu_state::*, devices::timer::GenericTimer, memory::*, tracing};
 
 mod psci;
 mod translation_blocks;
@@ -38,8 +32,6 @@ pub struct Armv8AMachine {
     pub cpu_state: ExecutionState,
     /// Current memory map.
     pub memory: MemoryMap,
-    /// Function to call to look up translated blocks.
-    pub lookup_block_func: Entry,
     /// Whether we have stopped at a breakpoint.
     pub in_breakpoint: bool,
     /// List of breakpoint addresses.
@@ -59,7 +51,6 @@ impl Armv8AMachine {
             prev_pc: 0,
             cpu_state: ExecutionState::default(),
             memory,
-            lookup_block_func: Entry(lookup_block),
             in_breakpoint: false,
             hw_breakpoints: BTreeSet::new(),
             interrupts,

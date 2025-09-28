@@ -50,9 +50,9 @@ fn test_mmu_4k() {
         }
         machine.load_code(&abort_code, entry_point).unwrap();
         machine.pc = entry_point.0;
-        let mut func = machine.lookup_block_func;
         while machine.cpu_state.exit_request.lock().unwrap().is_none() {
-            func = (func.0)(&mut jit, &mut machine);
+            let func = simulans::jit::lookup_block(&mut jit, &mut machine);
+            (func.0)(&mut jit, &mut machine);
         }
         assert_eq!(
             machine.cpu_state.exit_request.lock().unwrap().take(),
