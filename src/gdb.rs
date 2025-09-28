@@ -880,6 +880,7 @@ impl GdbStubRunner {
         enum State {
             Running,
             Stopped,
+            Exited,
         }
         fn handle_request(
             self_: &mut GdbStubRunner,
@@ -929,14 +930,18 @@ impl GdbStubRunner {
                     self_.jit.single_step = true;
                     let pc = self_.machine.pc;
                     self_.jit.translation_blocks.invalidate(pc);
-                    let entry = crate::jit::lookup_block(&mut self_.jit, &mut self_.machine);
-                    (entry.0)(&mut self_.jit, &mut self_.machine);
-                    self_.jit.single_step = false;
-                    self_
-                        .stop_sender
-                        .send(SingleThreadStopReason::DoneStep)
-                        .unwrap();
-                    return Some(State::Stopped);
+                    if !self_.machine.is_powered_off() {
+                        let entry = crate::jit::lookup_block(&mut self_.jit, &mut self_.machine);
+                        (entry.0)(&mut self_.jit, &mut self_.machine);
+                        self_.jit.single_step = false;
+                        self_
+                            .stop_sender
+                            .send(SingleThreadStopReason::DoneStep)
+                            .unwrap();
+                        return Some(State::Stopped);
+                    } else {
+                        return Some(State::Exited);
+                    }
                 }
                 GdbStubRequest::MemoryMaps(sender) => {
                     let mut entries = vec![];
@@ -967,6 +972,7 @@ impl GdbStubRunner {
                 self.ack();
             }
             match state {
+                State::Exited => break,
                 State::Running => {
                     while !self.machine.is_powered_off() {
                         if let Ok(request) = self.request_receiver.try_recv() {
