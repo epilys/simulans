@@ -667,7 +667,7 @@ pub fn aarch64_take_exception(
         vbar_elx,
         off = 0,
         len = 11,
-        val = get_bits!(vect_offset.0, off = 0, len = 11)
+        val = get_bits!(adjusted_vect_offset.0, off = 0, len = 11)
     );
     tracing::event!(
         target: tracing::TraceItem::Exception.as_str(),
