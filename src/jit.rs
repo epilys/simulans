@@ -886,7 +886,11 @@ impl BlockTranslator<'_> {
         } else if ((Reg::S0 as u32)..=(Reg::S31 as u32)).contains(&reg_no) {
             // 32 bits
             let no = reg_no - (Reg::S0 as u32);
-            let shift = if no % 2 == 0 { Some(Width::_32) } else { None };
+            let shift = if no.is_multiple_of(2) {
+                Some(Width::_32)
+            } else {
+                None
+            };
             let reg_no = no / 2;
             (reg_no, Width::_32, shift)
         } else if ((Reg::H0 as u32)..=(Reg::H31 as u32)).contains(&reg_no) {
