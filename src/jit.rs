@@ -2087,7 +2087,7 @@ impl BlockTranslator<'_> {
                 let operand1 = self.translate_operand(&instruction.operands()[1]);
                 let operand2 = self.translate_operand(&instruction.operands()[2]);
                 let carry_in = self.condition_holds(bad64::Condition::CS);
-                let (result, nzcv) =
+                let (result, _nzcv) =
                     self.add_with_carry(operand1, operand2, operand2, carry_in, width);
                 write_to_register!(
                     target,
@@ -2096,7 +2096,25 @@ impl BlockTranslator<'_> {
                         width,
                     },
                 );
-                self.update_nzcv(nzcv);
+            }
+            Op::SBC => {
+                // Subtract with carry
+                // [ref:needs_unit_test]
+                let target = get_destination_register!();
+                let width = self.operand_width(&instruction.operands()[0]);
+                let operand1 = self.translate_operand(&instruction.operands()[1]);
+                let operand2 = self.translate_operand(&instruction.operands()[2]);
+                let operand2 = self.builder.ins().bnot(operand2);
+                let carry_in = self.condition_holds(bad64::Condition::CS);
+                let (result, _nzcv) =
+                    self.add_with_carry(operand1, operand2, operand2, carry_in, width);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
             }
             Op::ADCLB => todo!(),
             Op::ADCLT => todo!(),
@@ -3696,7 +3714,6 @@ impl BlockTranslator<'_> {
             Op::SADDWB => todo!(),
             Op::SADDWT => todo!(),
             Op::SB => todo!(),
-            Op::SBC => todo!(),
             Op::SBCLB => todo!(),
             Op::SBCLT => todo!(),
             Op::SBCS => todo!(),
