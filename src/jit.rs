@@ -1528,7 +1528,8 @@ impl BlockTranslator<'_> {
                 let width = self.operand_width(&instruction.operands()[0]);
                 self.generate_write(target, value, width);
             }
-            Op::STURH | Op::STRH => {
+            Op::STLRH | Op::STURH | Op::STRH => {
+                // [ref:atomics]: STLRH We don't model exclusive access (yet).
                 let value = self.translate_operand(&instruction.operands()[0]);
                 // Reduce 32-bit register to least significant halfword.
                 let value = self.builder.ins().ireduce(I16, value);
@@ -4059,7 +4060,6 @@ impl BlockTranslator<'_> {
             Op::STLLR => todo!(),
             Op::STLLRB => todo!(),
             Op::STLLRH => todo!(),
-            Op::STLRH => todo!(),
             Op::STLUR => todo!(),
             Op::STLURB => todo!(),
             Op::STLURH => todo!(),
