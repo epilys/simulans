@@ -113,25 +113,26 @@ impl Default for DAIFFields {
 pub struct SavedProgramStatusRegister {
     pub M: Mode,
     pub nRW: ArchMode,
+    pub _res0: u1,
     pub DAIF: DAIFFields,
     pub _btype: u2,
     pub _ssbs: u1,
     pub _allint: u1,
-    pub __res: u6,
+    pub __res1: u6,
     pub IL: bool,
     pub SS: bool,
     pub _pan: u1,
     pub _uao: u1,
     pub _dit: u1,
     pub _tco: u1,
-    pub __res0: u2,
+    pub __res2: u2,
     pub NZCV: NZCVFields,
     pub _pm: u1,
     pub _ppend: u1,
     pub _exlock: u1,
     pub _pacm: u1,
     pub _uinj: u1,
-    pub _padding: u28,
+    pub _padding: u27,
 }
 
 impl SavedProgramStatusRegister {
@@ -263,7 +264,10 @@ impl ExecutionState {
         spsr.set_SS(pstate.SS());
         spsr.set_IL(pstate.IL());
         spsr.set_nRW(ArchMode::_64);
-        spsr.set_M(Mode::EL1h);
+        spsr.set_M(match pstate.SP() {
+            SpSel::SpEl0 => Mode::EL1t,
+            SpSel::Current => Mode::EL1h,
+        });
         spsr
     }
 
