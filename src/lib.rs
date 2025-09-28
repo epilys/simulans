@@ -165,9 +165,9 @@ pub fn main_loop(
     if machine.pc == 0 {
         machine.pc = start_address.0;
     }
-    let mut func = machine.lookup_block_func;
     while !machine.is_powered_off() {
-        func = (func.0)(&mut jit, machine);
+        let entry = crate::jit::lookup_block(&mut jit, machine);
+        (entry.0)(&mut jit, machine);
     }
     Ok(())
 }
