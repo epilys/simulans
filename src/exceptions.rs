@@ -84,6 +84,66 @@ pub enum Fault {
     ICacheMaint,
 }
 
+impl Fault {
+    /// Function that gives the Long-descriptor `FSC` code for types of
+    /// [`Fault`]
+    ///
+    /// `EncodeLDFSC`
+    fn encode_ldfsc(&self, level: u8) -> u8 {
+        match self {
+            Self::AddressSize => {
+                assert!([0, 1, 2, 3].contains(&level), "{level}");
+                level & 0b11
+            }
+            Self::AccessFlag => {
+                assert!([0, 1, 2, 3].contains(&level), "{level}");
+                (0b0010 << 2) | (level & 0b11)
+            }
+            Self::Permission => {
+                assert!([0, 1, 2, 3].contains(&level), "{level}");
+                (0b0011 << 2) | (level & 0b11)
+            }
+            Self::Translation => {
+                assert!([0, 1, 2, 3].contains(&level), "{level}");
+                (0b0001 << 2) | (level & 0b11)
+            }
+            Self::SyncExternal => 0b010000,
+            Self::SyncExternalOnWalk => {
+                assert!([0, 1, 2, 3].contains(&level), "{level}");
+                (0b0101 << 2) | (level & 0b11)
+            }
+            Self::SyncParity => 0b011000,
+            Self::SyncParityOnWalk => {
+                assert!([0, 1, 2, 3].contains(&level), "{level}");
+                0b0111 << 2 | (level & 0b11)
+            }
+            Self::AsyncParity => 0b011001,
+            Self::AsyncExternal => {
+                unreachable!()
+                // 0b010001
+                // assert UsingAArch32()
+            }
+            Self::TagCheck => {
+                // assert IsFeatureImplemented(FEAT_MTE2)
+                unimplemented!()
+                // 0b010001
+            }
+            Self::Alignment => 0b100001,
+            Self::Debug => 0b100010,
+            Self::GPCFOnWalk => {
+                assert!([0, 1, 2, 3].contains(&level), "{level}");
+                (0b1001 << 2) | (level & 0b11)
+            }
+            Self::GPCFOnOutput => 0b101000,
+            Self::TLBConflict => 0b110000,
+            Self::HWUpdateAccessFlag => 0b110001,
+            Self::Lockdown => 0b110100,  // IMPLEMENTATION DEFINE
+            Self::Exclusive => 0b110101, // IMPLEMENTATION DEFINE
+            _other => unreachable!("{_other:?}"),
+        }
+    }
+}
+
 /// The Security state of an execution context
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SecurityState {
@@ -425,7 +485,7 @@ impl IssType {
         // isstype.set_iss2_bit(11, fault.hdbssf);
         // if IsExternalAbort(fault) then isstype.iss<9> = fault.extflag;
         isstype.set_iss_bit(7, fault.s2fs1walk);
-        // isstype.set_iss_bit<5:0> = EncodeLDFSC(fault.statuscode, fault.level);
+        isstype.set_iss_bits(0, 6, fault.statuscode.encode_ldfsc(fault.level).into());
         isstype
     }
 
