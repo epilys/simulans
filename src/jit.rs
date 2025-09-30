@@ -18,7 +18,7 @@ use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
 
 use crate::{
-    cpu_state::{ExitRequest, ExitRequestID, SysReg, SysRegEncoding},
+    cpu_state::{ExitRequestID, SysReg, SysRegEncoding},
     machine::{Armv8AMachine, TranslationBlock, TranslationBlocks},
     memory::{mmu::ResolvedAddress, Address, Width},
     tracing,
@@ -54,22 +54,6 @@ pub struct Entry(
 /// ([`Jit::translation_blocks`]).
 pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> Entry {
     let pc: u64 = machine.pc;
-    {
-        let mut exit_request_ref = machine.cpu_state.exit_request.lock().unwrap();
-        if let Some(exit_request) = exit_request_ref.as_ref() {
-            if let ExitRequest::Abort {
-                fault,
-                preferred_exception_return,
-            } = *exit_request
-            {
-                let _ = exit_request_ref.take();
-                drop(exit_request_ref);
-
-                crate::exceptions::aarch64_abort(machine, fault, preferred_exception_return);
-            }
-            return Entry(lookup_block);
-        }
-    }
     if tracing::event_enabled!(target: tracing::TraceItem::BlockEntry.as_str(), tracing::Level::TRACE)
     {
         crate::tracing::print_registers(machine);

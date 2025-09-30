@@ -86,19 +86,31 @@ impl Armv8AMachine {
 
     /// Returns `true` if machine is powered off.
     pub fn is_powered_off(&mut self) -> bool {
-        let mut exit_request = self.cpu_state.exit_request.lock().unwrap();
-        let retval = match *exit_request {
+        let mut exit_request_ref = self.cpu_state.exit_request.lock().unwrap();
+        if let Some(ExitRequest::Abort {
+            fault,
+            preferred_exception_return,
+        }) = exit_request_ref.as_ref().copied()
+        {
+            let _ = exit_request_ref.take();
+            drop(exit_request_ref);
+
+            crate::exceptions::aarch64_abort(self, fault, preferred_exception_return);
+            self.poll();
+            return false;
+        }
+        let retval = match *exit_request_ref {
             None => false,
             Some(ExitRequest::Poweroff) => true,
             Some(ExitRequest::WaitForEvent) => {
-                exit_request.take();
-                drop(exit_request);
+                exit_request_ref.take();
+                drop(exit_request_ref);
                 while !self.poll() {}
                 return false;
             }
             Some(ExitRequest::Yield) => {
-                exit_request.take();
-                drop(exit_request);
+                exit_request_ref.take();
+                drop(exit_request_ref);
                 let sleep_dur = std::time::Duration::from_millis(100);
                 let mut ctr = 0;
                 while !self.poll() && ctr < 5 {
@@ -109,7 +121,7 @@ impl Armv8AMachine {
             }
             Some(_) => false,
         };
-        drop(exit_request);
+        drop(exit_request_ref);
         self.poll();
 
         retval
