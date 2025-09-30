@@ -112,7 +112,7 @@ impl Default for RegisterFile {
 }
 
 /// Classes of exception.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Exception {
     /// Uncategorized or unknown reason
     Uncategorized,
@@ -499,6 +499,26 @@ impl ExecutionState {
             ExceptionLevel::EL0 | ExceptionLevel::EL1 => self.exception_registers.elr_el1 = val,
             ExceptionLevel::EL2 => self.exception_registers.elr_el2 = val,
             ExceptionLevel::EL3 => self.exception_registers.elr_el3 = val,
+        }
+    }
+
+    /// Sets `ESR_ELx` register value depending on target exception level.
+    pub fn set_esr_elx(&mut self, val: u64, target_el: ExceptionLevel) {
+        match target_el {
+            ExceptionLevel::EL0 => unreachable!(),
+            ExceptionLevel::EL1 => self.exception_registers.esr_el1 = val,
+            ExceptionLevel::EL2 => self.exception_registers.esr_el2 = val,
+            ExceptionLevel::EL3 => self.exception_registers.esr_el3 = val,
+        }
+    }
+
+    /// Sets `FAR_ELx` register value depending on target exception level.
+    pub fn set_far_elx(&mut self, val: u64, target_el: ExceptionLevel) {
+        match target_el {
+            ExceptionLevel::EL0 => unreachable!(),
+            ExceptionLevel::EL1 => self.exception_registers.far_el1 = val,
+            ExceptionLevel::EL2 => self.exception_registers.far_el2 = val,
+            ExceptionLevel::EL3 => self.exception_registers.far_el3 = val,
         }
     }
 
