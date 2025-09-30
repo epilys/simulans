@@ -557,6 +557,7 @@ pub extern "C" fn translate_address<'machine>(
                 }
             };
             params.level += 1;
+            fault.level += 1;
 
             let table_entry_1 =
                 read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));
@@ -627,6 +628,7 @@ pub extern "C" fn translate_address<'machine>(
                 }
             };
             params.level += 1;
+            fault.level += 1;
 
             let table_entry_2 =
                 read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));

@@ -82,7 +82,7 @@ fn test_mmu_4k() {
                     write: false,
                     s1tagnotdata: false,
                     tagaccess: false,
-                    level: 0,
+                    level: 1,
                     extflag: false,
                     secondstage: false,
                     assuredonly: false,
