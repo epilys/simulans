@@ -412,6 +412,7 @@ impl<'j> JitContext<'j> {
                     | Op::B_VS => 0,
                     Op::BRK
                     | Op::HVC
+                    | Op::SVC
                     | Op::WFI
                     | Op::WFIT
                     | Op::WFE
@@ -3045,6 +3046,38 @@ impl BlockTranslator<'_> {
                     &[self.machine_ptr, next_pc, imm],
                 );
             }
+            Op::SVC => {
+                let imm: u64 = match instruction.operands()[0] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(imm),
+                        shift: None,
+                    } => imm,
+                    other => unexpected_operand!(other),
+                };
+                let imm = self.builder.ins().iconst(I16, imm as i64);
+
+                let sigref = {
+                    let mut sig = self.module.make_signature();
+                    // machine: &mut crate::machine::Armv8AMachine,
+                    sig.params.push(AbiParam::new(self.pointer_type));
+                    // preferred_exception_return: Address,
+                    sig.params.push(AbiParam::new(I64));
+                    // immediate: u16,
+                    sig.params.push(AbiParam::new(I16));
+                    self.builder.import_signature(sig)
+                };
+                let func = self.builder.ins().iconst(
+                    I64,
+                    crate::exceptions::aarch64_call_supervisor as usize as u64 as i64,
+                );
+                let next_pc = self.builder.ins().iconst(I64, self.address as i64 + 4);
+                return self.emit_indirect_noreturn(
+                    self.address,
+                    sigref,
+                    func,
+                    &[self.machine_ptr, next_pc, imm],
+                );
+            }
             Op::IC => {
                 // Instruction cache operation
             }
@@ -4229,7 +4262,6 @@ impl BlockTranslator<'_> {
             Op::SUNPKHI => todo!(),
             Op::SUNPKLO => todo!(),
             Op::SUQADD => todo!(),
-            Op::SVC => todo!(),
             Op::SWP => todo!(),
             Op::SWPA => todo!(),
             Op::SWPAB => todo!(),

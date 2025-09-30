@@ -1072,6 +1072,44 @@ pub fn aarch64_call_hypervisor(
     );
 }
 
+/// Perform SVC call
+///
+/// `AArch64.CallSupervisor`
+pub fn aarch64_call_supervisor(
+    machine: &mut crate::machine::Armv8AMachine,
+    preferred_exception_return: Address,
+    immediate: u16,
+) {
+    let current_el = machine.cpu_state.PSTATE().EL();
+
+    let route_to_el2 = current_el == ExceptionLevel::EL0 && machine.cpu_state.EL2_enabled() && {
+        // HCR_EL2.TGE == '1';
+        machine.cpu_state.control_registers.hcr_el2 & (1 << 27) > 0
+    };
+
+    let target_el = if current_el > ExceptionLevel::EL1 {
+        current_el
+    } else if route_to_el2 {
+        ExceptionLevel::EL2
+    } else {
+        ExceptionLevel::EL1
+    };
+    assert!(machine.cpu_state.have_el(target_el), "{target_el:?}");
+    let vect_offset = Address(0x0);
+
+    let mut except = ExceptionRecord::exception_syndrome(Exception::SupervisorCall);
+    except.syndrome.set_iss_bits(0, 16, immediate);
+    tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, ?target_el, ?vect_offset, ?except, ?preferred_exception_return, "AArch64.CallSupervisor");
+
+    aarch64_take_exception(
+        machine,
+        target_el,
+        except,
+        preferred_exception_return,
+        vect_offset,
+    );
+}
+
 /// Software breakpoint
 ///
 /// `AArch64.SoftwareBreakpoint`
