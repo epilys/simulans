@@ -603,12 +603,100 @@ pub extern "C" fn aarch64_undefined(
     }
 }
 
+/// Returns the Exception Class and Instruction Length fields to be reported in
+/// `ESR` `AArch64.ExceptionClass`
+fn exception_class(
+    exceptype: Exception,
+    pstate: &PSTATE,
+    target_el: ExceptionLevel,
+) -> (u32, bool) {
+    let mut ec = match exceptype {
+        Exception::IRQ | Exception::FIQ => unreachable!(),
+        Exception::Uncategorized => 0x00,
+        Exception::WFxTrap => 0x01,
+        // Exception::AdvSIMDFPAccessTrap => 0x07,
+        // Exception::FPIDTrap => 0x08,
+        // Exception::PACTrap => 0x09,
+        // Exception::LDST64BTrap => 0x0A,
+        // Exception::TSTARTAccessTrap => 0x1B,
+        // Exception::GPC => 0x1E,
+        // Exception::BranchTarget => 0x0D,
+        Exception::IllegalState => 0x0E,
+        Exception::SupervisorCall => 0x11,
+        Exception::HypervisorCall => 0x12,
+        Exception::MonitorCall => 0x13,
+        Exception::SystemRegisterTrap => 0x18,
+        // Exception::SystemRegister128Trap => 0x14,
+        // Exception::SVEAccessTrap => 0x19,
+        Exception::ERetTrap => 0x1A,
+        Exception::PACFail => 0x1C,
+        // Exception::SMEAccessTrap => 0x1D,
+        Exception::InstructionAbort => 0x20,
+        Exception::PCAlignment => 0x22,
+        Exception::DataAbort => 0x24,
+        Exception::NV2DataAbort => 0x25,
+        Exception::SPAlignment => 0x26,
+        // Exception::MemCpyMemSet => 0x27,
+        // Exception::GCSFail => 0x2D,
+        Exception::FPTrappedException => 0x28,
+        Exception::SError => 0x2F,
+        Exception::Breakpoint => 0x30,
+        Exception::SoftwareStep => 0x32,
+        Exception::Watchpoint => 0x34,
+        Exception::NV2Watchpoint => 0x35,
+        Exception::SoftwareBreakpoint => 0x38,
+        // Exception::Profiling => 0x3D,
+    };
+    if [0x20, 0x24, 0x30, 0x32, 0x34].contains(&ec) && target_el == pstate.EL() {
+        ec += 1;
+    }
+    if [0x11, 0x12, 0x13, 0x28, 0x38].contains(&ec) {
+        ec += 4;
+    }
+    (ec, true)
+}
+
+/// Report syndrome information for exception taken to `AArch64` state
+///
+/// `AArch64.ReportException`
+fn aarch64_report_exception(
+    machine: &mut crate::machine::Armv8AMachine,
+    except: &ExceptionRecord,
+    target_el: ExceptionLevel,
+) {
+    let (ec, il) = exception_class(except.exceptype, &machine.cpu_state.PSTATE(), target_el);
+    let iss = except.syndrome.iss();
+    let iss2 = except.syndrome.iss2();
+    let esr = //0  <63:56>
+             u64::from(iss2) << 32 // <55:32>
+             | u64::from(get_bits!(ec, off = 0, len = 6)) << 26 // ec<5:0>  <31:26>
+             | u64::from(il) << 25 // <25>
+             | u64::from(iss); // <24:0>
+    machine.cpu_state.set_esr_elx(esr, target_el);
+
+    if [
+        Exception::InstructionAbort,
+        Exception::PCAlignment,
+        Exception::DataAbort,
+        Exception::NV2DataAbort,
+        Exception::NV2Watchpoint,
+        // Exception::GPC,
+        Exception::Watchpoint,
+    ]
+    .contains(&except.exceptype)
+    {
+        machine.cpu_state.set_far_elx(except.vaddress.0, target_el);
+    } else {
+        machine.cpu_state.set_far_elx(0, target_el);
+    }
+}
+
 /// Prepares machine state to take an exception and updates `pc` with the
 /// appropriate exception vector entry.
 pub fn aarch64_take_exception(
     machine: &mut crate::machine::Armv8AMachine,
     target_el: ExceptionLevel,
-    _exception: ExceptionRecord,
+    except: ExceptionRecord,
     preferred_exception_return: Address,
     vect_offset: Address,
 ) {
@@ -638,6 +726,10 @@ pub fn aarch64_take_exception(
         adjusted_vect_offset += if lower_32 { 0x600_u64 } else { 0x400 };
     } else if matches!(machine.cpu_state.PSTATE().SP(), SpSel::Current) {
         adjusted_vect_offset += 0x200_u64;
+    }
+
+    if !matches!(except.exceptype, Exception::IRQ | Exception::FIQ) {
+        aarch64_report_exception(machine, &except, target_el);
     }
 
     // bits(64) spsr = GetPSRFromPSTATE(AArch64_NonDebugState, 64);

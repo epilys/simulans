@@ -198,6 +198,9 @@ pub enum SysReg {
     SPSR_EL1,
     SPSR_EL2,
     SPSR_EL3,
+    FAR_EL1,
+    FAR_EL2,
+    FAR_EL3,
 }
 
 impl From<SysRegEncoding> for SysReg {
@@ -570,6 +573,9 @@ impl From<&bad64::SysReg> for SysReg {
             bad64::SysReg::ESR_EL1 => Self::ESR_EL1,
             bad64::SysReg::ESR_EL2 => Self::ESR_EL2,
             bad64::SysReg::ESR_EL3 => Self::ESR_EL3,
+            bad64::SysReg::FAR_EL1 => Self::FAR_EL1,
+            bad64::SysReg::FAR_EL2 => Self::FAR_EL2,
+            bad64::SysReg::FAR_EL3 => Self::FAR_EL3,
             bad64::SysReg::VBAR_EL1 => Self::VBAR_EL1,
             bad64::SysReg::VBAR_EL2 => Self::VBAR_EL2,
             bad64::SysReg::VBAR_EL3 => Self::VBAR_EL3,
