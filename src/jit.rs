@@ -2836,6 +2836,13 @@ impl BlockTranslator<'_> {
                 let width = target.width;
                 let value = match target.element {
                     Some(ArrSpec::TwoDoubles(None)) => self.builder.ins().iconcat(value, value),
+                    Some(ArrSpec::SixteenBytes(None)) => {
+                        let value = self.builder.ins().ireduce(I8, value);
+                        let value = self.builder.ins().splat(I8X16, value);
+                        self.builder
+                            .ins()
+                            .bitcast(I128, MEMFLAG_LITTLE_ENDIAN, value)
+                    }
                     other => unimplemented!("{other:?}"),
                 };
                 write_to_register!(target, TypedValue { value, width });
