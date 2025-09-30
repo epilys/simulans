@@ -264,10 +264,14 @@ impl ExecutionState {
         spsr.set_SS(pstate.SS());
         spsr.set_IL(pstate.IL());
         spsr.set_nRW(ArchMode::_64);
-        spsr.set_M(match pstate.SP() {
-            SpSel::SpEl0 => Mode::EL1t,
-            SpSel::Current => Mode::EL1h,
-        });
+        if pstate.EL() == ExceptionLevel::EL0 {
+            spsr.set_M(Mode::EL0);
+        } else {
+            spsr.set_M(match pstate.SP() {
+                SpSel::SpEl0 => Mode::EL1t,
+                SpSel::Current => Mode::EL1h,
+            });
+        }
         spsr
     }
 
