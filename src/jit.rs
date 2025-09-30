@@ -3438,6 +3438,7 @@ impl BlockTranslator<'_> {
                         (false, I16X8, self.builder.ins().ireduce(I16, value))
                     }
                     Some(ArrSpec::TwoSingles(None)) => (true, I32X4, value),
+                    Some(ArrSpec::FourSingles(None)) => (false, I32X4, value),
                     other => unimplemented!("{other:?}"),
                 };
                 let value = self.builder.ins().splat(vector_type, value);
