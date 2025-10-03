@@ -57,19 +57,20 @@ impl BlockTranslator<'_> {
         &mut self,
         x: Value,
         y: Value,
-        _orig_y: Value,
         carry_in: Value,
         width: Width,
     ) -> (Value, [Value; 4]) {
         let carry_in = self.builder.ins().uextend(width.into(), carry_in);
-        let (signed_sum, mut overflow) = self.builder.ins().sadd_overflow(x, y);
-        {
-            let (_, carry_overflow) = self.builder.ins().sadd_overflow(signed_sum, carry_in);
-            overflow = self.builder.ins().bor(overflow, carry_overflow);
-        }
-        let (result, overflow_2) = self.builder.ins().uadd_overflow(x, y);
-        let (result, mut carry_out) = self.builder.ins().uadd_overflow(result, carry_in);
-        carry_out = self.builder.ins().bor(overflow_2, carry_out);
+        let overflow = {
+            let (signed_sum, overflow) = self.builder.ins().sadd_overflow(y, carry_in);
+            let (_, carry_overflow) = self.builder.ins().sadd_overflow(signed_sum, x);
+            self.builder.ins().bxor(overflow, carry_overflow)
+        };
+        let (result, carry_out) = {
+            let (result, overflow_2) = self.builder.ins().uadd_overflow(y, carry_in);
+            let (result, carry_out) = self.builder.ins().uadd_overflow(result, x);
+            (result, self.builder.ins().bxor(overflow_2, carry_out))
+        };
         let n = self
             .builder
             .ins()

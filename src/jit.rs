@@ -1761,7 +1761,7 @@ impl BlockTranslator<'_> {
                 let b = self.translate_operand_extended(&instruction.operands()[2], width);
                 let negoperand2 = self.builder.ins().bnot(b);
                 let one = self.builder.ins().iconst(I8, 1);
-                let (result, nzcv) = self.add_with_carry(a, negoperand2, b, one, width);
+                let (result, nzcv) = self.add_with_carry(a, negoperand2, one, width);
                 write_to_register!(
                     target,
                     TypedValue {
@@ -2068,8 +2068,7 @@ impl BlockTranslator<'_> {
                 let operand1 = self.translate_operand(&instruction.operands()[1]);
                 let operand2 = self.translate_operand(&instruction.operands()[2]);
                 let carry_in = self.condition_holds(bad64::Condition::CS);
-                let (result, _nzcv) =
-                    self.add_with_carry(operand1, operand2, operand2, carry_in, width);
+                let (result, _nzcv) = self.add_with_carry(operand1, operand2, carry_in, width);
                 write_to_register!(
                     target,
                     TypedValue {
@@ -2087,8 +2086,7 @@ impl BlockTranslator<'_> {
                 let operand2 = self.translate_operand(&instruction.operands()[2]);
                 let operand2 = self.builder.ins().bnot(operand2);
                 let carry_in = self.condition_holds(bad64::Condition::CS);
-                let (result, _nzcv) =
-                    self.add_with_carry(operand1, operand2, operand2, carry_in, width);
+                let (result, _nzcv) = self.add_with_carry(operand1, operand2, carry_in, width);
                 write_to_register!(
                     target,
                     TypedValue {
@@ -2106,8 +2104,7 @@ impl BlockTranslator<'_> {
                 let operand2 = self.translate_operand(&instruction.operands()[1]);
                 let operand2 = self.builder.ins().bnot(operand2);
                 let carry_in = self.condition_holds(bad64::Condition::CS);
-                let (result, _nzcv) =
-                    self.add_with_carry(operand1, operand2, operand2, carry_in, width);
+                let (result, _nzcv) = self.add_with_carry(operand1, operand2, carry_in, width);
                 write_to_register!(
                     target,
                     TypedValue {
@@ -2134,7 +2131,7 @@ impl BlockTranslator<'_> {
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand_extended(&instruction.operands()[2], width);
                 let zero = self.builder.ins().iconst(I8, 0);
-                let (result, nzcv) = self.add_with_carry(a, b, b, zero, width);
+                let (result, nzcv) = self.add_with_carry(a, b, zero, width);
                 write_to_register!(
                     target,
                     TypedValue {
@@ -2396,8 +2393,7 @@ impl BlockTranslator<'_> {
                 let negoperand2 = self.builder.ins().bnot(operand2);
                 let one = self.builder.ins().iconst(I8, 1);
                 let width = self.operand_width(&instruction.operands()[0]);
-                let (_result, nzcv) =
-                    self.add_with_carry(operand1, negoperand2, operand2, one, width);
+                let (_result, nzcv) = self.add_with_carry(operand1, negoperand2, one, width);
                 // discard result, only update NZCV flags.
                 self.update_nzcv(nzcv);
                 self.builder.ins().jump(merge_block, &[]);
@@ -2441,8 +2437,7 @@ impl BlockTranslator<'_> {
                 let negoperand2 = self.builder.ins().bnot(operand2);
                 let one = self.builder.ins().iconst(I8, 1);
                 let width = self.operand_width(&instruction.operands()[0]);
-                let (_result, nzcv) =
-                    self.add_with_carry(operand1, negoperand2, operand2, one, width);
+                let (_result, nzcv) = self.add_with_carry(operand1, negoperand2, one, width);
                 // discard result, only update NZCV flags.
                 self.update_nzcv(nzcv);
                 self.builder.ins().jump(merge_block, &[]);
@@ -2503,7 +2498,7 @@ impl BlockTranslator<'_> {
                 let a = self.translate_operand(&instruction.operands()[0]);
                 let b = self.translate_operand_extended(&instruction.operands()[1], width);
                 let zero = self.builder.ins().iconst(I8, 0);
-                let (_result, nzcv) = self.add_with_carry(a, b, b, zero, width);
+                let (_result, nzcv) = self.add_with_carry(a, b, zero, width);
                 self.update_nzcv(nzcv);
             }
             Op::CMP => {
@@ -2512,7 +2507,7 @@ impl BlockTranslator<'_> {
                 let b = self.translate_operand_extended(&instruction.operands()[1], width);
                 let negoperand2 = self.builder.ins().bnot(b);
                 let one = self.builder.ins().iconst(I8, 1);
-                let (_result, nzcv) = self.add_with_carry(a, negoperand2, b, one, width);
+                let (_result, nzcv) = self.add_with_carry(a, negoperand2, one, width);
                 // discard result, only update NZCV flags.
                 self.update_nzcv(nzcv);
             }
@@ -3497,7 +3492,7 @@ impl BlockTranslator<'_> {
                 let b = self.translate_operand_extended(&instruction.operands()[2], width);
                 let negoperand2 = self.builder.ins().bnot(b);
                 let one = self.builder.ins().iconst(I8, 1);
-                let (result, nzcv) = self.add_with_carry(a, negoperand2, b, one, width);
+                let (result, nzcv) = self.add_with_carry(a, negoperand2, one, width);
                 write_to_register!(
                     target,
                     TypedValue {
