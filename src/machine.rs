@@ -8,8 +8,10 @@ use std::{collections::BTreeSet, num::NonZero, pin::Pin};
 use crate::{cpu_state::*, devices::timer::GenericTimer, memory::*, tracing};
 
 mod psci;
+mod tlb;
 mod translation_blocks;
 
+pub use tlb::TLB;
 pub use translation_blocks::{TranslationBlock, TranslationBlocks};
 
 pub mod interrupts;
@@ -36,6 +38,8 @@ pub struct Armv8AMachine {
     pub in_breakpoint: bool,
     /// List of breakpoint addresses.
     pub hw_breakpoints: BTreeSet<Address>,
+    /// Translation lookaside buffer.
+    pub tlb: TLB,
     /// Interrupt generators and subscribers/handlers
     pub interrupts: Interrupts,
     /// Generic timer
@@ -53,6 +57,7 @@ impl Armv8AMachine {
             memory,
             in_breakpoint: false,
             hw_breakpoints: BTreeSet::new(),
+            tlb: TLB::new(),
             interrupts,
             timer,
         })

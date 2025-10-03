@@ -102,7 +102,7 @@ pub struct TranslationControlRegister {
     /// `T1SZ[21:16]`
     pub T1SZ: u6,
     /// `A1[22:22]`
-    pub A1: u1,
+    pub A1: bool,
     /// `EPD1[23:23]`
     pub EPD1: u1,
     /// `IRGN1[25:24]`

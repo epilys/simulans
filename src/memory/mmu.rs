@@ -136,6 +136,7 @@ struct IAParameters {
     va_range: VARange,
     #[allow(dead_code)]
     regime: Regime,
+    asid: u16,
     level: u8,
     granule: Granule,
     ttbr: Address,
@@ -189,6 +190,23 @@ impl IAParameters {
             (VARange::Lower, Regime::EL10) => machine.cpu_state.mmu_registers.ttbr0_el1,
             (VARange::Upper, Regime::EL10) => machine.cpu_state.mmu_registers.ttbr1_el1,
         });
+        let asid = if !tcr.A1() {
+            let ttbr0 = match regime {
+                Regime::EL3 => machine.cpu_state.mmu_registers.ttbr0_el3,
+                Regime::EL2 => machine.cpu_state.mmu_registers.ttbr0_el2,
+                Regime::EL20 => machine.cpu_state.mmu_registers.ttbr0_el2,
+                Regime::EL10 => machine.cpu_state.mmu_registers.ttbr0_el1,
+            };
+            TranslationTableBaseRegister::from(ttbr0).ASID()
+        } else {
+            let ttbr1 = match regime {
+                Regime::EL3 => unimplemented!(),
+                Regime::EL2 => unimplemented!(),
+                Regime::EL20 => machine.cpu_state.mmu_registers.ttbr1_el2,
+                Regime::EL10 => machine.cpu_state.mmu_registers.ttbr1_el1,
+            };
+            TranslationTableBaseRegister::from(ttbr1).ASID()
+        };
 
         let (granule, mut tsz, ds): (_, u8, _) = match va_range {
             VARange::Upper => (tcr.ttbr1_granule(), tcr.T1SZ().into(), tcr.DS().into()),
@@ -216,6 +234,7 @@ impl IAParameters {
         Self {
             level: s1startlevel,
             va_range,
+            asid,
             regime,
             ttbr,
             granule,
@@ -419,9 +438,22 @@ pub extern "C" fn translate_address<'machine>(
             ret,
         );
     }
+    let mut params = IAParameters::new(machine, &input_address);
+    {
+        let vpn = input_address.0 >> 12;
+        if let Some(page) = machine.tlb.get(&(params.asid, vpn)) {
+            let output_address = Address(page | get_bits!(input_address.0, off = 0, len = 12));
+            return physical_address_lookup(
+                machine,
+                output_address,
+                preferred_exception_return,
+                raise_exception,
+                ret,
+            );
+        }
+    }
 
     let accessdesc = AccessDescriptor::new(privileged, &pstate, AccessType::TTW);
-    let mut params = IAParameters::new(machine, &input_address);
     let page_table_base_address: Address =
         TranslationTableBaseRegister::from(params.ttbr.0).base_address(&params);
 
@@ -512,6 +544,12 @@ pub extern "C" fn translate_address<'machine>(
                             resolved_address = ?output_address,
                         );
                     }
+                    {
+                        let vpn = input_address.0 >> 12;
+                        let page = output_address.0 >> 12;
+                        let page = page << 12;
+                        machine.tlb.insert((params.asid, vpn), page);
+                    }
                     return physical_address_lookup(
                         machine,
                         output_address,
@@ -535,6 +573,12 @@ pub extern "C" fn translate_address<'machine>(
                             resolved_address = ?output_address
                         )
                     };
+                    {
+                        let vpn = input_address.0 >> 12;
+                        let page = output_address.0 >> 12;
+                        let page = page << 12;
+                        machine.tlb.insert((params.asid, vpn), page);
+                    }
                     return physical_address_lookup(
                         machine,
                         output_address,
@@ -583,6 +627,12 @@ pub extern "C" fn translate_address<'machine>(
                             resolved_address = ?output_address,
                         );
                     }
+                    {
+                        let vpn = input_address.0 >> 12;
+                        let page = output_address.0 >> 12;
+                        let page = page << 12;
+                        machine.tlb.insert((params.asid, vpn), page);
+                    }
                     return physical_address_lookup(
                         machine,
                         output_address,
@@ -605,6 +655,12 @@ pub extern "C" fn translate_address<'machine>(
                             tracing::Level::TRACE,
                             resolved_address = ?output_address,
                         );
+                    }
+                    {
+                        let vpn = input_address.0 >> 12;
+                        let page = output_address.0 >> 12;
+                        let page = page << 12;
+                        machine.tlb.insert((params.asid, vpn), page);
                     }
                     return physical_address_lookup(
                         machine,
@@ -654,6 +710,12 @@ pub extern "C" fn translate_address<'machine>(
                             resolved_address = ?output_address,
                         );
                     }
+                    {
+                        let vpn = input_address.0 >> 12;
+                        let page = output_address.0 >> 12;
+                        let page = page << 12;
+                        machine.tlb.insert((params.asid, vpn), page);
+                    }
                     return physical_address_lookup(
                         machine,
                         output_address,
@@ -676,6 +738,12 @@ pub extern "C" fn translate_address<'machine>(
                             tracing::Level::TRACE,
                             resolved_address = ?output_address
                         );
+                    }
+                    {
+                        let vpn = input_address.0 >> 12;
+                        let page = output_address.0 >> 12;
+                        let page = page << 12;
+                        machine.tlb.insert((params.asid, vpn), page);
                     }
                     return physical_address_lookup(
                         machine,
@@ -708,6 +776,12 @@ pub extern "C" fn translate_address<'machine>(
                     tracing::Level::TRACE,
                     resolved_address = ?output_address
                 );
+            }
+            {
+                let vpn = input_address.0 >> 12;
+                let page = output_address.0 >> 12;
+                let page = page << 12;
+                machine.tlb.insert((params.asid, vpn), page);
             }
             physical_address_lookup(
                 machine,
@@ -773,4 +847,8 @@ pub extern "C" fn mem_zero(
         }
     }
     true
+}
+
+pub extern "C" fn tlbi(machine: &Armv8AMachine) {
+    machine.tlb.clear();
 }
