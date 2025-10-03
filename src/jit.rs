@@ -4348,6 +4348,20 @@ impl BlockTranslator<'_> {
             Op::TCOMMIT => todo!(),
             Op::TLBI => {
                 // TLB invalidate operation
+                let sigref = {
+                    let mut sig = self.module.make_signature();
+                    sig.params.push(AbiParam::new(self.pointer_type));
+                    self.builder.import_signature(sig)
+                };
+                let func = self
+                    .builder
+                    .ins()
+                    .iconst(I64, crate::memory::mmu::tlbi as usize as u64 as i64);
+                let call = self
+                    .builder
+                    .ins()
+                    .call_indirect(sigref, func, &[self.machine_ptr]);
+                _ = self.builder.inst_results(call);
             }
             Op::TRN1 => todo!(),
             Op::TRN2 => todo!(),
