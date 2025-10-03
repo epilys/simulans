@@ -1561,7 +1561,8 @@ impl BlockTranslator<'_> {
                 let value = self.generate_read(source_address, width);
                 write_to_register!(target2, TypedValue { value, width });
             }
-            Op::LDRH => {
+            Op::LDARH | Op::LDRH => {
+                // [ref:atomics]: We don't model exclusive access (yet).
                 let target = get_destination_register!();
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_16);
@@ -3166,7 +3167,6 @@ impl BlockTranslator<'_> {
             Op::LDAPURSB => todo!(),
             Op::LDAPURSH => todo!(),
             Op::LDAPURSW => todo!(),
-            Op::LDARH => todo!(),
             Op::LDAXP => todo!(),
             Op::LDAXR => {
                 // [ref:atomics]: We don't model exclusive access (yet).
