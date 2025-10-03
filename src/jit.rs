@@ -2018,6 +2018,16 @@ impl BlockTranslator<'_> {
                 let width = self.operand_width(&instruction.operands()[1]);
                 write_to_register!(target, TypedValue { value, width });
             }
+            Op::EON => {
+                // Bitwise XOR NOT
+                let target = get_destination_register!();
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let b = self.translate_operand(&instruction.operands()[2]);
+                let b = self.builder.ins().bnot(b);
+                let value = self.builder.ins().bxor(a, b);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width });
+            }
             Op::LSL => {
                 // Logical shift left
                 // This instruction shifts a register value left by an immediate number of bits,
@@ -2845,7 +2855,6 @@ impl BlockTranslator<'_> {
             }
             Op::DUPM => todo!(),
             Op::DVP => todo!(),
-            Op::EON => todo!(),
             Op::EOR3 => todo!(),
             Op::EORBT => todo!(),
             Op::EORS => todo!(),
