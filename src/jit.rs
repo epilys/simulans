@@ -2885,7 +2885,6 @@ impl BlockTranslator<'_> {
             Op::EXT => todo!(),
             Op::EXTR => {
                 // Extract register extracts a register from a pair of registers.
-                // [ref:needs_unit_test]
                 let target = get_destination_register!();
                 let n = self.translate_operand(&instruction.operands()[1]);
                 let m = self.translate_operand(&instruction.operands()[2]);
@@ -2897,7 +2896,11 @@ impl BlockTranslator<'_> {
                     other => unexpected_operand!(other),
                 };
                 let width = self.operand_width(&instruction.operands()[1]);
-                let n = self.builder.ins().ishl_imm(n, width as i64 - lsb);
+                let n = if lsb == 0 {
+                    self.builder.ins().iconst(width.into(), 0)
+                } else {
+                    self.builder.ins().ishl_imm(n, width as i64 - lsb)
+                };
                 let m = self.builder.ins().ushr_imm(m, lsb);
                 let value = self.builder.ins().bor(n, m);
                 write_to_register!(target, TypedValue { value, width });

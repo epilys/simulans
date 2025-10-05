@@ -235,3 +235,21 @@ fn test_overflow() {
     assert_hex_eq!(machine.cpu_state.registers.x20, 2147483648);
     assert!(!machine.cpu_state.PSTATE().NZCV().V());
 }
+
+#[test_log::test]
+fn test_extract() {
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_extract.bin");
+    utils::disas(TEST_INPUT, 0);
+
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+
+    let entry_point = Address(0);
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+
+    assert_hex_eq!(machine.cpu_state.registers.x18, 0x15440000);
+    assert_hex_eq!(machine.cpu_state.registers.x19, 0x3f154400);
+    assert_hex_eq!(machine.cpu_state.registers.x20, 0x307715440000);
+    assert_hex_eq!(machine.cpu_state.registers.x21, 0x3f00003077154400);
+}
