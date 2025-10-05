@@ -4033,13 +4033,41 @@ impl BlockTranslator<'_> {
             Op::SMLSLB => todo!(),
             Op::SMLSLT => todo!(),
             Op::SMMLA => todo!(),
-            Op::SMNEGL => todo!(),
             Op::SMOPA => todo!(),
             Op::SMOPS => todo!(),
             Op::SMOV => todo!(),
             Op::SMSTART => todo!(),
             Op::SMSTOP => todo!(),
-            Op::SMSUBL => todo!(),
+            Op::SMSUBL => {
+                // Signed Multiply-Subtract Long
+
+                // [ref:needs_unit_test]
+                let destination = get_destination_register!();
+                let n = self.translate_operand(&instruction.operands()[1]);
+                let m = self.translate_operand(&instruction.operands()[2]);
+                let a = self.translate_operand(&instruction.operands()[3]);
+                let n = self.builder.ins().sextend(I64, n);
+                let m = self.builder.ins().sextend(I64, m);
+                let (value, _) = self.builder.ins().smul_overflow(n, m);
+                let value = self.builder.ins().isub(a, value);
+                let width = Width::_64;
+                write_to_register!(destination, TypedValue { value, width });
+            }
+            Op::SMNEGL => {
+                // Signed multiply-negate long
+
+                // [ref:needs_unit_test]
+                let destination = get_destination_register!();
+                let n = self.translate_operand(&instruction.operands()[1]);
+                let m = self.translate_operand(&instruction.operands()[2]);
+                let a = self.builder.ins().iconst(I64, 0);
+                let n = self.builder.ins().sextend(I64, n);
+                let m = self.builder.ins().sextend(I64, m);
+                let (value, _) = self.builder.ins().smul_overflow(n, m);
+                let value = self.builder.ins().isub(a, value);
+                let width = Width::_64;
+                write_to_register!(destination, TypedValue { value, width });
+            }
             Op::SMULH => {
                 // [ref:needs_unit_test]
                 let destination = get_destination_register!();
