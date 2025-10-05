@@ -36,7 +36,7 @@ macro_rules! assert_hex_eq {
         assert_eq!(
             left,
             right,
-            "Comparing {left_s} with {right_s} failed:\n0x{left:032x} {left_s}\n0x{right:032x} \
+            "Comparing {left_s} with {right_s} failed:\n0x{left:016x} {left_s}\n0x{right:016x} \
              {right_s}\n0b{left:064b} {left_s}\n0b{right:064b} {right_s}",
             left_s = stringify!($left),
             right_s = stringify!($right),
@@ -51,7 +51,7 @@ macro_rules! assert_hex_eq {
             left,
             right,
             "Comparing {left_s} with {right_s} failed:\n0x{left:032x} {left_s}\n0x{right:032x} \
-             {right_s}\n0b{left:064b} {left_s}\n0b{right:064b} {right_s}",
+             {right_s}\n0b{left:0128b} {left_s}\n0b{right:0128b} {right_s}",
             left_s = stringify!($left),
             right_s = stringify!($right),
             left = left,
