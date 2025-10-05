@@ -3685,7 +3685,7 @@ impl BlockTranslator<'_> {
                     let b = self.builder.ins().bswap(b);
                     let b = self.builder.ins().uextend(I64, b);
                     let b = self.builder.ins().ishl_imm(b, 32);
-                    self.builder.ins().band(a, b)
+                    self.builder.ins().bor(a, b)
                 };
                 write_to_register!(target, TypedValue { value, width });
             }
