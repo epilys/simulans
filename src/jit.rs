@@ -772,6 +772,7 @@ impl BlockTranslator<'_> {
                     other => unimplemented!("unimplemented shift {other:?}"),
                 }
             }
+            Operand::MemReg(reg) => self.reg_to_value(reg, None),
             Operand::MemOffset {
                 reg,
                 offset,
