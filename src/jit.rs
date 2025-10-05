@@ -3633,6 +3633,35 @@ impl BlockTranslator<'_> {
 
                         write_to_register!(target, TypedValue { value, width });
                     }
+                    Width::_64 => {
+                        let h_1 = self.builder.ins().ireduce(I16, value);
+                        let h_1 = self.builder.ins().bswap(h_1);
+                        let h_1 = self.builder.ins().uextend(I64, h_1);
+
+                        let h_2 = self.builder.ins().ushr_imm(value, 16);
+                        let h_2 = self.builder.ins().ireduce(I16, h_2);
+                        let h_2 = self.builder.ins().bswap(h_2);
+                        let h_2 = self.builder.ins().uextend(I64, h_2);
+                        let h_2 = self.builder.ins().ishl_imm(h_2, 16);
+
+                        let h_3 = self.builder.ins().ushr_imm(value, 32);
+                        let h_3 = self.builder.ins().ireduce(I16, h_3);
+                        let h_3 = self.builder.ins().bswap(h_3);
+                        let h_3 = self.builder.ins().uextend(I64, h_3);
+                        let h_3 = self.builder.ins().ishl_imm(h_3, 32);
+
+                        let h_4 = self.builder.ins().ushr_imm(value, 48);
+                        let h_4 = self.builder.ins().ireduce(I16, h_4);
+                        let h_4 = self.builder.ins().bswap(h_4);
+                        let h_4 = self.builder.ins().uextend(I64, h_4);
+                        let h_4 = self.builder.ins().ishl_imm(h_4, 48);
+
+                        let value = self.builder.ins().bor(h_1, h_2);
+                        let value = self.builder.ins().bor(value, h_3);
+                        let value = self.builder.ins().bor(value, h_4);
+
+                        write_to_register!(target, TypedValue { value, width });
+                    }
                     other => unimplemented!("{other:?}"),
                 }
             }
