@@ -3501,7 +3501,7 @@ impl BlockTranslator<'_> {
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let a = self.builder.ins().iconst(width.into(), 0);
-                let b = self.translate_operand_extended(&instruction.operands()[2], width);
+                let b = self.translate_operand_extended(&instruction.operands()[1], width);
                 let negoperand2 = self.builder.ins().bnot(b);
                 let one = self.builder.ins().iconst(I8, 1);
                 let (result, nzcv) = self.add_with_carry(a, negoperand2, one, width);
