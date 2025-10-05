@@ -1987,6 +1987,32 @@ impl BlockTranslator<'_> {
                     },
                 );
             }
+            Op::BFC => {
+                // Bitfield clear
+                // BFC <Wd>, #<lsb>, #<width>
+                let destination = get_destination_register!();
+                let dst_val = self.translate_operand(&instruction.operands()[0]);
+                let width = self.operand_width(&instruction.operands()[0]);
+                let lsb: i64 = match instruction.operands()[1] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(lsb),
+                        shift: None,
+                    } => lsb.try_into().unwrap(),
+                    other => unexpected_operand!(other),
+                };
+                let w: i64 = match instruction.operands()[2] {
+                    bad64::Operand::Imm32 {
+                        imm: bad64::Imm::Unsigned(w),
+                        shift: None,
+                    } => w.try_into().unwrap(),
+                    other => unexpected_operand!(other),
+                };
+                let value = self
+                    .builder
+                    .ins()
+                    .band_imm(dst_val, !((2_i64.pow(w as u32) - 1) << lsb));
+                write_to_register!(destination, TypedValue { value, width },);
+            }
             Op::ORR => {
                 // Bitwise OR
                 // This instruction performs a bitwise (inclusive) OR of a register value and an
@@ -2186,7 +2212,6 @@ impl BlockTranslator<'_> {
             Op::BCAX => todo!(),
             Op::BDEP => todo!(),
             Op::BEXT => todo!(),
-            Op::BFC => todo!(),
             Op::BFCVT => todo!(),
             Op::BFCVTN => todo!(),
             Op::BFCVTN2 => todo!(),

@@ -92,6 +92,7 @@ fn test_bitfields() {
     assert_hex_eq!(machine.cpu_state.registers.x3, (0x55555555 & 0b111) << 5);
     assert_hex_eq!(machine.cpu_state.registers.x4, 0x55555555 & 0b11111);
     assert_hex_eq!(machine.cpu_state.registers.x5, (0x55555555 & 0b1) << 63);
+    assert_hex_eq!(machine.cpu_state.registers.x2, 0xaaaaaaaa & !(0b11111 << 3));
 }
 
 #[test_log::test]
