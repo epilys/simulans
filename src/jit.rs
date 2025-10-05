@@ -4624,18 +4624,38 @@ impl BlockTranslator<'_> {
             Op::UMLSLB => todo!(),
             Op::UMLSLT => todo!(),
             Op::UMMLA => todo!(),
-            Op::UMNEGL => todo!(),
             Op::UMOPA => todo!(),
             Op::UMOPS => todo!(),
             Op::UMOV => todo!(),
             Op::UMSUBL => {
-                // Unsigned Multiply-Subtract Long multiplies two 32-bit register values,
+                // Unsigned Multiply-Subtract Long
+                // multiplies two 32-bit register values,
                 // subtracts the product from a 64-bit register value, and writes the result to
-                // the 64-bit destination register. [ref:needs_unit_test]
+                // the 64-bit destination register.
+
+                // [ref:needs_unit_test]
                 let destination = get_destination_register!();
                 let n = self.translate_operand(&instruction.operands()[1]);
                 let m = self.translate_operand(&instruction.operands()[2]);
                 let a = self.translate_operand(&instruction.operands()[3]);
+                let n = self.builder.ins().uextend(I64, n);
+                let m = self.builder.ins().uextend(I64, m);
+                let value = self.builder.ins().imul(n, m);
+                let value = self.builder.ins().isub(a, value);
+                let width = Width::_64;
+                write_to_register!(destination, TypedValue { value, width });
+            }
+            Op::UMNEGL => {
+                // Unsigned multiply-negate long
+                // This instruction multiplies two 32-bit register values, negates the product,
+                // and writes the result to the 64-bit destination register.
+                // This is an alias of UMSUBL.
+
+                // [ref:needs_unit_test]
+                let destination = get_destination_register!();
+                let n = self.translate_operand(&instruction.operands()[1]);
+                let m = self.translate_operand(&instruction.operands()[2]);
+                let a = self.builder.ins().iconst(I64, 0);
                 let n = self.builder.ins().uextend(I64, n);
                 let m = self.builder.ins().uextend(I64, m);
                 let value = self.builder.ins().imul(n, m);
