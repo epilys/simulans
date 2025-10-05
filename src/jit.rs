@@ -2499,12 +2499,12 @@ impl BlockTranslator<'_> {
                 self.builder.seal_block(else_block);
                 // Update NZCV with value of immediate.
                 {
-                    let new_nzcv = self.translate_operand(&instruction.operands()[2]);
+                    let mut new_nzcv = self.translate_operand(&instruction.operands()[2]);
                     let new_nzcv_width = self.operand_width(&instruction.operands()[2]);
-                    let mut new_nzcv = self.builder.ins().ishl_imm(new_nzcv, 28);
                     if !matches!(new_nzcv_width, Width::_64) {
                         new_nzcv = self.builder.ins().uextend(I64, new_nzcv);
                     }
+                    new_nzcv = self.builder.ins().ishl_imm(new_nzcv, 28);
                     self.write_sysreg(&SysReg::NZCV, new_nzcv);
                 }
                 self.builder.ins().jump(merge_block, &[]);
@@ -2543,12 +2543,12 @@ impl BlockTranslator<'_> {
                 self.builder.seal_block(else_block);
                 // Update NZCV with value of immediate.
                 {
-                    let new_nzcv = self.translate_operand(&instruction.operands()[2]);
+                    let mut new_nzcv = self.translate_operand(&instruction.operands()[2]);
                     let new_nzcv_width = self.operand_width(&instruction.operands()[2]);
-                    let mut new_nzcv = self.builder.ins().ishl_imm(new_nzcv, 28);
                     if !matches!(new_nzcv_width, Width::_64) {
                         new_nzcv = self.builder.ins().uextend(I64, new_nzcv);
                     }
+                    new_nzcv = self.builder.ins().ishl_imm(new_nzcv, 28);
                     self.write_sysreg(&SysReg::NZCV, new_nzcv);
                 }
                 self.builder.ins().jump(merge_block, &[]);
