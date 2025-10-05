@@ -595,11 +595,21 @@ impl BlockTranslator<'_> {
                             self.builder.ins().ishl_imm(value, i64::from(*sxtw))
                         }
                     }
-                    Shift::SXTX(_sxtx) => {
-                        todo!()
+                    Shift::SXTX(sxtx) => {
+                        let value = self.builder.ins().sextend(extend_to.into(), value);
+                        if *sxtx == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*sxtx))
+                        }
                     }
-                    Shift::UXTX(_uxtx) => {
-                        todo!()
+                    Shift::UXTX(uxtx) => {
+                        let value = self.builder.ins().uextend(extend_to.into(), value);
+                        if *uxtx == 0 {
+                            value
+                        } else {
+                            self.builder.ins().ishl_imm(value, i64::from(*uxtx))
+                        }
                     }
                     Shift::SXTB(sxtb) => {
                         // [ref:verify_implementation]
