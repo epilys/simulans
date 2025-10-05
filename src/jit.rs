@@ -1198,11 +1198,11 @@ impl BlockTranslator<'_> {
                         current_width = extend_to;
                     }
                 }
-                if let Some(shift) = target.shift {
-                    value = self.builder.ins().ishl_imm(value, shift as i64);
-                }
                 if target.width > current_width {
                     value = self.builder.ins().uextend(target.width.into(), value);
+                }
+                if let Some(shift) = target.shift {
+                    value = self.builder.ins().ishl_imm(value, shift as i64);
                 }
                 self.def_view(&target, value);
             }};
@@ -1220,11 +1220,11 @@ impl BlockTranslator<'_> {
                         current_width = extend_to;
                     }
                 }
-                if let Some(shift) = target.shift {
-                    value = self.builder.ins().ishl_imm(value, shift as i64);
-                }
                 if target.width > current_width {
                     value = self.builder.ins().sextend(target.width.into(), value);
+                }
+                if let Some(shift) = target.shift {
+                    value = self.builder.ins().ishl_imm(value, shift as i64);
                 }
                 self.def_view(&target, value);
             }};
