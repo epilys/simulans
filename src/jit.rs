@@ -2142,6 +2142,25 @@ impl BlockTranslator<'_> {
                     },
                 );
             }
+            Op::SBCS => {
+                // Subtract with carry, setting flags
+                // [ref:needs_unit_test]
+                let target = get_destination_register!();
+                let width = self.operand_width(&instruction.operands()[0]);
+                let operand1 = self.translate_operand(&instruction.operands()[1]);
+                let operand2 = self.translate_operand(&instruction.operands()[2]);
+                let operand2 = self.builder.ins().bnot(operand2);
+                let carry_in = self.condition_holds(bad64::Condition::CS);
+                let (result, nzcv) = self.add_with_carry(operand1, operand2, carry_in, width);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value: result,
+                        width,
+                    },
+                );
+                self.update_nzcv(nzcv);
+            }
             Op::NGC => {
                 // Negate with carry, alias of SBC Xd, XZR, Xm
                 // [ref:needs_unit_test]
@@ -3805,7 +3824,6 @@ impl BlockTranslator<'_> {
             Op::SB => todo!(),
             Op::SBCLB => todo!(),
             Op::SBCLT => todo!(),
-            Op::SBCS => todo!(),
             Op::SBFIZ => {
                 let destination = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
