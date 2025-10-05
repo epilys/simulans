@@ -196,6 +196,12 @@ fn test_bit_counts() {
 
     assert_hex_eq!(machine.cpu_state.registers.x4, 32);
     assert_hex_eq!(machine.cpu_state.registers.x5, 16);
+
+    assert_hex_eq!(machine.cpu_state.registers.x7, 31);
+    assert_hex_eq!(machine.cpu_state.registers.x8, 1);
+    assert_hex_eq!(machine.cpu_state.registers.x9, 31);
+    assert_hex_eq!(machine.cpu_state.registers.x10, 32 + 16 - 1);
+    assert_hex_eq!(machine.cpu_state.registers.x11, 0x3f);
 }
 
 #[test_log::test]

@@ -2477,13 +2477,18 @@ impl BlockTranslator<'_> {
                 // [ref:atomics]: We don't model exclusive access (yet).
             }
             Op::CLS => {
-                // Count leading sign bits. (broken in cranelift)
-                // [ref:needs_unit_test]
+                // Count leading sign bits.
                 let target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[1]);
                 // [ref:cranelift_ice]: should be implemented in ISLE: inst = `v194 = cls.i32 v193`, type = `Some(types::I32)`
-                let value = self.builder.ins().cls(value);
+                // We cannot use cranelift's cls, so do some bit twiddling.
+                // If we xor every bit of the input with the bit on the left, we will get as
+                // many leading zeros as sign bits plus one extra zero we subtract.
+                let val_shifted = self.builder.ins().sshr_imm(value, 1);
+                let value = self.builder.ins().bxor(value, val_shifted);
+                let value = self.builder.ins().clz(value);
+                let value = self.builder.ins().iadd_imm(value, -1);
                 write_to_register!(target, TypedValue { value, width });
             }
             Op::CLZ => {
