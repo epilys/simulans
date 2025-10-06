@@ -42,6 +42,7 @@ pub struct Armv8AMachine {
     pub tlb: TLB,
     /// Interrupt generators and subscribers/handlers
     pub interrupts: Interrupts,
+    pub interrupts_enabled: bool,
     /// Generic timer
     pub timer: GenericTimer,
 }
@@ -58,6 +59,7 @@ impl Armv8AMachine {
             in_breakpoint: false,
             hw_breakpoints: BTreeSet::new(),
             tlb: TLB::new(),
+            interrupts_enabled: true,
             interrupts,
             timer,
         })
@@ -69,6 +71,9 @@ impl Armv8AMachine {
             (daif.F(), daif.I())
         };
         self.interrupts.rcv(f_mask && i_mask);
+        if !self.interrupts_enabled {
+            return true;
+        }
         if !f_mask && self.interrupts.fiq() {
             let preferred_exception_return = Address(self.pc);
             crate::exceptions::aarch64_take_physical_fiq_exception(

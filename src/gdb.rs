@@ -731,8 +731,8 @@ impl GdbStubRunner {
     }
 
     #[inline(always)]
-    fn handle_monitor_cmd(&self, s: &str) -> String {
-        const AVAILABLE_COMMANDS: &str = "log,trace,pc,state,registers";
+    fn handle_monitor_cmd(&mut self, s: &str) -> String {
+        const AVAILABLE_COMMANDS: &str = "log,trace,pc,state,registers,int";
 
         let words = s.split_whitespace().collect::<Vec<&str>>();
         if words.is_empty() {
@@ -772,6 +772,10 @@ impl GdbStubRunner {
                     );
                 }
             },
+            "int" => {
+                self.machine.interrupts_enabled = !self.machine.interrupts_enabled;
+                return format!("interrupts enabled: {:?}", self.machine.interrupts_enabled);
+            }
             "trace" => match words.get(1) {
                 None => {
                     return format!(
