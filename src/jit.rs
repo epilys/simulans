@@ -2372,10 +2372,10 @@ impl BlockTranslator<'_> {
                 return self.unconditional_jump_epilogue(label_value);
             }
             Op::BLR => {
+                let next_pc = self.translate_operand(&instruction.operands()[0]);
                 let link_pc = self.builder.ins().iconst(I64, (self.address + 4) as i64);
                 let link_register = self.reg_to_var(&bad64::Reg::X30, None, true);
                 self.def_view(&link_register, link_pc);
-                let next_pc = self.translate_operand(&instruction.operands()[0]);
                 return self.unconditional_jump_epilogue(next_pc);
             }
             Op::BLRAA => todo!(),
