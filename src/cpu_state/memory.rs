@@ -120,9 +120,9 @@ pub struct TranslationControlRegister {
     /// `AS[36:36]`
     pub AS: u1,
     /// `TBI0[37:37]`
-    pub TBI0: u1,
+    pub TBI0: bool,
     /// `TBI1[38:38]`
-    pub TBI1: u1,
+    pub TBI1: bool,
     /// `HA[39:39]`
     pub HA: u1,
     /// `HD[40:40]`

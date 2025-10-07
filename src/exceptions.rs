@@ -10,7 +10,7 @@ use bilge::prelude::*;
 use crate::{
     cpu_state::{
         ArchMode, DAIFFields, Exception, ExceptionLevel, Mode, SavedProgramStatusRegister, SpSel,
-        PSTATE,
+        TranslationControlRegister, PSTATE,
     },
     get_bits,
     memory::Address,
@@ -968,6 +968,90 @@ fn set_PSTATE_from_PSR(
     machine.cpu_state.PSTATE_mut().set_DAIF(spsr.DAIF());
 }
 
+fn s1_translation_regime(el: ExceptionLevel) -> ExceptionLevel {
+    if el != ExceptionLevel::EL0 {
+        return el;
+    }
+
+    ExceptionLevel::EL1
+}
+
+/// Returns the effective Top-byte-ignore value in the `AArch64` stage 1
+/// translation regime for `el`.
+fn effective_tbi(
+    machine: &crate::machine::Armv8AMachine,
+    address: Address,
+    _is_instr: bool,
+    el: ExceptionLevel,
+) -> bool {
+    debug_assert!(machine.cpu_state.have_el(el), "{el:?}");
+    let regime = s1_translation_regime(el);
+    match regime {
+        ExceptionLevel::EL1 => {
+            let tcr_el1 = TranslationControlRegister::from(machine.cpu_state.mmu_registers.tcr_el1);
+            if get_bits!(address.0, off = 55, len = 1) == 1 {
+                tcr_el1.TBI1()
+            } else {
+                tcr_el1.TBI0()
+            }
+        }
+        ExceptionLevel::EL2 => {
+            // let tcr_el2 =
+            // TranslationControlRegister::from(machine.cpu_state.mmu_registers.tcr_el2);
+            // tcr_el2.TBI()
+            unimplemented!()
+        }
+        ExceptionLevel::EL3 => {
+            // let tcr_el3 =
+            // TranslationControlRegister::from(machine.cpu_state.mmu_registers.tcr_el3);
+            // tcr_el3.TBI()
+            unimplemented!()
+        }
+        ExceptionLevel::EL0 => unreachable!(),
+    }
+}
+
+/// Return the MSB number of a virtual address in the stage 1 translation regime
+/// for `el`.
+fn addr_top(
+    machine: &crate::machine::Armv8AMachine,
+    address: Address,
+    is_instr: bool,
+    el: ExceptionLevel,
+) -> u32 {
+    debug_assert!(machine.cpu_state.have_el(el), "{el:?}");
+    if effective_tbi(machine, address, is_instr, el) {
+        55
+    } else {
+        63
+    }
+}
+
+// Return the virtual address with tag bits removed.
+//
+// This is typically used when the address will be stored to the program
+// counter.
+//
+// `AArch64.BranchAddr`
+fn aarch64_branch_addr(
+    machine: &crate::machine::Armv8AMachine,
+    vaddress: Address,
+    el: ExceptionLevel,
+) -> Address {
+    let msbit = addr_top(machine, vaddress, true, el);
+    if msbit == 63 {
+        vaddress
+    } else if (matches!(el, ExceptionLevel::EL0 | ExceptionLevel::EL1)/* || IsInHost() */)
+        && get_bits!(vaddress.0, off = msbit, len = 1) == 1
+    {
+        // sign extend:
+        let mask = u64::MAX & (2_u64.pow(msbit) - 1);
+        Address(mask | vaddress.0)
+    } else {
+        Address(get_bits!(vaddress.0, off = 0, len = msbit))
+    }
+}
+
 /// Return from exception
 ///
 /// [AArch64.ExceptionReturn](https://developer.arm.com/documentation/ddi0602/2024-12/Shared-Pseudocode/aarch64-functions-eret?lang=en#AArch64.ExceptionReturn.2)
@@ -989,6 +1073,8 @@ pub extern "C" fn aarch64_exception_return(
     machine.cpu_state.event_register = true;
     if machine.cpu_state.PSTATE().IL() {
         new_pc.0 &= !(0b11);
+    } else {
+        new_pc = aarch64_branch_addr(machine, new_pc, target_el);
     }
     machine.pc = new_pc.0;
 }
