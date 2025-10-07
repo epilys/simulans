@@ -697,14 +697,6 @@ impl BlockTranslator<'_> {
                         self.def_view(&reg_view, value);
                         self.reg_to_value(reg, None)
                     }
-                    Imm::Signed(imm) if *imm < 0 => {
-                        let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
-                        let (value, _overflow_flag) =
-                            self.builder.ins().usub_overflow(reg_val, imm_value);
-                        let reg_view = self.reg_to_var(reg, None, true);
-                        self.def_view(&reg_view, value);
-                        self.reg_to_value(reg, None)
-                    }
                     Imm::Signed(imm) => {
                         let value = self.builder.ins().iadd_imm(reg_val, *imm);
                         let reg_view = self.reg_to_var(reg, None, true);
@@ -718,13 +710,6 @@ impl BlockTranslator<'_> {
                 match imm {
                     Imm::Unsigned(imm) => {
                         let post_value = self.builder.ins().iadd_imm(reg_val, *imm as i64);
-                        let reg_view = self.reg_to_var(reg, None, true);
-                        self.def_view(&reg_view, post_value);
-                    }
-                    Imm::Signed(imm) if *imm < 0 => {
-                        let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
-                        let (post_value, _overflow_flag) =
-                            self.builder.ins().usub_overflow(reg_val, imm_value);
                         let reg_view = self.reg_to_var(reg, None, true);
                         self.def_view(&reg_view, post_value);
                     }
@@ -780,18 +765,7 @@ impl BlockTranslator<'_> {
                 let reg_val = self.reg_to_value(reg, None);
                 match offset {
                     Imm::Unsigned(imm) => self.builder.ins().iadd_imm(reg_val, *imm as i64),
-                    Imm::Signed(imm) if *imm < 0 => {
-                        let imm_value = self.builder.ins().iconst(I64, (*imm).abs());
-                        let (value, _overflow_flag) =
-                            self.builder.ins().usub_overflow(reg_val, imm_value);
-                        value
-                    }
-                    Imm::Signed(imm) => {
-                        let imm_value = self.builder.ins().iconst(I64, *imm);
-                        let (value, _overflow_flag) =
-                            self.builder.ins().uadd_overflow(reg_val, imm_value);
-                        value
-                    }
+                    Imm::Signed(imm) => self.builder.ins().iadd_imm(reg_val, *imm),
                 }
             }
             Operand::Label(Imm::Unsigned(imm)) => self.builder.ins().iconst(I64, *imm as i64),
@@ -3540,10 +3514,6 @@ impl BlockTranslator<'_> {
                     other => unimplemented!("{other:?}"),
                 };
                 let value = self.builder.ins().splat(vector_type, value);
-                let value = self
-                    .builder
-                    .ins()
-                    .bitcast(I128, MEMFLAG_LITTLE_ENDIAN, value);
                 let value = self
                     .builder
                     .ins()
