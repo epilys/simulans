@@ -805,7 +805,7 @@ pub extern "C" fn mem_zero(
 ) -> bool {
     const MAX_ZERO_BLOCK_SIZE: u64 = 2048;
     let size =
-        4 * 2_u64.pow(get_bits!(machine.cpu_state.id_registers.dczid_el0, off = 0, len = 3) as u32);
+        4 * 2_u64.pow(get_bits!(machine.cpu_state.id_registers.dczid_el0, off = 0, len = 4) as u32);
     assert!(size <= MAX_ZERO_BLOCK_SIZE);
     let vaddress = align(input_address.0, size);
 
