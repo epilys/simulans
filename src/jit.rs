@@ -78,7 +78,8 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
                         tracing::event!(
                             target: tracing::TraceItem::InAsm.as_str(),
                             tracing::Level::TRACE,
-                            "{s}"
+                            prev_pc = ?Address(machine.prev_pc),
+                            disassembly = %s,
                         );
                     }
                 }
@@ -103,6 +104,17 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
     let block = JitContext::new(machine_addr, &machine.hw_breakpoints, jit)
         .compile(code_area, pc)
         .unwrap();
+    if tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE) {
+        let input = &code_area[..(block.end as usize - block.start as usize + 4)];
+        if let Ok(s) = crate::disas(input, pc) {
+            tracing::event!(
+                target: tracing::TraceItem::InAsm.as_str(),
+                tracing::Level::TRACE,
+                prev_pc = ?Address(machine.prev_pc),
+                disassembly = %s,
+            );
+        }
+    }
     tracing::event!(
         target: tracing::TraceItem::LookupBlock.as_str(),
         tracing::Level::TRACE,
@@ -470,20 +482,6 @@ impl<'j> JitContext<'j> {
                         }
                     }
                 }
-            }
-        }
-        if tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE)
-        {
-            let len = code_area.len();
-            let input = &code_area[..=(len
-                .saturating_sub(1)
-                .min(usize::try_from(last_pc - program_counter).unwrap() + 4))];
-            if let Ok(s) = crate::disas(input, program_counter) {
-                tracing::event!(
-                    target: tracing::TraceItem::InAsm.as_str(),
-                    tracing::Level::TRACE,
-                    "{s}"
-                );
             }
         }
         let block_exit = next_pc.unwrap_or_else(|| {
