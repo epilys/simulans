@@ -760,13 +760,15 @@ pub fn aarch64_take_exception(
     preferred_exception_return: Address,
     vect_offset: Address,
 ) {
+    let current_el = machine.cpu_state.PSTATE().EL();
+
     assert!(machine.cpu_state.have_el(target_el));
     //assert!(!ELUsingAArch32(target_el));
-    assert!(target_el as u32 >= machine.cpu_state.PSTATE().EL() as u32);
+    assert!(target_el as u32 >= current_el as u32);
 
     let mut adjusted_vect_offset = vect_offset;
 
-    if target_el as u32 > machine.cpu_state.PSTATE().EL() as u32 {
+    if target_el as u32 > current_el as u32 {
         // Skip aarch32, we don't support it.
         // let lower_32: bool = if target_el == ExceptionLevel::EL3 {
         //     if machine.cpu_state.EL2_enabled() {
@@ -824,7 +826,7 @@ pub fn aarch64_take_exception(
     tracing::event!(
         target: tracing::TraceItem::Exception.as_str(),
         tracing::Level::TRACE,
-        current_el = ?machine.cpu_state.PSTATE().EL(),
+        current_el = ?current_el,
         ?target_el,
         ?vect_offset,
         ?adjusted_vect_offset,
