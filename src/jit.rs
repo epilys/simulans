@@ -1707,7 +1707,7 @@ impl BlockTranslator<'_> {
                 let value = self.generate_read(source_address, Width::_16);
                 write_to_register!(signed target, TypedValue { value, width: Width::_16 });
             }
-            Op::LDRSW => {
+            Op::LDURSW | Op::LDRSW => {
                 let target = get_destination_register!();
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_32);
@@ -3547,7 +3547,6 @@ impl BlockTranslator<'_> {
             Op::LDUMINL => todo!(),
             Op::LDUMINLB => todo!(),
             Op::LDUMINLH => todo!(),
-            Op::LDURSW => todo!(),
             Op::LDAXP | Op::LDXP => {
                 // LDAXP: [ref:atomics]: We don't model semantics (yet).
                 let target1 = get_destination_register!();
