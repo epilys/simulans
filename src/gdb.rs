@@ -461,6 +461,12 @@ impl GdbStubRunner {
             AArch64RegId::ELR_EL3 => {
                 read_reg!(self.machine.cpu_state.exception_registers.elr_el3)
             }
+            AArch64RegId::TPIDR_EL0 => {
+                read_reg!(self.machine.cpu_state.mmu_registers.tpidr_el0)
+            }
+            AArch64RegId::TPIDR_EL1 => {
+                read_reg!(self.machine.cpu_state.mmu_registers.tpidr_el1)
+            }
             AArch64RegId::CNTP_CTL_EL0 => {
                 read_reg!(crate::devices::timer::timer_register_read(
                     &self.machine,
