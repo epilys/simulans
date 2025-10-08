@@ -3668,7 +3668,49 @@ impl BlockTranslator<'_> {
                 }
                 write_to_register!(target, TypedValue { value, width });
             }
-            Op::MVNI => todo!(),
+            Op::MVNI => {
+                // FEAT_AdvSIMD
+                // [ref:needs_unit_test]
+                // Move Negated Immediate (vector). This instruction places an inverted
+                // immediate constant into every vector element of the
+                // destination SIMD&FP register.
+                let target = get_destination_register!();
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().bnot(value);
+                // [ref:cranelift_ice]: Cranelift ICEs with "should be implemented in ISLE:" error when
+                // using 64-bit vector types, so use 128-bit types and reduce them to I64 type
+                // manually.
+                let (reduce, vector_type, value) = match target.element {
+                    Some(ArrSpec::TwoDoubles(None)) => (false, I64X2, value),
+                    Some(ArrSpec::EightBytes(None)) => {
+                        (true, I8X16, self.builder.ins().ireduce(I8, value))
+                    }
+                    Some(ArrSpec::SixteenBytes(None)) => {
+                        (false, I8X16, self.builder.ins().ireduce(I8, value))
+                    }
+                    Some(ArrSpec::FourHalves(None)) => {
+                        (true, I16X8, self.builder.ins().ireduce(I16, value))
+                    }
+                    Some(ArrSpec::EightHalves(None)) => {
+                        (false, I16X8, self.builder.ins().ireduce(I16, value))
+                    }
+                    Some(ArrSpec::TwoSingles(None)) => (true, I32X4, value),
+                    Some(ArrSpec::FourSingles(None)) => (false, I32X4, value),
+                    other => unimplemented!("{other:?}"),
+                };
+                let value = self.builder.ins().splat(vector_type, value);
+                let value = self
+                    .builder
+                    .ins()
+                    .bitcast(I128, MEMFLAG_LITTLE_ENDIAN, value);
+                let (value, width) = if reduce {
+                    let value = self.builder.ins().ireduce(I64, value);
+                    (value, Width::_64)
+                } else {
+                    (value, Width::_128)
+                };
+                write_to_register!(target, TypedValue { value, width });
+            }
             Op::NAND => todo!(),
             Op::NANDS => todo!(),
             Op::NBSL => todo!(),
