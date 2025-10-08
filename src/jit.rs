@@ -1187,14 +1187,14 @@ impl BlockTranslator<'_> {
 
                 let mut current_width = val.width;
 
-                if let Some(extend_to) = target.extend_to {
-                    if extend_to > current_width {
-                        value = self.builder.ins().sextend(extend_to.into(), value);
-                        current_width = extend_to;
-                    }
-                }
                 if target.width > current_width {
                     value = self.builder.ins().sextend(target.width.into(), value);
+                    current_width = target.width;
+                }
+                if let Some(extend_to) = target.extend_to {
+                    if extend_to > current_width {
+                        value = self.builder.ins().uextend(extend_to.into(), value);
+                    }
                 }
                 if let Some(shift) = target.shift {
                     value = self.builder.ins().ishl_imm(value, shift as i64);
