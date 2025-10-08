@@ -1069,8 +1069,9 @@ pub extern "C" fn aarch64_exception_return(
     let target_el = machine.cpu_state.PSTATE().EL();
     tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, ?source_pc, ?source_el, ?target_el, ?new_pc, "exception return");
     //ClearExclusiveLocal(ProcessorID());
+    machine.cpu_state.monitor.clrex();
     //SendEventLocal();
-    machine.cpu_state.event_register = true;
+    machine.cpu_state.monitor.event_register = true;
     if machine.cpu_state.PSTATE().IL() {
         new_pc.0 &= !(0b11);
     } else {

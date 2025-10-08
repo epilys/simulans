@@ -18,6 +18,9 @@ pub use memory::*;
 mod pstate;
 pub use pstate::*;
 
+mod exclusive_monitor;
+pub use exclusive_monitor::*;
+
 /// Regular registers.
 #[derive(Debug)]
 #[repr(C)]
@@ -443,8 +446,8 @@ pub struct TimerRegisterFile {
 #[repr(C)]
 #[derive(Default, Debug)]
 pub struct ExecutionState {
-    /// Event pseudo-register ("Wait for Event mechanism and Send event")
-    pub event_register: bool,
+    /// Local exclusive monitor
+    pub monitor: ExclusiveMonitor,
     /// Regular registers.
     pub registers: RegisterFile,
     /// Vector (SIMD) registers.

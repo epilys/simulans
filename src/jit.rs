@@ -1424,6 +1424,103 @@ impl BlockTranslator<'_> {
                 }
             }};
         }
+        macro_rules! monitor {
+            (load_excl $addr:expr) => {{
+                let addr = $addr;
+                let sigref = {
+                    let mut sig = self.module.make_signature();
+                    sig.params.push(AbiParam::new(self.pointer_type));
+                    sig.params.push(AbiParam::new(I64));
+                    self.builder.import_signature(sig)
+                };
+                let load_excl = self
+                    .builder
+                    .ins()
+                    .iconst(I64, crate::cpu_state::load_excl as usize as u64 as i64);
+                let monitor_addr = self.builder.ins().iadd_imm(
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, cpu_state.monitor) as i64,
+                );
+                let call =
+                    self.builder
+                        .ins()
+                        .call_indirect(sigref, load_excl, &[monitor_addr, addr]);
+                _ = self.builder.inst_results(call);
+            }};
+            (store_excl $addr:expr, $status_target:expr, $($stores:tt)*) => {{
+                let addr = $addr;
+                let status_target = $status_target;
+                let sigref = {
+                    let mut sig = self.module.make_signature();
+                    sig.params.push(AbiParam::new(self.pointer_type));
+                    sig.params.push(AbiParam::new(I64));
+                    sig.returns.push(AbiParam::new(I8));
+                    self.builder.import_signature(sig)
+                };
+                let store_excl = self
+                    .builder
+                    .ins()
+                    .iconst(I64, crate::cpu_state::store_excl as usize as u64 as i64);
+                let monitor_addr = self.builder.ins().iadd_imm(
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, cpu_state.monitor) as i64,
+                );
+                let call = self.builder
+                    .ins()
+                    .call_indirect(sigref, store_excl, &[monitor_addr, addr]);
+                let is_failure = self.builder.inst_results(call)[0];
+                let success_block = self.builder.create_block();
+                self.builder.append_block_param(success_block, I8);
+                let merge_block = self.builder.create_block();
+                self.builder.append_block_param(merge_block, I8);
+                self.builder
+                    .ins()
+                    .brif(is_failure,
+                        merge_block,
+                        &[BlockArg::from(is_failure)],
+                        success_block,
+                        &[BlockArg::from(is_failure)]);
+                self.builder.switch_to_block(success_block);
+                self.builder.seal_block(success_block);
+                {
+                    $($stores)*
+                }
+                let is_failure = self.builder.block_params(success_block)[0];
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[BlockArg::from(is_failure)]);
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
+                let is_failure = self.builder.block_params(merge_block)[0];
+                write_to_register!(
+                    status_target,
+                    TypedValue {
+                        value: is_failure,
+                        width: Width::_8,
+                    },
+                );
+            }};
+            (clrex) => {{
+                let sigref = {
+                    let mut sig = self.module.make_signature();
+                    sig.params.push(AbiParam::new(self.pointer_type));
+                    self.builder.import_signature(sig)
+                };
+                let clrex = self
+                    .builder
+                    .ins()
+                    .iconst(I64, crate::cpu_state::clrex as usize as u64 as i64);
+                let monitor_addr = self.builder.ins().iadd_imm(
+                    self.machine_ptr,
+                    std::mem::offset_of!(Armv8AMachine, cpu_state.monitor) as i64,
+                );
+                let call = self
+                    .builder
+                    .ins()
+                    .call_indirect(sigref, clrex, &[monitor_addr]);
+                _ = self.builder.inst_results(call);
+            }};
+        }
         macro_rules! unexpected_operand {
             ($other:expr) => {{
                 let other = $other;
@@ -1485,14 +1582,14 @@ impl BlockTranslator<'_> {
                 write_to_register!(target, TypedValue { value, width });
             }
             Op::STLR | Op::STR => {
-                // For STLR: [ref:atomics]: We don't model exclusive access (yet).
+                // For STLR: [ref:atomics]: We don't model semantics (yet).
                 let value = self.translate_operand(&instruction.operands()[0]);
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[0]);
                 self.generate_write(target, value, width);
             }
             Op::STLRH | Op::STURH | Op::STRH => {
-                // [ref:atomics]: STLRH We don't model exclusive access (yet).
+                // [ref:atomics]: STLRH We don't model semantics (yet).
                 let value = self.translate_operand(&instruction.operands()[0]);
                 // Reduce 32-bit register to least significant halfword.
                 let value = self.builder.ins().ireduce(I16, value);
@@ -1500,7 +1597,7 @@ impl BlockTranslator<'_> {
                 self.generate_write(target, value, Width::_16);
             }
             Op::STLRB | Op::STRB => {
-                // For STLRB: [ref:atomics]: We don't model exclusive access (yet).
+                // For STLRB: [ref:atomics]: We don't model semantics (yet).
                 let value = self.translate_operand(&instruction.operands()[0]);
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().ireduce(I8, value);
@@ -1519,11 +1616,13 @@ impl BlockTranslator<'_> {
                 self.generate_write(target, data2, width);
             }
             Op::LDXR | Op::LDAR | Op::LDR => {
-                // For LDAR: [ref:atomics]: We don't model exclusive access (yet).
-                // For LDXR: [ref:atomics]: We don't model exclusive access (yet).
+                // For LDAR: [ref:atomics]: We don't model semantics (yet).
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
+                if matches!(op, Op::LDXR) {
+                    monitor!(load_excl source_address);
+                }
                 let value = self.generate_read(source_address, width);
                 write_to_register!(target, TypedValue { value, width });
             }
@@ -1545,7 +1644,7 @@ impl BlockTranslator<'_> {
                 write_to_register!(target2, TypedValue { value, width });
             }
             Op::LDARH | Op::LDRH => {
-                // [ref:atomics]: We don't model exclusive access (yet).
+                // [ref:atomics]: We don't model semantics (yet).
                 let target = get_destination_register!();
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_16);
@@ -2533,9 +2632,7 @@ impl BlockTranslator<'_> {
             Op::CFP => todo!(),
             Op::CLASTA => todo!(),
             Op::CLASTB => todo!(),
-            Op::CLREX => {
-                // [ref:atomics]: We don't model exclusive access (yet).
-            }
+            Op::CLREX => monitor!(clrex),
             Op::CLS => {
                 // Count leading sign bits.
                 let target = get_destination_register!();
@@ -3244,19 +3341,22 @@ impl BlockTranslator<'_> {
             Op::LDAPURSB => todo!(),
             Op::LDAPURSH => todo!(),
             Op::LDAPURSW => todo!(),
-            Op::LDAXP => todo!(),
             Op::LDAXR => {
-                // [ref:atomics]: We don't model exclusive access (yet).
+                // [ref:atomics]: We don't model semantics (yet).
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
                 let source_address = self.translate_operand(&instruction.operands()[1]);
+                monitor!(load_excl source_address);
                 let value = self.generate_read(source_address, width);
                 write_to_register!(target, TypedValue { value, width });
             }
             Op::LDARB | Op::LDAXRB => {
-                // [ref:atomics]: We don't model exclusive access (yet).
+                // [ref:atomics]: We don't model semantics (yet).
                 let target = get_destination_register!();
                 let source_address = self.translate_operand(&instruction.operands()[1]);
+                if matches!(op, Op::LDAXRB) {
+                    monitor!(load_excl source_address);
+                }
                 let value = self.generate_read(source_address, Width::_8);
                 write_to_register!(
                     target,
@@ -3266,7 +3366,20 @@ impl BlockTranslator<'_> {
                     },
                 );
             }
-            Op::LDAXRH => todo!(),
+            Op::LDAXRH => {
+                // [ref:atomics]: We don't model semantics (yet).
+                let target = get_destination_register!();
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                monitor!(load_excl source_address);
+                let value = self.generate_read(source_address, Width::_16);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_16
+                    },
+                );
+            }
             Op::LDCLR => todo!(),
             Op::LDCLRA => todo!(),
             Op::LDCLRAB => todo!(),
@@ -3436,14 +3549,15 @@ impl BlockTranslator<'_> {
             Op::LDUMINLB => todo!(),
             Op::LDUMINLH => todo!(),
             Op::LDURSW => todo!(),
-            Op::LDXP => {
-                // [ref:atomics]: We don't model exclusive access (yet).
+            Op::LDAXP | Op::LDXP => {
+                // LDAXP: [ref:atomics]: We don't model semantics (yet).
                 let target1 = get_destination_register!();
                 let target2 = get_destination_register!(1);
 
                 let width = target1.width;
 
                 let source_address = self.translate_operand(&instruction.operands()[2]);
+                monitor!(load_excl source_address);
 
                 let value = self.generate_read(source_address, width);
                 write_to_register!(target1, TypedValue { value, width });
@@ -3455,9 +3569,10 @@ impl BlockTranslator<'_> {
                 write_to_register!(target2, TypedValue { value, width });
             }
             Op::LDXRB => {
-                // [ref:atomics]: We don't model exclusive access (yet).
+                // [ref:atomics]: We don't model semantics (yet).
                 let target = get_destination_register!();
                 let source_address = self.translate_operand(&instruction.operands()[1]);
+                monitor!(load_excl source_address);
                 let value = self.generate_read(source_address, Width::_8);
                 write_to_register!(
                     target,
@@ -3467,7 +3582,20 @@ impl BlockTranslator<'_> {
                     },
                 );
             }
-            Op::LDXRH => todo!(),
+            Op::LDXRH => {
+                // [ref:atomics]: We don't model semantics (yet).
+                let target = get_destination_register!();
+                let source_address = self.translate_operand(&instruction.operands()[1]);
+                monitor!(load_excl source_address);
+                let value = self.generate_read(source_address, Width::_16);
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: Width::_16
+                    },
+                );
+            }
             Op::LSLR => todo!(),
             Op::LSLV => todo!(),
             Op::LSRR => todo!(),
@@ -3936,7 +4064,7 @@ impl BlockTranslator<'_> {
                     TRUSTED_MEMFLAGS,
                     true_val,
                     self.machine_ptr,
-                    std::mem::offset_of!(Armv8AMachine, cpu_state.event_register) as i32,
+                    std::mem::offset_of!(Armv8AMachine, cpu_state.monitor.event_register) as i32,
                 );
             }
             Op::SHA1C => todo!(),
@@ -4202,57 +4330,43 @@ impl BlockTranslator<'_> {
             Op::STLURB => todo!(),
             Op::STLURH => todo!(),
             Op::STXP | Op::STLXP => {
-                // [ref:atomics]: We don't model exclusive access (yet).
+                // [ref:atomics]: We don't model semantics (yet).
                 let status_target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[1]);
                 let data1 = self.translate_operand(&instruction.operands()[1]);
                 let data2 = self.translate_operand(&instruction.operands()[2]);
                 let target = self.translate_operand(&instruction.operands()[3]);
-                self.generate_write(target, data1, width);
-                let target = self
-                    .builder
-                    .ins()
-                    .iadd_imm(target, i64::from(width as i32) / 8);
-                self.generate_write(target, data2, width);
-                let zero = {
-                    let width = self.operand_width(&instruction.operands()[0]);
-                    self.builder.ins().iconst(width.into(), 0)
-                };
-                write_to_register!(
-                    status_target,
-                    TypedValue {
-                        value: zero,
-                        width: Width::_32,
-                    },
+                monitor!(store_excl target, status_target,
+                    self.generate_write(target, data1, width);
+                    let target = self
+                        .builder
+                        .ins()
+                        .iadd_imm(target, i64::from(width as i32) / 8);
+                    self.generate_write(target, data2, width);
                 );
             }
             Op::STLXRB => {
-                // [ref:atomics]: We don't model exclusive access (yet).
+                // [ref:atomics]: We don't model semantics (yet).
                 // [ref:needs_unit_test]
                 let status_target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let target = self.translate_operand(&instruction.operands()[2]);
-                // assert_eq!(width, Width::_8); ?
-                let value = self.builder.ins().ireduce(I8, value);
-                self.generate_write(target, value, Width::_8);
-                // > [..] Is the 32-bit name of the general-purpose register into which the status
-                // > result of the store exclusive is written, encoded in the "Rs" field. The
-                // > value returned is:
-                // > - 0 If the operation updates memory.
-                // > - 1 If the operation fails to update memory.
-                let zero = {
-                    let width = self.operand_width(&instruction.operands()[0]);
-                    self.builder.ins().iconst(width.into(), 0)
-                };
-                write_to_register!(
-                    status_target,
-                    TypedValue {
-                        value: zero,
-                        width: Width::_32,
-                    },
+                monitor!(store_excl target, status_target,
+                    let value = self.builder.ins().ireduce(I8, value);
+                    self.generate_write(target, value, Width::_8);
                 );
             }
-            Op::STLXRH => todo!(),
+            Op::STLXRH => {
+                // [ref:atomics]: We don't model semantics (yet).
+                // [ref:needs_unit_test]
+                let status_target = get_destination_register!();
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let target = self.translate_operand(&instruction.operands()[2]);
+                monitor!(store_excl target, status_target,
+                    let value = self.builder.ins().ireduce(I16, value);
+                    self.generate_write(target, value, Width::_16);
+                );
+            }
             Op::STNP => todo!(),
             Op::STNT1B => todo!(),
             Op::STNT1D => todo!(),
@@ -4321,54 +4435,35 @@ impl BlockTranslator<'_> {
                 self.generate_write(target, value, Width::_8);
             }
             Op::STLXR | Op::STXR => {
-                // [ref:atomics]: We don't model exclusive access (yet).
+                // [ref:atomics]: We don't model semantics (yet).
                 let status_target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let target = self.translate_operand(&instruction.operands()[2]);
                 let width = self.operand_width(&instruction.operands()[1]);
-                self.generate_write(target, value, width);
-                // > [..] Is the 32-bit name of the general-purpose register into which the status
-                // > result of the store exclusive is written, encoded in the "Rs" field. The
-                // > value returned is:
-                // > - 0 If the operation updates memory.
-                // > - 1 If the operation fails to update memory.
-                let zero = {
-                    let width = self.operand_width(&instruction.operands()[0]);
-                    self.builder.ins().iconst(width.into(), 0)
-                };
-                write_to_register!(
-                    status_target,
-                    TypedValue {
-                        value: zero,
-                        width: Width::_32,
-                    },
+                monitor!(store_excl target, status_target,
+                    self.generate_write(target, value, width);
                 );
             }
             Op::STXRB => {
-                // [ref:atomics]: We don't model exclusive access (yet).
+                // [ref:atomics]: We don't model semantics (yet).
                 let status_target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
                 let target = self.translate_operand(&instruction.operands()[2]);
-                let value = self.builder.ins().ireduce(I8, value);
-                self.generate_write(target, value, Width::_8);
-                // > [..] Is the 32-bit name of the general-purpose register into which the status
-                // > result of the store exclusive is written, encoded in the "Rs" field. The
-                // > value returned is:
-                // > - 0 If the operation updates memory.
-                // > - 1 If the operation fails to update memory.
-                let zero = {
-                    let width = self.operand_width(&instruction.operands()[0]);
-                    self.builder.ins().iconst(width.into(), 0)
-                };
-                write_to_register!(
-                    status_target,
-                    TypedValue {
-                        value: zero,
-                        width: Width::_32,
-                    },
+                monitor!(store_excl target, status_target,
+                    let value = self.builder.ins().ireduce(I8, value);
+                    self.generate_write(target, value, Width::_8);
                 );
             }
-            Op::STXRH => todo!(),
+            Op::STXRH => {
+                // [ref:atomics]: We don't model semantics (yet).
+                let status_target = get_destination_register!();
+                let value = self.translate_operand(&instruction.operands()[1]);
+                let target = self.translate_operand(&instruction.operands()[2]);
+                monitor!(store_excl target, status_target,
+                    let value = self.builder.ins().ireduce(I16, value);
+                    self.generate_write(target, value, Width::_16);
+                );
+            }
             Op::STZ2G => todo!(),
             Op::STZG => todo!(),
             Op::STZGM => todo!(),
@@ -4739,7 +4834,7 @@ impl BlockTranslator<'_> {
                     TRUSTED_MEMFLAGS,
                     false_val,
                     self.machine_ptr,
-                    std::mem::offset_of!(Armv8AMachine, cpu_state.event_register) as i32,
+                    std::mem::offset_of!(Armv8AMachine, cpu_state.monitor.event_register) as i32,
                 );
                 return self.r#yield(ExitRequestID::WaitForEvent);
             }
