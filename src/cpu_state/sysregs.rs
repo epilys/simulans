@@ -127,6 +127,7 @@ pub enum SysReg {
     DAIFClr,
     CurrentEL,
     SpSel,
+    TCO,
     /// `PMUSERENR_EL0`, Performance Monitors User Enable Register
     PMUSERENR_EL0,
     /// `AMUSERENR_EL0`, Activity Monitors User Enable Register
@@ -553,6 +554,7 @@ impl From<&bad64::SysReg> for SysReg {
     fn from(reg: &bad64::SysReg) -> Self {
         match reg {
             bad64::SysReg::NZCV => Self::NZCV,
+            bad64::SysReg::TCO => Self::TCO,
             bad64::SysReg::DAIFSET => Self::DAIFSet,
             bad64::SysReg::DAIFCLR => Self::DAIFClr,
             bad64::SysReg::CURRENTEL => Self::CurrentEL,

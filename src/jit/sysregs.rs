@@ -172,6 +172,7 @@ impl BlockTranslator<'_> {
             | SysReg::MVFR0_EL1
             | SysReg::MVFR1_EL1
             | SysReg::MVFR2_EL1 => self.builder.ins().iconst(I64, 0),
+            SysReg::TCO => self.builder.ins().iconst(I64, 0),
             // [ref:FEAT_RNG]
             SysReg::RNDRRS => RNDRRS::generate_read(self),
             SysReg::RNDR => RNDRRS::generate_read(self),
@@ -233,6 +234,7 @@ impl BlockTranslator<'_> {
             SysReg::DAIFClr => DAIFClr::generate_write(self, value),
             SysReg::CurrentEL => CurrentEl::generate_write(self, value),
             SysReg::SpSel => SPSel::generate_write(self, value),
+            SysReg::TCO => {}
             SysReg::SP_EL0 => SP_EL0::generate_write(self, value),
             SysReg::SP_EL1 => SP_EL1::generate_write(self, value),
             SysReg::SP_EL2 => SP_EL2::generate_write(self, value),
