@@ -1603,7 +1603,7 @@ impl BlockTranslator<'_> {
                 let value = self.builder.ins().ireduce(I8, value);
                 self.generate_write(target, value, Width::_8);
             }
-            Op::STP => {
+            Op::STNP | Op::STP => {
                 let width = self.operand_width(&instruction.operands()[0]);
                 let data1 = self.translate_operand(&instruction.operands()[0]);
                 let data2 = self.translate_operand(&instruction.operands()[1]);
@@ -1626,7 +1626,7 @@ impl BlockTranslator<'_> {
                 let value = self.generate_read(source_address, width);
                 write_to_register!(target, TypedValue { value, width });
             }
-            Op::LDP => {
+            Op::LDNP | Op::LDP => {
                 let target1 = get_destination_register!();
                 let target2 = get_destination_register!(1);
 
@@ -3423,7 +3423,6 @@ impl BlockTranslator<'_> {
             Op::LDNF1SH => todo!(),
             Op::LDNF1SW => todo!(),
             Op::LDNF1W => todo!(),
-            Op::LDNP => todo!(),
             Op::LDNT1B => todo!(),
             Op::LDNT1D => todo!(),
             Op::LDNT1H => todo!(),
@@ -4367,7 +4366,6 @@ impl BlockTranslator<'_> {
                     self.generate_write(target, value, Width::_16);
                 );
             }
-            Op::STNP => todo!(),
             Op::STNT1B => todo!(),
             Op::STNT1D => todo!(),
             Op::STNT1H => todo!(),
