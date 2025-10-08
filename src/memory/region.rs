@@ -535,7 +535,7 @@ pub mod ops {
                     tracing::Level::TRACE,
                     kind = "write",
                     size = stringify!($size),
-                    address = ?Address(address_inside_region),
+                    address = ?Address(address_inside_region + mem_region.phys_offset.0),
                     value = ?tracing::BinaryHex(value),
                 );
                 let result = match mem_region.backing {
@@ -587,8 +587,7 @@ pub mod ops {
                     tracing::Level::TRACE,
                     kind = "read",
                     size = stringify!($size),
-                    address = ?Address(address_inside_region),
-                    inside_offset = ?Address(address_inside_region),
+                    address = ?Address(address_inside_region + mem_region.phys_offset.0),
                 );
                 let result = match mem_region.backing {
                     MemoryBacking::Mmap(ref map @ MmappedMemory {  .. }) => {
@@ -628,8 +627,7 @@ pub mod ops {
                     tracing::Level::TRACE,
                     kind = "read",
                     size = stringify!($size),
-                    address = ?Address(address_inside_region),
-                    inside_offset = ?Address(address_inside_region),
+                    address = ?Address(address_inside_region + mem_region.phys_offset.0),
                     returning_value = ?tracing::BinaryHex(value),
                 );
                 ret.write(value);
