@@ -439,6 +439,8 @@ impl<'j> JitContext<'j> {
         let mut last_pc = program_counter;
         // Translate each decoded instruction
         let mut decoded_iter = bad64::disasm(code_area, program_counter);
+
+        let mut count = 1;
         if let Some(first) = decoded_iter.next() {
             let first = first.map_err(|err| format!("Error decoding instruction: {}", err))?;
             last_pc = first.address();
@@ -476,6 +478,13 @@ impl<'j> JitContext<'j> {
                             if let ControlFlow::Break(jump_pc) = trans.translate_instruction(&insn)
                             {
                                 next_pc = jump_pc;
+                                break;
+                            }
+                            count += 1;
+                            if count == 12_000 {
+                                next_pc = Some(BlockExit::Branch(
+                                    trans.builder.ins().iconst(I64, insn.address() as i64 + 4),
+                                ));
                                 break;
                             }
                         }
