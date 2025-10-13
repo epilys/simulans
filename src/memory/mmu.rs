@@ -19,12 +19,11 @@ use crate::{
     tracing::{self, TraceItem},
 };
 
+mod descriptors;
+use descriptors::*;
+
 fn align(x: u64, y: u64) -> u64 {
     y * (x / y)
-}
-
-fn align_bits(x: u64, y: u64, n: u32) -> u64 {
-    get_bits!(align(x, y), off = 0, len = n - 1)
 }
 
 fn is_aligned(x: u64, y: u64) -> bool {
@@ -226,10 +225,10 @@ impl Armv8AMachine {
             // stage 1 MMU disabled
             return self.physical_address_lookup(input_address, preferred_exception_return);
         }
-        let mut params = IAParameters::new(self, &input_address);
+        let mut ttwstate = TTWState::new(self, &input_address);
         {
             let vpn = input_address.0 >> 12;
-            if let Some(page) = self.tlb.get(&(params.asid, vpn)) {
+            if let Some(page) = self.tlb.get(&(ttwstate.asid, vpn)) {
                 let output_address = Address(page | get_bits!(input_address.0, off = 0, len = 12));
                 if trace {
                     tracing::event!(
@@ -245,8 +244,46 @@ impl Armv8AMachine {
         }
 
         let accessdesc = AccessDescriptor::new(privileged, &pstate, AccessType::TTW);
+
+        let descriptor = self.s1_walk(
+            &mut ttwstate,
+            &accessdesc,
+            input_address,
+            preferred_exception_return,
+            unprivileged,
+            trace,
+        )?;
+        let output_address = descriptor.stage_output_address(input_address, &ttwstate);
+        if trace {
+            tracing::event!(
+                target: TraceItem::AddressLookup.as_str(),
+                tracing::Level::TRACE,
+                resolved_address = ?output_address,
+            );
+        }
+        let physical = self.physical_address_lookup(output_address, preferred_exception_return)?;
+        {
+            let vpn = input_address.0 >> 12;
+            let page = output_address.0 >> 12;
+            let page = page << 12;
+            self.tlb.insert((ttwstate.asid, vpn), page);
+        }
+        Ok(physical)
+    }
+
+    fn s1_walk(
+        &self,
+        ttwstate: &mut TTWState,
+        accessdesc: &AccessDescriptor,
+        input_address: Address,
+        preferred_exception_return: Address,
+        unprivileged: bool,
+        trace: bool,
+    ) -> Result<Descriptor, ExitRequest> {
+        let mut fault = FaultRecord::no_fault(*accessdesc, input_address);
+        let pstate = self.cpu_state.PSTATE();
         let page_table_base_address: Address =
-            TranslationTableBaseRegister::from(params.ttbr.0).base_address(&params);
+            TranslationTableBaseRegister::from(ttwstate.ttbr.0).base_address(ttwstate);
 
         if trace {
             tracing::event!(
@@ -257,12 +294,11 @@ impl Armv8AMachine {
                 pc = ?Address(self.pc),
                 EL = ?pstate.EL(),
                 ?unprivileged,
-                ?params,
+                ?ttwstate,
                 ?accessdesc,
                 ?page_table_base_address
             );
         }
-        let mut fault = FaultRecord::no_fault(accessdesc, input_address);
 
         macro_rules! read_table_entry {
             ($base_addr:expr, $idx:expr) => {{
@@ -281,68 +317,37 @@ impl Armv8AMachine {
                 mem_region.read_64(address_inside_region)?
             }};
         }
-        match params.granule {
+        match ttwstate.granule {
             Granule::_4KB => {
                 // Extract translation table indices for each level OR output address bits.
                 let mut base_address = page_table_base_address;
 
                 let table_entry_0 =
-                    read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));
+                    read_table_entry!(base_address, IA4KB::idx(input_address.0, ttwstate));
                 if trace {
                     tracing::event!(
                         target: TraceItem::AddressLookup.as_str(),
                         tracing::Level::TRACE,
                         ?base_address,
-                        level = params.level,
+                        level = ttwstate.level,
                         table_entry_0 = ?tracing::BinaryHex(table_entry_0),
                     );
                 }
 
                 base_address = match table_entry_0 & 0b11 {
-                    0b11 if params.level == 3 => {
+                    0b11 if ttwstate.level == 3 => {
                         // Page descriptor
-                        let page_desc = PageDescriptor::new(table_entry_0, &params);
-                        let output_address = page_desc.stage_output_address(input_address, &params);
-                        if trace {
-                            tracing::event!(
-                                target: TraceItem::AddressLookup.as_str(),
-                                tracing::Level::TRACE,
-                                resolved_address = ?output_address,
-                            );
-                        }
-                        {
-                            let vpn = input_address.0 >> 12;
-                            let page = output_address.0 >> 12;
-                            let page = page << 12;
-                            self.tlb.insert((params.asid, vpn), page);
-                        }
-                        return self
-                            .physical_address_lookup(output_address, preferred_exception_return);
+                        let page_desc = PageDescriptor::new(table_entry_0, ttwstate);
+                        return Ok(Descriptor::Page(page_desc));
                     }
                     0b11 => {
                         // Table descriptor
-                        TableDescriptor::new(table_entry_0, &params).entry_address
+                        TableDescriptor::new(table_entry_0, ttwstate).entry_address
                     }
                     0b01 => {
                         // Block descriptor
-                        let block_desc = BlockDescriptor::new(table_entry_0, &params);
-                        let output_address =
-                            block_desc.stage_output_address(input_address, &params);
-                        if trace {
-                            tracing::event!(
-                                target: TraceItem::AddressLookup.as_str(),
-                                tracing::Level::TRACE,
-                                resolved_address = ?output_address
-                            )
-                        };
-                        {
-                            let vpn = input_address.0 >> 12;
-                            let page = output_address.0 >> 12;
-                            let page = page << 12;
-                            self.tlb.insert((params.asid, vpn), page);
-                        }
-                        return self
-                            .physical_address_lookup(output_address, preferred_exception_return);
+                        let block_desc = BlockDescriptor::new(table_entry_0, ttwstate);
+                        return Ok(Descriptor::Block(block_desc));
                     }
                     other => {
                         tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
@@ -353,66 +358,35 @@ impl Armv8AMachine {
                         });
                     }
                 };
-                params.level += 1;
+                ttwstate.level += 1;
                 fault.level += 1;
 
                 let table_entry_1 =
-                    read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));
+                    read_table_entry!(base_address, IA4KB::idx(input_address.0, ttwstate));
                 if trace {
                     tracing::event!(
                         target: TraceItem::AddressLookup.as_str(),
                         tracing::Level::TRACE,
                         ?base_address,
-                        level = params.level,
+                        level = ttwstate.level,
                         table_entry_1 = ?tracing::BinaryHex(table_entry_1),
                     );
                 }
 
                 base_address = match table_entry_1 & 0b11 {
-                    0b11 if params.level == 3 => {
+                    0b11 if ttwstate.level == 3 => {
                         // Page descriptor
-                        let page_desc = PageDescriptor::new(table_entry_1, &params);
-                        let output_address = page_desc.stage_output_address(input_address, &params);
-                        if trace {
-                            tracing::event!(
-                                target: TraceItem::AddressLookup.as_str(),
-                                tracing::Level::TRACE,
-                                resolved_address = ?output_address,
-                            );
-                        }
-                        {
-                            let vpn = input_address.0 >> 12;
-                            let page = output_address.0 >> 12;
-                            let page = page << 12;
-                            self.tlb.insert((params.asid, vpn), page);
-                        }
-                        return self
-                            .physical_address_lookup(output_address, preferred_exception_return);
+                        let page_desc = PageDescriptor::new(table_entry_1, ttwstate);
+                        return Ok(Descriptor::Page(page_desc));
                     }
                     0b11 => {
                         // Table descriptor
-                        TableDescriptor::new(table_entry_1, &params).entry_address
+                        TableDescriptor::new(table_entry_1, ttwstate).entry_address
                     }
                     0b01 => {
                         // Block descriptor
-                        let block_desc = BlockDescriptor::new(table_entry_1, &params);
-                        let output_address =
-                            block_desc.stage_output_address(input_address, &params);
-                        if trace {
-                            tracing::event!(
-                                target: TraceItem::AddressLookup.as_str(),
-                                tracing::Level::TRACE,
-                                resolved_address = ?output_address,
-                            );
-                        }
-                        {
-                            let vpn = input_address.0 >> 12;
-                            let page = output_address.0 >> 12;
-                            let page = page << 12;
-                            self.tlb.insert((params.asid, vpn), page);
-                        }
-                        return self
-                            .physical_address_lookup(output_address, preferred_exception_return);
+                        let block_desc = BlockDescriptor::new(table_entry_1, ttwstate);
+                        return Ok(Descriptor::Block(block_desc));
                     }
                     other => {
                         tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
@@ -423,66 +397,39 @@ impl Armv8AMachine {
                         });
                     }
                 };
-                params.level += 1;
+                ttwstate.level += 1;
                 fault.level += 1;
 
                 let table_entry_2 =
-                    read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));
+                    read_table_entry!(base_address, IA4KB::idx(input_address.0, ttwstate));
                 if trace {
                     tracing::event!(
                         target: TraceItem::AddressLookup.as_str(),
                         tracing::Level::TRACE,
                         ?base_address,
-                        level = params.level,
+                        level = ttwstate.level,
                         table_entry_2 = ?tracing::BinaryHex(table_entry_2),
                     );
                 }
 
                 base_address = match table_entry_2 & 0b11 {
-                    0b11 if params.level == 3 => {
+                    0b11 if ttwstate.level == 3 => {
                         // Page descriptor
-                        let page_desc = PageDescriptor::new(table_entry_2, &params);
-                        let output_address = page_desc.stage_output_address(input_address, &params);
-                        if trace {
-                            tracing::event!(
-                                target: TraceItem::AddressLookup.as_str(),
-                                tracing::Level::TRACE,
-                                resolved_address = ?output_address,
-                            );
-                        }
-                        {
-                            let vpn = input_address.0 >> 12;
-                            let page = output_address.0 >> 12;
-                            let page = page << 12;
-                            self.tlb.insert((params.asid, vpn), page);
-                        }
-                        return self
-                            .physical_address_lookup(output_address, preferred_exception_return);
+                        return Ok(Descriptor::Page(PageDescriptor::new(
+                            table_entry_2,
+                            ttwstate,
+                        )));
                     }
                     0b11 => {
                         // Table descriptor
-                        TableDescriptor::new(table_entry_2, &params).entry_address
+                        TableDescriptor::new(table_entry_2, ttwstate).entry_address
                     }
                     0b01 => {
                         // Block descriptor
-                        let block_desc = BlockDescriptor::new(table_entry_2, &params);
-                        let output_address =
-                            block_desc.stage_output_address(input_address, &params);
-                        if trace {
-                            tracing::event!(
-                                target: TraceItem::AddressLookup.as_str(),
-                                tracing::Level::TRACE,
-                                resolved_address = ?output_address
-                            );
-                        }
-                        {
-                            let vpn = input_address.0 >> 12;
-                            let page = output_address.0 >> 12;
-                            let page = page << 12;
-                            self.tlb.insert((params.asid, vpn), page);
-                        }
-                        return self
-                            .physical_address_lookup(output_address, preferred_exception_return);
+                        return Ok(Descriptor::Block(BlockDescriptor::new(
+                            table_entry_2,
+                            ttwstate,
+                        )));
                     }
                     other => {
                         tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
@@ -493,24 +440,12 @@ impl Armv8AMachine {
                         });
                     }
                 };
-                params.level += 1;
+                ttwstate.level += 1;
                 // Block descriptor
-                let block_desc = BlockDescriptor::new(base_address.0, &params);
-                let output_address = block_desc.stage_output_address(input_address, &params);
-                if trace {
-                    tracing::event!(
-                        target: TraceItem::AddressLookup.as_str(),
-                        tracing::Level::TRACE,
-                        resolved_address = ?output_address
-                    );
-                }
-                {
-                    let vpn = input_address.0 >> 12;
-                    let page = output_address.0 >> 12;
-                    let page = page << 12;
-                    self.tlb.insert((params.asid, vpn), page);
-                }
-                self.physical_address_lookup(output_address, preferred_exception_return)
+                Ok(Descriptor::Block(BlockDescriptor::new(
+                    base_address.0,
+                    ttwstate,
+                )))
             }
             Granule::_16KB | Granule::_64KB => {
                 unimplemented!()
@@ -571,7 +506,7 @@ impl From<&Address> for VARange {
 }
 
 #[derive(Copy, Clone, Debug)]
-struct IAParameters {
+struct TTWState {
     #[allow(dead_code)]
     va_range: VARange,
     #[allow(dead_code)]
@@ -584,9 +519,9 @@ struct IAParameters {
 }
 
 impl TranslationTableBaseRegister {
-    fn base_address(&self, params: &IAParameters) -> Address {
+    fn base_address(&self, ttwstate: &TTWState) -> Address {
         let raw: u64 = (*self).into();
-        Address(match params.granule {
+        Address(match ttwstate.granule {
             Granule::_4KB => get_bits!(raw, off = 12, len = 47 - 12) << 12,
             Granule::_16KB => get_bits!(raw, off = 14, len = 47 - 14) << 14,
             Granule::_64KB => get_bits!(raw, off = 16, len = 47 - 16) << 16,
@@ -595,13 +530,6 @@ impl TranslationTableBaseRegister {
 }
 
 const FINAL_LEVEL: u8 = 3;
-
-fn translation_size(d128: bool, tgx: Granule, level: u8) -> u64 {
-    let granulebits = tgx.bits();
-    let descsizelog2 = if d128 { 4 } else { 3 };
-    let blockbits = u64::from(FINAL_LEVEL - level) * u64::from(granulebits - descsizelog2);
-    u64::from(granulebits) + blockbits
-}
 
 // `AArch64.S1MinTxSZ`
 fn s1_min_tx_sz(_regime: Regime, _d128: bool, _ds: bool, _tgx: Granule) -> u8 {
@@ -615,7 +543,7 @@ fn max_tx_sz(_tgx: Granule) -> u8 {
     39
 }
 
-impl IAParameters {
+impl TTWState {
     fn new(machine: &Armv8AMachine, input_address: &Address) -> Self {
         let regime = translation_regime(machine);
         let tcr = TranslationControlRegister::from(machine.cpu_state.tcr_elx());
@@ -696,175 +624,16 @@ struct IA4KB {
 
 impl IA4KB {
     // `S1SLTTEntryAddress`
-    fn idx(input_address: u64, params: &IAParameters) -> u64 {
-        let granulebits = params.granule.bits();
+    fn idx(input_address: u64, ttwstate: &TTWState) -> u64 {
+        let granulebits = ttwstate.granule.bits();
         let descsizelog2 = 3; // if d128 { 4 } else { 3 };
         let stride = granulebits - descsizelog2;
-        let levels = FINAL_LEVEL - params.level;
+        let levels = FINAL_LEVEL - ttwstate.level;
         let lsb = levels * stride + granulebits;
         let nstride = 1; // if walkparams.d128 == '1' then UInt(skl) + 1 else 1;
         let msb = (lsb + (stride * nstride)) - 1;
         // index = ZeroExtend(ia<msb:lsb>:Zeros(descsizelog2), 56);
         get_bits!(input_address, off = lsb, len = msb - lsb + 1) << descsizelog2
-    }
-}
-
-#[derive(Debug)]
-struct BlockDescriptor {
-    output_address: Address,
-    contiguous: bool,
-}
-
-impl BlockDescriptor {
-    fn new(descriptor: u64, params: &IAParameters) -> Self {
-        assert_eq!(descriptor & 0b11, 1);
-        let contiguous = if matches!(params.granule, Granule::_4KB) {
-            if params.level == 0 {
-                false
-            } else {
-                get_bits!(descriptor, off = 52, len = 1) == 1
-            }
-        } else {
-            unimplemented!()
-        };
-        match (params.granule, params.ds) {
-            (Granule::_4KB | Granule::_16KB, true) => {
-                // 52-bit OA
-                let n = match params.level {
-                    0 => 39,
-                    1 => 30,
-                    2 => 21,
-                    _ => unreachable!(),
-                };
-                let output_address = Address(get_bits!(descriptor, off = n, len = 49 - n) << n);
-                Self {
-                    output_address,
-                    contiguous,
-                }
-            }
-            (Granule::_64KB, true) => unimplemented!(),
-            (_, false) => {
-                // 48-bit OA
-                let n = match params.granule {
-                    Granule::_4KB if params.level == 0 => unreachable!(),
-                    Granule::_4KB if params.level == 1 => 30,
-                    Granule::_4KB if params.level == 2 => 21,
-                    Granule::_16KB if params.level == 2 => 25,
-                    Granule::_64KB if params.level == 2 => 29,
-                    other => unreachable!("{other:?} level {:?}", params.level),
-                };
-                let output_address = Address(get_bits!(descriptor, off = n, len = 47 - n) << n);
-                Self {
-                    output_address,
-                    contiguous,
-                }
-            }
-        }
-    }
-
-    // `StageOA()`
-    fn stage_output_address(self, input_address: Address, params: &IAParameters) -> Address {
-        let tsize = translation_size(false, params.granule, params.level);
-        let csize = if self.contiguous { 4 } else { 0 }; //(if walkstate.contiguous == '1' then ContiguousSize(d128, tgx,
-                                                         //(if walkstate.level) else 0);
-        let ia_msb = tsize + csize;
-        // oa.paspace = walkstate.baseaddress.paspace;
-        // oa.address = walkstate.baseaddress.address<55:ia_msb>:ia<ia_msb-1:0>;
-        Address(
-            get_bits!(self.output_address.0, off = ia_msb, len = 55 - ia_msb) << ia_msb
-                | get_bits!(input_address.0, off = 0, len = ia_msb),
-        )
-    }
-}
-
-#[derive(Debug)]
-struct TableDescriptor {
-    entry_address: Address,
-}
-
-impl TableDescriptor {
-    fn new(descriptor: u64, params: &IAParameters) -> Self {
-        assert_eq!(descriptor & 0b11, 0b11);
-        // AArch64.NextTableBase()
-        let mut tablebase = 0;
-        let granulebits = params.granule.bits();
-        // if d128 == '1' then
-        //     constant integer descsizelog2 = 4;
-        //     let stride = granulebits - descsizelog2;
-        //     let tablesize = stride*(1 + UInt(skl)) + descsizelog2;
-        // else
-        let tablesize = granulebits;
-        match params.granule {
-            Granule::_4KB => {
-                tablebase |= get_bits!(descriptor, off = 12, len = 47 - 12) << 12;
-            }
-            Granule::_16KB => {
-                tablebase |= get_bits!(descriptor, off = 14, len = 47 - 14) << 14;
-            }
-            Granule::_64KB => {
-                tablebase |= get_bits!(descriptor, off = 16, len = 47 - 16) << 16;
-            }
-        }
-        tablebase = align_bits(tablebase, 2_u32.pow(u32::from(tablesize)).into(), 56);
-        // if d128 == '1' then
-        //     tablebase<55:48> = descriptor<55:48>;
-        // elsif tgx == TGx_64KB && (AArch64.PAMax() >= 52 ||
-        //     boolean IMPLEMENTATION_DEFINED "descriptor[15:12] for 64KB granule are
-        // OA[51:48]") then     tablebase<51:48> = descriptor<15:12>;
-        // elsif ds == '1' then
-        //     tablebase<51:48> = descriptor<9:8>:descriptor<49:48>;
-
-        Self {
-            entry_address: Address(tablebase),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct PageDescriptor {
-    page_address: Address,
-    contiguous: bool,
-}
-
-impl PageDescriptor {
-    fn new(descriptor: u64, params: &IAParameters) -> Self {
-        assert_eq!(descriptor & 0b11, 0b11);
-        let page_address = match params.granule {
-            Granule::_4KB => get_bits!(descriptor, off = 12, len = 47 - 12) << 12,
-            Granule::_16KB => get_bits!(descriptor, off = 14, len = 47 - 14) << 14,
-            Granule::_64KB => get_bits!(descriptor, off = 16, len = 47 - 16) << 16,
-        };
-        let contiguous = if matches!(params.granule, Granule::_4KB) {
-            if params.level == 0 {
-                false
-            } else {
-                get_bits!(descriptor, off = 52, len = 1) == 1
-            }
-        } else {
-            unimplemented!()
-        };
-
-        Self {
-            page_address: Address(page_address),
-            contiguous,
-        }
-    }
-
-    fn stage_output_address(self, input_address: Address, params: &IAParameters) -> Address {
-        let tsize = translation_size(false, params.granule, params.level);
-        let csize = if self.contiguous {
-            //(if walkstate.contiguous == '1' then ContiguousSize(d128, tgx, (walkstate.level) else 0);
-            4
-        } else {
-            0
-        };
-        let ia_msb = tsize + csize;
-        // oa.paspace = walkstate.baseaddress.paspace;
-        // oa.address = walkstate.baseaddress.address<55:ia_msb>:ia<ia_msb-1:0>;
-        Address(
-            get_bits!(self.page_address.0, off = ia_msb, len = 55 - ia_msb) << ia_msb
-                | get_bits!(input_address.0, off = 0, len = ia_msb),
-        )
     }
 }
 
