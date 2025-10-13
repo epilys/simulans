@@ -34,6 +34,8 @@ pub struct Armv8AMachine {
     pub cpu_state: ExecutionState,
     /// Current memory map.
     pub memory: MemoryMap,
+    /// Physical addresses to invalidate translation blocks for.
+    pub invalidate: Vec<u64>,
     /// Whether we have stopped at a breakpoint.
     pub in_breakpoint: bool,
     /// List of breakpoint addresses.
@@ -56,6 +58,7 @@ impl Armv8AMachine {
             prev_pc: 0,
             cpu_state: ExecutionState::default(),
             memory,
+            invalidate: vec![],
             in_breakpoint: false,
             hw_breakpoints: BTreeSet::new(),
             tlb: TLB::new(),
