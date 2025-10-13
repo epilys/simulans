@@ -115,7 +115,7 @@ impl Armv8AMachine {
         let retval = match *exit_request_ref {
             None => false,
             Some(ExitRequest::Poweroff) => true,
-            Some(ExitRequest::WaitForEvent) => {
+            Some(ExitRequest::WaitForInterrupt) => {
                 exit_request_ref.take();
                 drop(exit_request_ref);
                 while !self.poll() {}
@@ -124,15 +124,10 @@ impl Armv8AMachine {
             Some(ExitRequest::Yield) => {
                 exit_request_ref.take();
                 drop(exit_request_ref);
-                let sleep_dur = std::time::Duration::from_millis(100);
-                let mut ctr = 0;
-                while !self.poll() && ctr < 5 {
-                    std::thread::sleep(sleep_dur);
-                    ctr += 1;
-                }
+                self.poll();
                 return false;
             }
-            Some(_) => false,
+            Some(ExitRequest::Abort { .. }) => unreachable!(),
         };
         drop(exit_request_ref);
         self.poll();

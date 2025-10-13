@@ -4886,7 +4886,7 @@ impl BlockTranslator<'_> {
             Op::UXTW => todo!(),
             Op::UZP1 => todo!(),
             Op::UZP2 => todo!(),
-            Op::WFE | Op::WFET | Op::WFI | Op::WFIT => {
+            Op::WFE | Op::WFET => {
                 // [ref:FIXME]
                 let false_val = self.builder.ins().iconst(I8, i64::from(false));
                 self.builder.ins().store(
@@ -4895,7 +4895,11 @@ impl BlockTranslator<'_> {
                     self.machine_ptr,
                     std::mem::offset_of!(Armv8AMachine, cpu_state.monitor.event_register) as i32,
                 );
-                return self.r#yield(ExitRequestID::WaitForEvent);
+                return self.r#yield(ExitRequestID::Yield);
+            }
+            Op::WFI | Op::WFIT => {
+                // [ref:FIXME] WFIT
+                return self.r#yield(ExitRequestID::WaitForInterrupt);
             }
             Op::WHILEGE => todo!(),
             Op::WHILEGT => todo!(),

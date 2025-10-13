@@ -210,7 +210,7 @@ pub enum Exception {
 pub enum ExitRequestID {
     /// Shut down the machine
     Poweroff = 0,
-    WaitForEvent,
+    WaitForInterrupt,
     Yield,
 }
 
@@ -219,7 +219,7 @@ pub enum ExitRequestID {
 pub enum ExitRequest {
     /// Shut down the machine
     Poweroff,
-    WaitForEvent,
+    WaitForInterrupt,
     Yield,
     /// Instruction or data abort
     Abort {
@@ -236,7 +236,7 @@ impl From<ExitRequestID> for ExitRequest {
 
         match id {
             Id::Poweroff => Self::Poweroff,
-            Id::WaitForEvent => Self::WaitForEvent,
+            Id::WaitForInterrupt => Self::WaitForInterrupt,
             Id::Yield => Self::Yield,
         }
     }
