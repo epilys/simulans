@@ -17,6 +17,8 @@ use crate::{
     set_bits, tracing,
 };
 
+mod syscalls;
+
 /// Fault types
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Fault {
@@ -1175,6 +1177,12 @@ pub fn aarch64_call_supervisor(
     let mut except = ExceptionRecord::exception_syndrome(Exception::SupervisorCall);
     except.syndrome.set_iss_bits(0, 16, immediate);
     tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, ?target_el, ?vect_offset, ?except, ?preferred_exception_return, "AArch64.CallSupervisor");
+    tracing::event!(
+        target: tracing::TraceItem::Syscall.as_str(),
+        tracing::Level::TRACE,
+        "{}",
+        syscalls::Syscalls::trace_syscall(machine)
+    );
 
     aarch64_take_exception(
         machine,

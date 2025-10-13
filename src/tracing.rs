@@ -137,6 +137,8 @@ pub enum TraceItem {
     Memory,
     /// Logs [`PL011State`](crate::devices::pl011::PL011State`) related events.
     Pl011,
+    /// Logs Linux syscalls.
+    Syscall,
 }
 
 impl TraceItem {
@@ -162,6 +164,7 @@ impl TraceItem {
             Self::LookupBlock => "simulans::lookup_block:event",
             Self::Memory => "simulans::memory:event",
             Self::Pl011 => "simulans::pl011:event",
+            Self::Syscall => "simulans::syscall:event",
         }
     }
 
@@ -182,6 +185,7 @@ impl TraceItem {
             Self::LookupBlock => "lookup_block",
             Self::Memory => "memory",
             Self::Pl011 => "pl011",
+            Self::Syscall => "syscall",
         }
     }
 }
