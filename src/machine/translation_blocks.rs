@@ -12,16 +12,36 @@ use crate::jit::Entry;
 ///
 /// Before dropped, [`TranslationBlock::free`] must be called.
 pub struct TranslationBlock {
-    /// First instruction address.
+    /// First instruction address (physical).
     pub start: u64,
-    /// Final instruction address (inclusive).
+    /// Final physical instruction address (inclusive).
     pub end: u64,
+    pub virtual_addr: u64,
     /// The translated function entry.
     pub entry: Entry,
     /// Compiled for single step execution.
     pub single_step: bool,
     /// The JIT context, used to free the memory.
     pub ctx: cranelift_jit::JITModule,
+}
+
+impl std::fmt::Debug for TranslationBlock {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fmt.debug_struct("TranslationBlock")
+            .field(
+                "physical_range",
+                &format!("{:#x}-{:#x}", self.start, self.end),
+            )
+            .field(
+                "virtual_range",
+                &format!(
+                    "{:#x}-{:#x}",
+                    self.virtual_addr,
+                    (self.virtual_addr + (self.end - self.start))
+                ),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 impl TranslationBlock {
@@ -63,8 +83,10 @@ impl TranslationBlocks {
 
     #[inline]
     /// Get a translated block for this program counter.
-    pub fn get(&self, pc: &u64) -> Option<&TranslationBlock> {
-        self.entries.get(pc)
+    pub fn get(&mut self, physical_pc: &u64, virtual_pc: &u64) -> Option<&TranslationBlock> {
+        self.entries
+            .get(physical_pc)
+            .filter(|tb| tb.virtual_addr == *virtual_pc)
     }
 
     #[inline]

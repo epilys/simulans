@@ -53,28 +53,32 @@ pub struct Entry(
 /// Lookup [`machine.pc`] in cached translation blocks
 /// ([`Jit::translation_blocks`]).
 pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> Entry {
-    let pc: u64 = machine.pc;
+    let virtual_pc: u64 = machine.pc;
     if tracing::event_enabled!(target: tracing::TraceItem::BlockEntry.as_str(), tracing::Level::TRACE)
     {
         crate::tracing::print_registers(machine);
     }
-    if let Some(tb) = jit.translation_blocks.get(&pc) {
+    let Ok(physical_pc) = translate_code_address(machine, virtual_pc) else {
+        // Exception raised
+        return Entry(lookup_block);
+    };
+    for addr in machine.invalidate.drain(..) {
+        jit.translation_blocks.invalidate(addr);
+    }
+    if let Some(tb) = jit.translation_blocks.get(&physical_pc.0, &virtual_pc) {
         if jit.single_step != tb.single_step {
-            jit.translation_blocks.invalidate(pc);
+            jit.translation_blocks.invalidate(physical_pc.0);
         } else {
             tracing::event!(
                 target: tracing::TraceItem::LookupBlock.as_str(),
                 tracing::Level::TRACE,
-                pc = ?Address(pc),
-                "re-using cached block for 0x{:x}-0x{:x}",
-                pc,
-                tb.end
+                "re-using cached block {tb:?}",
             );
             if tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE)
             {
-                if let Ok(code_area) = translate_code_address(machine, pc) {
+                if let Ok(code_area) = code_area(machine, virtual_pc, physical_pc) {
                     let input = &code_area[..(tb.end as usize - tb.start as usize + 4)];
-                    if let Ok(s) = crate::disas(input, pc) {
+                    if let Ok(s) = crate::disas(input, virtual_pc) {
                         tracing::event!(
                             target: tracing::TraceItem::InAsm.as_str(),
                             tracing::Level::TRACE,
@@ -90,23 +94,31 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
     tracing::event!(
         target: tracing::TraceItem::LookupBlock.as_str(),
         tracing::Level::TRACE,
-        pc = ?Address(pc),
+        pc = ?Address(virtual_pc),
         "generating block",
     );
 
     let machine_addr = std::ptr::addr_of!(*machine).addr();
 
-    let Ok(code_area) = translate_code_address(machine, pc) else {
+    let Ok(code_area) = code_area(machine, virtual_pc, physical_pc) else {
         // Exception raised
         return Entry(lookup_block);
     };
 
-    let block = JitContext::new(machine_addr, &machine.hw_breakpoints, jit)
-        .compile(code_area, pc)
-        .unwrap();
+    let block = match JitContext::new(machine_addr, &machine.hw_breakpoints, jit).compile(
+        code_area,
+        virtual_pc,
+        physical_pc.0,
+    ) {
+        Ok(b) => b,
+        err @ Err(_) => {
+            eprintln!("Could not compile pc={virtual_pc:#x}");
+            err.unwrap()
+        }
+    };
     if tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE) {
         let input = &code_area[..(block.end as usize - block.start as usize + 4)];
-        if let Ok(s) = crate::disas(input, pc) {
+        if let Ok(s) = crate::disas(input, virtual_pc) {
             tracing::event!(
                 target: tracing::TraceItem::InAsm.as_str(),
                 tracing::Level::TRACE,
@@ -118,8 +130,7 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
     tracing::event!(
         target: tracing::TraceItem::LookupBlock.as_str(),
         tracing::Level::TRACE,
-        pc = ?Address(pc),
-        end = ?Address(block.end),
+        block = ?block,
         "returning generated block",
     );
     let next_entry = block.entry;
@@ -131,7 +142,7 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
 fn translate_code_address(
     machine: &Armv8AMachine,
     program_counter: u64,
-) -> Result<&[u8], Box<dyn std::error::Error>> {
+) -> Result<Address, Box<dyn std::error::Error>> {
     let mut resolved_pc_address = MaybeUninit::uninit();
     if !crate::memory::mmu::translate_address(
         machine,
@@ -148,16 +159,26 @@ fn translate_code_address(
         .into());
     }
     let ResolvedAddress {
-                mem_region,
-                address_inside_region: pc_offset,
-                physical: _,
+                mem_region: _,
+                address_inside_region: _,
+                physical,
             } =
             // SAFETY: we checked the return value
             unsafe { resolved_pc_address.assume_init( )};
+    Ok(physical)
+}
+
+fn code_area(
+    machine: &Armv8AMachine,
+    virtual_pc: u64,
+    physical_pc: Address,
+) -> Result<&[u8], Box<dyn std::error::Error>> {
+    let mem_region = machine.memory.find_region(physical_pc).unwrap();
+    let pc_offset = physical_pc.0 - mem_region.phys_offset.0;
     let Some(mmapped_region) = mem_region.as_mmap() else {
         return Err(format!(
             "Received program counter {} which is mapped in device memory.",
-            Address(program_counter),
+            Address(virtual_pc),
         )
         .into());
     };
@@ -248,6 +269,7 @@ impl<'j> JitContext<'j> {
         mut self,
         code_area: &[u8],
         program_counter: u64,
+        physical_pc: u64,
     ) -> Result<TranslationBlock, Box<dyn std::error::Error>> {
         tracing::event!(
             target: tracing::TraceItem::Jit.as_str(),
@@ -305,8 +327,9 @@ impl<'j> JitContext<'j> {
             std::mem::transmute::<*const u8, Entry>(self.module.get_finalized_function(id))
         };
         Ok(TranslationBlock {
-            start: program_counter,
-            end: last_pc,
+            start: physical_pc,
+            end: (last_pc - program_counter) + physical_pc,
+            virtual_addr: program_counter,
             entry,
             single_step: self.single_step,
             ctx: self.module,
