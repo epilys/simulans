@@ -6,7 +6,6 @@
 use cranelift::{
     codegen::ir::{
         entities::StackSlot,
-        instructions::BlockArg,
         stackslot::{StackSlotData, StackSlotKind},
         types::{I128, I16, I32, I64, I8},
     },
@@ -18,7 +17,7 @@ use cranelift_module::Module;
 use crate::{
     cpu_state::ExitRequest,
     jit::{BlockExit, BlockTranslator},
-    memory::{mmu::ResolvedAddress, Width},
+    memory::Width,
 };
 
 macro_rules! create_stack_slot {
@@ -48,36 +47,6 @@ macro_rules! create_stack_slot {
 
 impl BlockTranslator<'_> {
     #[inline]
-    fn merge_mem_op(
-        &mut self,
-        exception_addr: Value,
-        merge_block: Block,
-        success: Value,
-        success_value: Option<Value>,
-    ) {
-        let success_block = self.builder.create_block();
-        let failure_block = self.builder.create_block();
-        self.builder
-            .ins()
-            .brif(success, success_block, &[], failure_block, &[]);
-        self.builder.switch_to_block(failure_block);
-        self.builder.seal_block(failure_block);
-        _ = self.builder.ins().call_indirect(
-            self.memops_table.set_exception_sigref,
-            self.set_exception_func,
-            &[self.machine_ptr, exception_addr],
-        );
-        self.store_pc(None);
-        self.direct_exit(BlockExit::Exception);
-        self.builder.switch_to_block(success_block);
-        self.builder.seal_block(success_block);
-        self.builder.ins().jump(
-            merge_block,
-            &[BlockArg::from(success_value.unwrap_or(success))],
-        );
-    }
-
-    #[inline]
     /// Generates a privileged JIT write access
     pub fn generate_write(&mut self, target_address: Value, value: Value, width: Width) -> Value {
         self.generate_write_inner(target_address, value, width, false)
@@ -103,74 +72,41 @@ impl BlockTranslator<'_> {
         width: Width,
         unprivileged: bool,
     ) -> Value {
-        let address_lookup_func = self.builder.ins().iconst(
-            I64,
-            crate::memory::mmu::translate_address as usize as u64 as i64,
-        );
         self.store_pc(None);
         let preferred_exception_return = self.builder.ins().iconst(I64, self.address as i64);
-        let raise_exception = self.builder.ins().iconst(I8, i64::from(true));
         let unprivileged = self.builder.ins().iconst(I8, i64::from(unprivileged));
-        let (resolved_address_slot, resolved_address_slot_address) =
-            create_stack_slot!(self, ResolvedAddress<'_>);
-        let call = self.builder.ins().call_indirect(
-            self.address_lookup_sigref,
-            address_lookup_func,
-            &[
-                self.machine_ptr,
-                target_address,
-                preferred_exception_return,
-                raise_exception,
-                unprivileged,
-                resolved_address_slot_address,
-            ],
-        );
         let (_exception_slot, exception_slot_address) = create_stack_slot!(self, ExitRequest);
-        let (success, memory_region_ptr, address_inside_region) = {
-            let success = self.builder.inst_results(call)[0];
-            let memory_region_ptr = self.builder.ins().stack_load(
-                self.module.target_config().pointer_type(),
-                resolved_address_slot,
-                std::mem::offset_of!(ResolvedAddress, mem_region) as i32,
-            );
-            let address_inside_region = self.builder.ins().stack_load(
-                I64,
-                resolved_address_slot,
-                std::mem::offset_of!(ResolvedAddress, address_inside_region) as i32,
-            );
-            (success, memory_region_ptr, address_inside_region)
-        };
-        let success_block = self.builder.create_block();
-        let failure_block = self.builder.create_block();
-        let merge_block = self.builder.create_block();
-        self.builder.append_block_param(merge_block, I8);
-        self.builder
-            .ins()
-            .brif(success, success_block, &[], failure_block, &[]);
-        self.builder.switch_to_block(success_block);
-        self.builder.seal_block(success_block);
-
         let (write_func, sigref) = self.memops_table.write(width);
         let write_func = self.builder.ins().iconst(I64, write_func);
         let call = self.builder.ins().call_indirect(
             *sigref,
             write_func,
             &[
-                memory_region_ptr,
-                address_inside_region,
+                self.machine_ptr,
+                target_address,
                 value,
+                unprivileged,
+                preferred_exception_return,
                 exception_slot_address,
             ],
         );
         let success = self.builder.inst_results(call)[0];
-        self.merge_mem_op(exception_slot_address, merge_block, success, None);
+        let success_block = self.builder.create_block();
+        let failure_block = self.builder.create_block();
+        self.builder
+            .ins()
+            .brif(success, success_block, &[], failure_block, &[]);
         self.builder.switch_to_block(failure_block);
         self.builder.seal_block(failure_block);
+        _ = self.builder.ins().call_indirect(
+            self.memops_table.set_exception_sigref,
+            self.set_exception_func,
+            &[self.machine_ptr, exception_slot_address],
+        );
         self.store_pc(None);
         self.direct_exit(BlockExit::Exception);
-        self.builder.switch_to_block(merge_block);
-        self.builder.seal_block(merge_block);
-        let success = self.builder.block_params(merge_block)[0];
+        self.builder.switch_to_block(success_block);
+        self.builder.seal_block(success_block);
         success
     }
 
@@ -194,91 +130,50 @@ impl BlockTranslator<'_> {
         width: Width,
         unprivileged: bool,
     ) -> Value {
-        let address_lookup_func = self.builder.ins().iconst(
-            I64,
-            crate::memory::mmu::translate_address as usize as u64 as i64,
-        );
         self.store_pc(None);
         let preferred_exception_return = self.builder.ins().iconst(I64, self.address as i64);
-        let raise_exception = self.builder.ins().iconst(I8, i64::from(true));
         let unprivileged = self.builder.ins().iconst(I8, i64::from(unprivileged));
-        let (resolved_address_slot, resolved_address_slot_address) =
-            create_stack_slot!(self, ResolvedAddress<'_>);
+        let (read_value_slot, read_value_slot_address) = create_stack_slot!(self, width = width);
+        let (_exception_slot, exception_slot_address) = create_stack_slot!(self, ExitRequest);
+        let (read_func, sigref) = self.memops_table.read(width);
+        let read_func = self.builder.ins().iconst(I64, read_func);
         let call = self.builder.ins().call_indirect(
-            self.address_lookup_sigref,
-            address_lookup_func,
+            *sigref,
+            read_func,
             &[
                 self.machine_ptr,
                 target_address,
-                preferred_exception_return,
-                raise_exception,
+                read_value_slot_address,
                 unprivileged,
-                resolved_address_slot_address,
+                preferred_exception_return,
+                exception_slot_address,
             ],
         );
-        let (read_value_slot, read_value_slot_address) = create_stack_slot!(self, width = width);
-        let (_exception_slot, exception_slot_address) = create_stack_slot!(self, ExitRequest);
-        let (success, resolved) = {
-            let success = self.builder.inst_results(call)[0];
-            let memory_region_ptr = self.builder.ins().stack_load(
-                self.module.target_config().pointer_type(),
-                resolved_address_slot,
-                std::mem::offset_of!(ResolvedAddress, mem_region) as i32,
-            );
-            let address_inside_region = self.builder.ins().stack_load(
-                I64,
-                resolved_address_slot,
-                std::mem::offset_of!(ResolvedAddress, address_inside_region) as i32,
-            );
-            (
-                success,
-                [
-                    memory_region_ptr,
-                    address_inside_region,
-                    read_value_slot_address,
-                    exception_slot_address,
-                ],
-            )
-        };
+        let success = self.builder.inst_results(call)[0];
         let success_block = self.builder.create_block();
         let failure_block = self.builder.create_block();
-        let merge_block = self.builder.create_block();
-        self.builder.append_block_param(merge_block, width.into());
         self.builder
             .ins()
             .brif(success, success_block, &[], failure_block, &[]);
-        self.builder.switch_to_block(success_block);
-        self.builder.seal_block(success_block);
-
-        let (read_func, sigref) = self.memops_table.read(width);
-        let read_func = self.builder.ins().iconst(I64, read_func);
-        let call = self
-            .builder
-            .ins()
-            .call_indirect(*sigref, read_func, &resolved);
-        let success = self.builder.inst_results(call)[0];
-        let read_value = self
-            .builder
-            .ins()
-            .stack_load(width.into(), read_value_slot, 0);
-        self.merge_mem_op(
-            exception_slot_address,
-            merge_block,
-            success,
-            Some(read_value),
-        );
         self.builder.switch_to_block(failure_block);
         self.builder.seal_block(failure_block);
+        _ = self.builder.ins().call_indirect(
+            self.memops_table.set_exception_sigref,
+            self.set_exception_func,
+            &[self.machine_ptr, exception_slot_address],
+        );
         self.store_pc(None);
         self.direct_exit(BlockExit::Exception);
-        self.builder.switch_to_block(merge_block);
-        self.builder.seal_block(merge_block);
-        self.builder.block_params(merge_block)[0]
+        self.builder.switch_to_block(success_block);
+        self.builder.seal_block(success_block);
+        self.builder
+            .ins()
+            .stack_load(width.into(), read_value_slot, 0)
     }
 }
 
 /// Helper struct to hold signatures for memory operation callbacks (see
-/// [`crate::memory::ops`])
+/// [`crate::memory::mmu::ops`])
 pub struct MemOpsTable {
     set_exception_sigref: codegen::ir::SigRef,
     write_sigrefs: [codegen::ir::SigRef; 5],
@@ -292,23 +187,23 @@ impl MemOpsTable {
     fn write(&self, width: Width) -> (i64, &codegen::ir::SigRef) {
         match width {
             Width::_8 => (
-                crate::memory::ops::memory_region_write_8 as usize as u64 as i64,
+                crate::memory::mmu::ops::write_8 as usize as u64 as i64,
                 &self.write_sigrefs[0],
             ),
             Width::_16 => (
-                crate::memory::ops::memory_region_write_16 as usize as u64 as i64,
+                crate::memory::mmu::ops::write_16 as usize as u64 as i64,
                 &self.write_sigrefs[1],
             ),
             Width::_32 => (
-                crate::memory::ops::memory_region_write_32 as usize as u64 as i64,
+                crate::memory::mmu::ops::write_32 as usize as u64 as i64,
                 &self.write_sigrefs[2],
             ),
             Width::_64 => (
-                crate::memory::ops::memory_region_write_64 as usize as u64 as i64,
+                crate::memory::mmu::ops::write_64 as usize as u64 as i64,
                 &self.write_sigrefs[3],
             ),
             Width::_128 => (
-                crate::memory::ops::memory_region_write_128 as usize as u64 as i64,
+                crate::memory::mmu::ops::write_128 as usize as u64 as i64,
                 &self.write_sigrefs[4],
             ),
         }
@@ -320,23 +215,23 @@ impl MemOpsTable {
     fn read(&self, width: Width) -> (i64, &codegen::ir::SigRef) {
         match width {
             Width::_8 => (
-                crate::memory::ops::memory_region_read_8 as usize as u64 as i64,
+                crate::memory::mmu::ops::read_8 as usize as u64 as i64,
                 &self.read_sigrefs[0],
             ),
             Width::_16 => (
-                crate::memory::ops::memory_region_read_16 as usize as u64 as i64,
+                crate::memory::mmu::ops::read_16 as usize as u64 as i64,
                 &self.read_sigrefs[1],
             ),
             Width::_32 => (
-                crate::memory::ops::memory_region_read_32 as usize as u64 as i64,
+                crate::memory::mmu::ops::read_32 as usize as u64 as i64,
                 &self.read_sigrefs[2],
             ),
             Width::_64 => (
-                crate::memory::ops::memory_region_read_64 as usize as u64 as i64,
+                crate::memory::mmu::ops::read_64 as usize as u64 as i64,
                 &self.read_sigrefs[3],
             ),
             Width::_128 => (
-                crate::memory::ops::memory_region_read_128 as usize as u64 as i64,
+                crate::memory::mmu::ops::read_128 as usize as u64 as i64,
                 &self.read_sigrefs[4],
             ),
         }
@@ -345,47 +240,64 @@ impl MemOpsTable {
     /// Create new [`MemOpsTable`].
     pub fn new(module: &JITModule, builder: &mut FunctionBuilder<'_>) -> Self {
         macro_rules! sigref {
-            (write $t:expr) => {{
+            (read $t:expr) => {{
                 let mut sig = module.make_signature();
+                // machine: &Armv8AMachine,
                 sig.params
                     .push(AbiParam::new(module.target_config().pointer_type()));
+                // address: Address,
+                sig.params.push(AbiParam::new(I64));
+                // ret: &mut MaybeUninit<$size>,
                 sig.params
                     .push(AbiParam::new(module.target_config().pointer_type()));
-                sig.params.push(AbiParam::new($t));
+                // unprivileged: bool,
+                sig.params.push(AbiParam::new(I8));
+                // preferred_exception_return: Address,
+                sig.params.push(AbiParam::new(I64));
+                // exception: &mut MaybeUninit<ExitRequest>,
                 sig.params
                     .push(AbiParam::new(module.target_config().pointer_type()));
+                // -> bool
                 sig.returns.push(AbiParam::new(I8));
                 builder.import_signature(sig)
             }};
-            (read $t:expr) => {{
+            (write $t:expr) => {{
                 let mut sig = module.make_signature();
+                // machine: &mut Armv8AMachine,
                 sig.params
                     .push(AbiParam::new(module.target_config().pointer_type()));
+                // address: Address,
+                sig.params.push(AbiParam::new(I64));
+                // value: $size,
+                sig.params.push(AbiParam::new($t));
+                // unprivileged: bool,
+                sig.params.push(AbiParam::new(I8));
+                // preferred_exception_return: Address,
+                sig.params.push(AbiParam::new(I64));
+                // exception: &mut MaybeUninit<ExitRequest>,
                 sig.params
                     .push(AbiParam::new(module.target_config().pointer_type()));
-                sig.params
-                    .push(AbiParam::new(module.target_config().pointer_type()));
-                sig.params
-                    .push(AbiParam::new(module.target_config().pointer_type()));
+                // -> bool
                 sig.returns.push(AbiParam::new(I8));
                 builder.import_signature(sig)
             }};
         }
-        let write_sigrefs = [
-            sigref! { write I8 },
-            sigref! { write I16 },
-            sigref! { write I32 },
-            sigref! { write I64 },
-            sigref! { write I128 },
-        ];
-
-        let read_sigrefs = [
-            sigref! { read I8 },
-            sigref! { read I16 },
-            sigref! { read I32 },
-            sigref! { read I64 },
-            sigref! { read I128 },
-        ];
+        let (read_sigrefs, write_sigrefs) = (
+            [
+                sigref! { read I8 },
+                sigref! { read I16 },
+                sigref! { read I32 },
+                sigref! { read I64 },
+                sigref! { read I128 },
+            ],
+            [
+                sigref! { write I8 },
+                sigref! { write I16 },
+                sigref! { write I32 },
+                sigref! { write I64 },
+                sigref! { write I128 },
+            ],
+        );
 
         let set_exception_sigref = {
             let mut sig = module.make_signature();

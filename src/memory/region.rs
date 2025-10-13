@@ -252,6 +252,51 @@ pub mod ops {
 
     macro_rules! def_op {
         (write $fn:ident: $size:ty) => {
+            impl MemoryRegion {
+                pub fn $fn(
+                    &mut self,
+                    address_inside_region: u64,
+                    value: $size,
+                ) -> Result<(), ExitRequest> {
+                    let guest_address = Address(address_inside_region + self.phys_offset.0);
+                    tracing::event!(
+                        target: tracing::TraceItem::Memory.as_str(),
+                        tracing::Level::TRACE,
+                        kind = "write",
+                        size = stringify!($size),
+                        address = ?guest_address,
+                        value = ?tracing::BinaryHex(value),
+                    );
+                    match self.backing {
+                        MemoryBacking::Mmap(ref mut map @ MmappedMemory { .. }) => {
+                            let destination =
+                                // SAFETY: when resolving the guest address to a memory region, we
+                                // essentially performed a bounds check so we know this offset is valid.
+                                unsafe { map.as_mut_ptr().add(address_inside_region as usize) };
+                            // SAFETY: this is safe as long as $size width does not exceed the map's
+                            // size. We don't check for this, so FIXME
+                            Ok(unsafe { std::ptr::write_unaligned(destination.cast::<$size>(), value) })
+                        }
+                        MemoryBacking::Device(ref ops) => {
+                            ops.write(
+                                address_inside_region,
+                                // [ref:TODO] allow for device 128bit IO?
+                                u64::try_from(value).unwrap(),
+                                match std::mem::size_of::<$size>() {
+                                    1 => Width::_8,
+                                    2 => Width::_16,
+                                    4 => Width::_32,
+                                    8 => Width::_64,
+                                    16 => Width::_128,
+                                    _ => unreachable!(),
+                                },
+                            )
+                        }
+                    }
+
+                }
+            }
+
             /// Helper memory write struct called from JIT code.
             pub extern "C" fn $fn(
                 mem_region: &mut MemoryRegion,
@@ -259,42 +304,7 @@ pub mod ops {
                 value: $size,
                 exception: &mut MaybeUninit<ExitRequest>,
             ) -> bool {
-                tracing::event!(
-                    target: tracing::TraceItem::Memory.as_str(),
-                    tracing::Level::TRACE,
-                    kind = "write",
-                    size = stringify!($size),
-                    address = ?Address(address_inside_region + mem_region.phys_offset.0),
-                    value = ?tracing::BinaryHex(value),
-                );
-                let result = match mem_region.backing {
-                    MemoryBacking::Mmap(ref mut map @ MmappedMemory { .. }) => {
-                        let destination =
-                        // SAFETY: when resolving the guest address to a memory region, we
-                        // essentially performed a bounds check so we know this offset is valid.
-                            unsafe { map.as_mut_ptr().add(address_inside_region as usize) };
-                        // SAFETY: this is safe as long as $size width does not exceed the map's
-                        // size. We don't check for this, so FIXME
-                        Ok(unsafe { std::ptr::write_unaligned(destination.cast::<$size>(), value) })
-                    }
-                    MemoryBacking::Device(ref ops) => {
-                        ops.write(
-                            address_inside_region,
-                            // [ref:TODO] allow for device 128bit IO?
-                            u64::try_from(value).unwrap(),
-                            match std::mem::size_of::<$size>() {
-                                1 => Width::_8,
-                                2 => Width::_16,
-                                4 => Width::_32,
-                                8 => Width::_64,
-                                16 => Width::_128,
-                                _ => unreachable!(),
-                            },
-                        )
-                    }
-                };
-
-                match result {
+                match mem_region.$fn(address_inside_region, value) {
                     Ok(()) => true,
                     Err(err) => {
                         exception.write(err);
@@ -304,6 +314,57 @@ pub mod ops {
             }
         };
         (read $fn:ident: $size:ty) => {
+            impl MemoryRegion {
+                pub fn $fn(
+                    &self,
+                    address_inside_region: u64,
+                ) -> Result<$size, ExitRequest> {
+                    let guest_address = Address(address_inside_region + self.phys_offset.0);
+                    tracing::event!(
+                        target: tracing::TraceItem::Memory.as_str(),
+                        tracing::Level::TRACE,
+                        kind = "read",
+                        size = stringify!($size),
+                        address = ?guest_address,
+                    );
+                    let value = match self.backing {
+                        MemoryBacking::Mmap(ref map @ MmappedMemory {  .. }) => {
+                            let destination =
+                                // SAFETY: when resolving the guest address to a memory region, we
+                                // essentially performed a bounds check so we know this offset is valid.
+                                unsafe { map.as_ptr().add(address_inside_region as usize) };
+                            // SAFETY: this is safe as long as $size width does not exceed the map's
+                            // size. We don't check for this, so FIXME
+                            Ok(unsafe { std::ptr::read_unaligned(destination.cast::<$size>()) })
+                        }
+                        #[allow(clippy::cast_lossless)]
+                        MemoryBacking::Device(ref ops) => match ops.read(
+                            address_inside_region,
+                            match std::mem::size_of::<$size>() {
+                                1 => Width::_8,
+                                2 => Width::_16,
+                                4 => Width::_32,
+                                8 => Width::_64,
+                                16 => Width::_128,
+                                _ => unreachable!(),
+                            },
+                        ) {
+                            Ok(v) => Ok(v as $size),
+                            Err(err) => Err(err),
+                        }
+                    }?;
+                    tracing::event!(
+                        target: tracing::TraceItem::Memory.as_str(),
+                        tracing::Level::TRACE,
+                        kind = "read",
+                        size = stringify!($size),
+                        address = ?Address(address_inside_region + self.phys_offset.0),
+                        returning_value = ?tracing::BinaryHex(value),
+                    );
+                    Ok(value)
+                }
+            }
+
             /// Helper memory read struct called from JIT code.
             pub extern "C" fn $fn(
                 mem_region: &MemoryRegion,
@@ -311,69 +372,29 @@ pub mod ops {
                 ret: &mut MaybeUninit<$size>,
                 exception: &mut MaybeUninit<ExitRequest>,
             ) -> bool {
-                tracing::event!(
-                    target: tracing::TraceItem::Memory.as_str(),
-                    tracing::Level::TRACE,
-                    kind = "read",
-                    size = stringify!($size),
-                    address = ?Address(address_inside_region + mem_region.phys_offset.0),
-                );
-                let result = match mem_region.backing {
-                    MemoryBacking::Mmap(ref map @ MmappedMemory {  .. }) => {
-                        let destination =
-                        // SAFETY: when resolving the guest address to a memory region, we
-                        // essentially performed a bounds check so we know this offset is valid.
-                            unsafe { map.as_ptr().add(address_inside_region as usize) };
-                        // SAFETY: this is safe as long as $size width does not exceed the map's
-                        // size. We don't check for this, so FIXME
-                        Ok(unsafe { std::ptr::read_unaligned(destination.cast::<$size>()) })
-                    }
-                    #[allow(clippy::cast_lossless)]
-                    MemoryBacking::Device(ref ops) => match ops.read(
-                        address_inside_region,
-                        match std::mem::size_of::<$size>() {
-                            1 => Width::_8,
-                            2 => Width::_16,
-                            4 => Width::_32,
-                            8 => Width::_64,
-                            16 => Width::_128,
-                            _ => unreachable!(),
-                        },
-                    ) {
-                        Ok(v) => Ok(v as $size),
-                        Err(err) => Err(err),
-                    }
-                };
-                let value = match result {
-                    Ok(v) => v,
+                match mem_region.$fn(address_inside_region) {
+                    Ok(value) => {
+                        ret.write(value);
+                        true
+                    },
                     Err(err) => {
                         exception.write(err);
-                        return false;
+                        false
                     }
-                };
-                tracing::event!(
-                    target: tracing::TraceItem::Memory.as_str(),
-                    tracing::Level::TRACE,
-                    kind = "read",
-                    size = stringify!($size),
-                    address = ?Address(address_inside_region + mem_region.phys_offset.0),
-                    returning_value = ?tracing::BinaryHex(value),
-                );
-                ret.write(value);
-                true
+                }
             }
         };
     }
 
-    def_op! { write memory_region_write_8: u8 }
-    def_op! { write memory_region_write_16: u16 }
-    def_op! { write memory_region_write_32: u32 }
-    def_op! { write memory_region_write_64: u64 }
-    def_op! { write memory_region_write_128: u128 }
+    def_op! { write write_8: u8 }
+    def_op! { write write_16: u16 }
+    def_op! { write write_32: u32 }
+    def_op! { write write_64: u64 }
+    def_op! { write write_128: u128 }
 
-    def_op! { read memory_region_read_8: u8 }
-    def_op! { read memory_region_read_16: u16 }
-    def_op! { read memory_region_read_32: u32 }
-    def_op! { read memory_region_read_64: u64 }
-    def_op! { read memory_region_read_128: u128 }
+    def_op! { read read_8: u8 }
+    def_op! { read read_16: u16 }
+    def_op! { read read_32: u32 }
+    def_op! { read read_64: u64 }
+    def_op! { read read_128: u128 }
 }

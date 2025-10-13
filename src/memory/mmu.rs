@@ -27,56 +27,496 @@ fn align_bits(x: u64, y: u64, n: u32) -> u64 {
     get_bits!(align(x, y), off = 0, len = n - 1)
 }
 
+fn is_aligned(x: u64, y: u64) -> bool {
+    x == align(x, y)
+}
+
 #[repr(C)]
 /// A resolved address for a translated block.
 pub struct ResolvedAddress<'a> {
     /// Memory region this block resides.
-    pub mem_region: Option<&'a MemoryRegion>,
+    pub mem_region: &'a MemoryRegion,
     /// The offset inside this region.
     pub address_inside_region: u64,
+    pub physical: Address,
 }
 
-/// Helper function to look up memory region for given physical address.
-pub extern "C" fn physical_address_lookup<'machine>(
-    machine: &'machine Armv8AMachine,
-    address: Address,
-    preferred_exception_return: Address,
-    raise_exception: bool,
-    ret: &mut MaybeUninit<ResolvedAddress<'machine>>,
-) -> bool {
-    if raise_exception {
-        tracing::event!(
-            target: TraceItem::AddressLookup.as_str(),
-            tracing::Level::TRACE,
-            physical = true,
-            address = ?address,
-            pc = ?Address(machine.pc),
-        );
+impl Armv8AMachine {
+    /// Perform a read of `SIZE` bytes
+    ///
+    /// `Mem[] - non-assignment (read) form`
+    pub fn mem<const SIZE: usize>(
+        &self,
+        address: Address,
+        ret: &mut [u8; SIZE],
+        unprivileged: bool,
+        preferred_exception_return: Address,
+    ) -> Result<(), ExitRequest> {
+        assert!([1, 2, 4, 8, 16, 32].contains(&SIZE));
+        let aligned: bool = is_aligned(address.0, SIZE as u64);
+        // if !aligned && AArch64.UnalignedAccessFaults(accdesc, address, size) then
+        // constant FaultRecord fault = AlignmentFault(accdesc, address);
+        // AArch64.Abort(fault);
+        if aligned {
+            let ResolvedAddress {
+                mem_region,
+                address_inside_region,
+                ..
+            } = self.translate_address(address, preferred_exception_return, unprivileged, true)?;
+            match SIZE {
+                1 => {
+                    ret[0] = mem_region.read_8(address_inside_region)?;
+                }
+                2 => {
+                    ret.copy_from_slice(&mem_region.read_16(address_inside_region)?.to_le_bytes());
+                }
+                4 => {
+                    ret.copy_from_slice(&mem_region.read_32(address_inside_region)?.to_le_bytes());
+                }
+                8 => {
+                    ret.copy_from_slice(&mem_region.read_64(address_inside_region)?.to_le_bytes());
+                }
+                16 => {
+                    ret.copy_from_slice(&mem_region.read_128(address_inside_region)?.to_le_bytes());
+                }
+                32 => {
+                    unimplemented!();
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            assert!(SIZE > 1);
+
+            let mut address = address;
+            for byte in ret.iter_mut().take(SIZE) {
+                let ResolvedAddress {
+                    mem_region,
+                    address_inside_region,
+                    ..
+                } = self.translate_address(
+                    address,
+                    preferred_exception_return,
+                    unprivileged,
+                    true,
+                )?;
+                *byte = mem_region.read_8(address_inside_region)?;
+                address = Address(address.0 + 1);
+            }
+        }
+        Ok(())
     }
-    let Some(mem_region) = machine.memory.find_region(address) else {
-        if raise_exception {
-            let accessdesc =
-                AccessDescriptor::new(true, &machine.cpu_state.PSTATE(), AccessType::TTW);
-            let mut fault = FaultRecord::no_fault(accessdesc, address);
-            fault.statuscode = Fault::Translation;
-            *machine.cpu_state.exit_request.lock().unwrap() = Some(ExitRequest::Abort {
-                fault,
-                preferred_exception_return,
+
+    /// Perform a write of `SIZE` bytes
+    pub fn mem_write<const SIZE: usize>(
+        &mut self,
+        address: Address,
+        value: &[u8; SIZE],
+        unprivileged: bool,
+        preferred_exception_return: Address,
+    ) -> Result<(), ExitRequest> {
+        assert!([1, 2, 4, 8, 16, 32].contains(&SIZE));
+        let aligned: bool = is_aligned(address.0, SIZE as u64);
+        // if !aligned && AArch64.UnalignedAccessFaults(accdesc, address, size) then
+        // constant FaultRecord fault = AlignmentFault(accdesc, address);
+        // AArch64.Abort(fault);
+        if aligned {
+            let ResolvedAddress {
+                mem_region: _,
+                address_inside_region,
+                physical,
+            } = self.translate_address(address, preferred_exception_return, unprivileged, true)?;
+            let mem_region = self.memory.find_region_mut(physical).unwrap();
+            match SIZE {
+                1 => {
+                    mem_region.write_8(address_inside_region, value[0])?;
+                }
+                2 => {
+                    let value: [u8; 2] = value.as_slice().try_into().unwrap();
+                    mem_region.write_16(address_inside_region, u16::from_le_bytes(value))?;
+                }
+                4 => {
+                    let value: [u8; 4] = value.as_slice().try_into().unwrap();
+                    mem_region.write_32(address_inside_region, u32::from_le_bytes(value))?;
+                }
+                8 => {
+                    let value: [u8; 8] = value.as_slice().try_into().unwrap();
+                    mem_region.write_64(address_inside_region, u64::from_le_bytes(value))?;
+                }
+                16 => {
+                    let value: [u8; 16] = value.as_slice().try_into().unwrap();
+                    mem_region.write_128(address_inside_region, u128::from_le_bytes(value))?;
+                }
+                32 => {
+                    unimplemented!();
+                }
+                _ => unreachable!(),
+            }
+            self.invalidate
+                .extend(physical.0..(physical.0 + SIZE as u64));
+        } else {
+            assert!(SIZE > 1);
+
+            let mut address = address;
+            for byte in value.iter().take(SIZE) {
+                let ResolvedAddress {
+                    mem_region: _,
+                    address_inside_region,
+                    physical,
+                } = self.translate_address(
+                    address,
+                    preferred_exception_return,
+                    unprivileged,
+                    true,
+                )?;
+                let mem_region = self.memory.find_region_mut(physical).unwrap();
+                mem_region.write_8(address_inside_region, *byte)?;
+                address = Address(address.0 + 1);
+                self.invalidate.push(physical.0);
+            }
+        }
+        Ok(())
+    }
+
+    /// Look up memory region for given physical address.
+    pub fn physical_address_lookup(
+        &'_ self,
+        address: Address,
+        preferred_exception_return: Address,
+    ) -> Result<ResolvedAddress<'_>, ExitRequest> {
+        let Some(mem_region) = self.memory.find_region(address) else {
+            return Err({
+                let accessdesc =
+                    AccessDescriptor::new(true, &self.cpu_state.PSTATE(), AccessType::TTW);
+                let mut fault = FaultRecord::no_fault(accessdesc, address);
+                fault.statuscode = Fault::Translation;
+                ExitRequest::Abort {
+                    fault,
+                    preferred_exception_return,
+                }
             });
-            tracing::error!(
-                "Could not look up address {} in physical memory map. pc was: 0x{:x}",
-                address,
-                machine.pc
+        };
+        let address_inside_region = address.0 - mem_region.phys_offset.0;
+        Ok(ResolvedAddress {
+            mem_region,
+            address_inside_region,
+            physical: address,
+        })
+    }
+
+    /// `AArch64.TranslateAddress`
+    ///
+    /// Merged with `AArch64.FullTranslate`.
+    pub fn translate_address(
+        &'_ self,
+        input_address: Address,
+        preferred_exception_return: Address,
+        unprivileged: bool,
+        trace: bool,
+    ) -> Result<ResolvedAddress<'_>, ExitRequest> {
+        // [ref:TODO]: rename to S1 translation and add S2 stub
+        let pstate = self.cpu_state.PSTATE();
+        let sctlr = self.cpu_state.sctlr_elx();
+        let privileged = if unprivileged {
+            is_unpriv_access_priv(&pstate)
+        } else {
+            pstate.EL() != ExceptionLevel::EL0
+        };
+
+        if sctlr & 0x1 == 0 {
+            // stage 1 MMU disabled
+            return self.physical_address_lookup(input_address, preferred_exception_return);
+        }
+        let mut params = IAParameters::new(self, &input_address);
+        {
+            let vpn = input_address.0 >> 12;
+            if let Some(page) = self.tlb.get(&(params.asid, vpn)) {
+                let output_address = Address(page | get_bits!(input_address.0, off = 0, len = 12));
+                if trace {
+                    tracing::event!(
+                        target: TraceItem::AddressLookup.as_str(),
+                        tracing::Level::TRACE,
+                        vaddress = ?input_address,
+                        resolved_paddress = ?output_address,
+                        tlb_hit = true,
+                    );
+                }
+                return self.physical_address_lookup(output_address, preferred_exception_return);
+            }
+        }
+
+        let accessdesc = AccessDescriptor::new(privileged, &pstate, AccessType::TTW);
+        let page_table_base_address: Address =
+            TranslationTableBaseRegister::from(params.ttbr.0).base_address(&params);
+
+        if trace {
+            tracing::event!(
+                target: TraceItem::AddressLookup.as_str(),
+                tracing::Level::TRACE,
+                physical = false,
+                address = ?input_address,
+                pc = ?Address(self.pc),
+                EL = ?pstate.EL(),
+                ?unprivileged,
+                ?params,
+                ?accessdesc,
+                ?page_table_base_address
             );
         }
-        return false;
-    };
-    let address_inside_region = address.0 - mem_region.phys_offset.0;
-    ret.write(ResolvedAddress {
-        mem_region: Some(mem_region),
-        address_inside_region,
-    });
-    true
+        let mut fault = FaultRecord::no_fault(accessdesc, input_address);
+
+        macro_rules! read_table_entry {
+            ($base_addr:expr, $idx:expr) => {{
+                let base_addr = $base_addr.0;
+                let idx = u64::from($idx);
+                // For the VMSAv8-64 translation system, an entry is an eight-byte, or 64-bit,
+                // object
+                let ResolvedAddress {
+                    mem_region,
+                    address_inside_region,
+                    physical: _,
+                } = self.physical_address_lookup(
+                    Address(base_addr + idx),
+                    preferred_exception_return,
+                )?;
+                mem_region.read_64(address_inside_region)?
+            }};
+        }
+        match params.granule {
+            Granule::_4KB => {
+                // Extract translation table indices for each level OR output address bits.
+                let mut base_address = page_table_base_address;
+
+                let table_entry_0 =
+                    read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));
+                if trace {
+                    tracing::event!(
+                        target: TraceItem::AddressLookup.as_str(),
+                        tracing::Level::TRACE,
+                        ?base_address,
+                        level = params.level,
+                        table_entry_0 = ?tracing::BinaryHex(table_entry_0),
+                    );
+                }
+
+                base_address = match table_entry_0 & 0b11 {
+                    0b11 if params.level == 3 => {
+                        // Page descriptor
+                        let page_desc = PageDescriptor::new(table_entry_0, &params);
+                        let output_address = page_desc.stage_output_address(input_address, &params);
+                        if trace {
+                            tracing::event!(
+                                target: TraceItem::AddressLookup.as_str(),
+                                tracing::Level::TRACE,
+                                resolved_address = ?output_address,
+                            );
+                        }
+                        {
+                            let vpn = input_address.0 >> 12;
+                            let page = output_address.0 >> 12;
+                            let page = page << 12;
+                            self.tlb.insert((params.asid, vpn), page);
+                        }
+                        return self
+                            .physical_address_lookup(output_address, preferred_exception_return);
+                    }
+                    0b11 => {
+                        // Table descriptor
+                        TableDescriptor::new(table_entry_0, &params).entry_address
+                    }
+                    0b01 => {
+                        // Block descriptor
+                        let block_desc = BlockDescriptor::new(table_entry_0, &params);
+                        let output_address =
+                            block_desc.stage_output_address(input_address, &params);
+                        if trace {
+                            tracing::event!(
+                                target: TraceItem::AddressLookup.as_str(),
+                                tracing::Level::TRACE,
+                                resolved_address = ?output_address
+                            )
+                        };
+                        {
+                            let vpn = input_address.0 >> 12;
+                            let page = output_address.0 >> 12;
+                            let page = page << 12;
+                            self.tlb.insert((params.asid, vpn), page);
+                        }
+                        return self
+                            .physical_address_lookup(output_address, preferred_exception_return);
+                    }
+                    other => {
+                        tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
+                        fault.statuscode = Fault::Translation;
+                        return Err(ExitRequest::Abort {
+                            fault,
+                            preferred_exception_return,
+                        });
+                    }
+                };
+                params.level += 1;
+                fault.level += 1;
+
+                let table_entry_1 =
+                    read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));
+                if trace {
+                    tracing::event!(
+                        target: TraceItem::AddressLookup.as_str(),
+                        tracing::Level::TRACE,
+                        ?base_address,
+                        level = params.level,
+                        table_entry_1 = ?tracing::BinaryHex(table_entry_1),
+                    );
+                }
+
+                base_address = match table_entry_1 & 0b11 {
+                    0b11 if params.level == 3 => {
+                        // Page descriptor
+                        let page_desc = PageDescriptor::new(table_entry_1, &params);
+                        let output_address = page_desc.stage_output_address(input_address, &params);
+                        if trace {
+                            tracing::event!(
+                                target: TraceItem::AddressLookup.as_str(),
+                                tracing::Level::TRACE,
+                                resolved_address = ?output_address,
+                            );
+                        }
+                        {
+                            let vpn = input_address.0 >> 12;
+                            let page = output_address.0 >> 12;
+                            let page = page << 12;
+                            self.tlb.insert((params.asid, vpn), page);
+                        }
+                        return self
+                            .physical_address_lookup(output_address, preferred_exception_return);
+                    }
+                    0b11 => {
+                        // Table descriptor
+                        TableDescriptor::new(table_entry_1, &params).entry_address
+                    }
+                    0b01 => {
+                        // Block descriptor
+                        let block_desc = BlockDescriptor::new(table_entry_1, &params);
+                        let output_address =
+                            block_desc.stage_output_address(input_address, &params);
+                        if trace {
+                            tracing::event!(
+                                target: TraceItem::AddressLookup.as_str(),
+                                tracing::Level::TRACE,
+                                resolved_address = ?output_address,
+                            );
+                        }
+                        {
+                            let vpn = input_address.0 >> 12;
+                            let page = output_address.0 >> 12;
+                            let page = page << 12;
+                            self.tlb.insert((params.asid, vpn), page);
+                        }
+                        return self
+                            .physical_address_lookup(output_address, preferred_exception_return);
+                    }
+                    other => {
+                        tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
+                        fault.statuscode = Fault::Translation;
+                        return Err(ExitRequest::Abort {
+                            fault,
+                            preferred_exception_return,
+                        });
+                    }
+                };
+                params.level += 1;
+                fault.level += 1;
+
+                let table_entry_2 =
+                    read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));
+                if trace {
+                    tracing::event!(
+                        target: TraceItem::AddressLookup.as_str(),
+                        tracing::Level::TRACE,
+                        ?base_address,
+                        level = params.level,
+                        table_entry_2 = ?tracing::BinaryHex(table_entry_2),
+                    );
+                }
+
+                base_address = match table_entry_2 & 0b11 {
+                    0b11 if params.level == 3 => {
+                        // Page descriptor
+                        let page_desc = PageDescriptor::new(table_entry_2, &params);
+                        let output_address = page_desc.stage_output_address(input_address, &params);
+                        if trace {
+                            tracing::event!(
+                                target: TraceItem::AddressLookup.as_str(),
+                                tracing::Level::TRACE,
+                                resolved_address = ?output_address,
+                            );
+                        }
+                        {
+                            let vpn = input_address.0 >> 12;
+                            let page = output_address.0 >> 12;
+                            let page = page << 12;
+                            self.tlb.insert((params.asid, vpn), page);
+                        }
+                        return self
+                            .physical_address_lookup(output_address, preferred_exception_return);
+                    }
+                    0b11 => {
+                        // Table descriptor
+                        TableDescriptor::new(table_entry_2, &params).entry_address
+                    }
+                    0b01 => {
+                        // Block descriptor
+                        let block_desc = BlockDescriptor::new(table_entry_2, &params);
+                        let output_address =
+                            block_desc.stage_output_address(input_address, &params);
+                        if trace {
+                            tracing::event!(
+                                target: TraceItem::AddressLookup.as_str(),
+                                tracing::Level::TRACE,
+                                resolved_address = ?output_address
+                            );
+                        }
+                        {
+                            let vpn = input_address.0 >> 12;
+                            let page = output_address.0 >> 12;
+                            let page = page << 12;
+                            self.tlb.insert((params.asid, vpn), page);
+                        }
+                        return self
+                            .physical_address_lookup(output_address, preferred_exception_return);
+                    }
+                    other => {
+                        tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
+                        fault.statuscode = Fault::Translation;
+                        return Err(ExitRequest::Abort {
+                            fault,
+                            preferred_exception_return,
+                        });
+                    }
+                };
+                params.level += 1;
+                // Block descriptor
+                let block_desc = BlockDescriptor::new(base_address.0, &params);
+                let output_address = block_desc.stage_output_address(input_address, &params);
+                if trace {
+                    tracing::event!(
+                        target: TraceItem::AddressLookup.as_str(),
+                        tracing::Level::TRACE,
+                        resolved_address = ?output_address
+                    );
+                }
+                {
+                    let vpn = input_address.0 >> 12;
+                    let page = output_address.0 >> 12;
+                    let page = page << 12;
+                    self.tlb.insert((params.asid, vpn), page);
+                }
+                self.physical_address_lookup(output_address, preferred_exception_return)
+            }
+            Granule::_16KB | Granule::_64KB => {
+                unimplemented!()
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -272,11 +712,21 @@ impl IA4KB {
 #[derive(Debug)]
 struct BlockDescriptor {
     output_address: Address,
+    contiguous: bool,
 }
 
 impl BlockDescriptor {
-    fn new(value: u64, params: &IAParameters) -> Self {
-        assert_eq!(value & 0b11, 1);
+    fn new(descriptor: u64, params: &IAParameters) -> Self {
+        assert_eq!(descriptor & 0b11, 1);
+        let contiguous = if matches!(params.granule, Granule::_4KB) {
+            if params.level == 0 {
+                false
+            } else {
+                get_bits!(descriptor, off = 52, len = 1) == 1
+            }
+        } else {
+            unimplemented!()
+        };
         match (params.granule, params.ds) {
             (Granule::_4KB | Granule::_16KB, true) => {
                 // 52-bit OA
@@ -286,8 +736,11 @@ impl BlockDescriptor {
                     2 => 21,
                     _ => unreachable!(),
                 };
-                let output_address = Address(get_bits!(value, off = n, len = 49 - n) << n);
-                Self { output_address }
+                let output_address = Address(get_bits!(descriptor, off = n, len = 49 - n) << n);
+                Self {
+                    output_address,
+                    contiguous,
+                }
             }
             (Granule::_64KB, true) => unimplemented!(),
             (_, false) => {
@@ -300,8 +753,11 @@ impl BlockDescriptor {
                     Granule::_64KB if params.level == 2 => 29,
                     other => unreachable!("{other:?} level {:?}", params.level),
                 };
-                let output_address = Address(get_bits!(value, off = n, len = 47 - n) << n);
-                Self { output_address }
+                let output_address = Address(get_bits!(descriptor, off = n, len = 47 - n) << n);
+                Self {
+                    output_address,
+                    contiguous,
+                }
             }
         }
     }
@@ -309,8 +765,8 @@ impl BlockDescriptor {
     // `StageOA()`
     fn stage_output_address(self, input_address: Address, params: &IAParameters) -> Address {
         let tsize = translation_size(false, params.granule, params.level);
-        let csize = 0; //(if walkstate.contiguous == '1' then ContiguousSize(d128, tgx,
-                       //(if walkstate.level) else 0);
+        let csize = if self.contiguous { 4 } else { 0 }; //(if walkstate.contiguous == '1' then ContiguousSize(d128, tgx,
+                                                         //(if walkstate.level) else 0);
         let ia_msb = tsize + csize;
         // oa.paspace = walkstate.baseaddress.paspace;
         // oa.address = walkstate.baseaddress.address<55:ia_msb>:ia<ia_msb-1:0>;
@@ -367,6 +823,7 @@ impl TableDescriptor {
 #[derive(Debug)]
 struct PageDescriptor {
     page_address: Address,
+    contiguous: bool,
 }
 
 impl PageDescriptor {
@@ -377,20 +834,37 @@ impl PageDescriptor {
             Granule::_16KB => get_bits!(descriptor, off = 14, len = 47 - 14) << 14,
             Granule::_64KB => get_bits!(descriptor, off = 16, len = 47 - 16) << 16,
         };
+        let contiguous = if matches!(params.granule, Granule::_4KB) {
+            if params.level == 0 {
+                false
+            } else {
+                get_bits!(descriptor, off = 52, len = 1) == 1
+            }
+        } else {
+            unimplemented!()
+        };
 
         Self {
             page_address: Address(page_address),
+            contiguous,
         }
     }
 
     fn stage_output_address(self, input_address: Address, params: &IAParameters) -> Address {
         let tsize = translation_size(false, params.granule, params.level);
-        let csize = 0; //(if walkstate.contiguous == '1' then ContiguousSize(d128, tgx,
-                       //(if walkstate.level) else 0);
+        let csize = if self.contiguous {
+            //(if walkstate.contiguous == '1' then ContiguousSize(d128, tgx, (walkstate.level) else 0);
+            4
+        } else {
+            0
+        };
         let ia_msb = tsize + csize;
         // oa.paspace = walkstate.baseaddress.paspace;
         // oa.address = walkstate.baseaddress.address<55:ia_msb>:ia<ia_msb-1:0>;
-        Address(self.page_address.0 | get_bits!(input_address.0, off = 0, len = ia_msb))
+        Address(
+            get_bits!(self.page_address.0, off = ia_msb, len = 55 - ia_msb) << ia_msb
+                | get_bits!(input_address.0, off = 0, len = ia_msb),
+        )
     }
 }
 
@@ -419,380 +893,21 @@ pub extern "C" fn translate_address<'machine>(
     unprivileged: bool,
     ret: &mut MaybeUninit<ResolvedAddress<'machine>>,
 ) -> bool {
-    // [ref:TODO]: rename to S1 translation and add S2 stub
-    let pstate = machine.cpu_state.PSTATE();
-    let sctlr = machine.cpu_state.sctlr_elx();
-    let privileged = if unprivileged {
-        is_unpriv_access_priv(&pstate)
-    } else {
-        pstate.EL() != ExceptionLevel::EL0
-    };
-
-    if sctlr & 0x1 == 0 {
-        // stage 1 MMU disabled
-        return physical_address_lookup(
-            machine,
-            input_address,
-            preferred_exception_return,
-            raise_exception,
-            ret,
-        );
-    }
-    let mut params = IAParameters::new(machine, &input_address);
-    {
-        let vpn = input_address.0 >> 12;
-        if let Some(page) = machine.tlb.get(&(params.asid, vpn)) {
-            let output_address = Address(page | get_bits!(input_address.0, off = 0, len = 12));
-            return physical_address_lookup(
-                machine,
-                output_address,
-                preferred_exception_return,
-                raise_exception,
-                ret,
-            );
+    match machine.translate_address(
+        input_address,
+        preferred_exception_return,
+        unprivileged,
+        raise_exception,
+    ) {
+        Ok(resolved) => {
+            ret.write(resolved);
+            true
         }
-    }
-
-    let accessdesc = AccessDescriptor::new(privileged, &pstate, AccessType::TTW);
-    let page_table_base_address: Address =
-        TranslationTableBaseRegister::from(params.ttbr.0).base_address(&params);
-
-    if raise_exception {
-        tracing::event!(
-            target: TraceItem::AddressLookup.as_str(),
-            tracing::Level::TRACE,
-            physical = false,
-            address = ?input_address,
-            pc = ?Address(machine.pc),
-            EL = ?pstate.EL(),
-            ?unprivileged,
-            ?params,
-            ?accessdesc,
-            ?page_table_base_address
-        );
-    }
-    let mut fault = FaultRecord::no_fault(accessdesc, input_address);
-
-    macro_rules! read_table_entry {
-        ($base_addr:expr, $idx:expr) => {{
-            let base_addr = $base_addr.0;
-            let idx = u64::from($idx);
-            // For the VMSAv8-64 translation system, an entry is an eight-byte, or 64-bit,
-            // object
-            let mut resolved_address = MaybeUninit::uninit();
-            if !physical_address_lookup(
-                machine,
-                Address(base_addr + idx),
-                preferred_exception_return,
-                raise_exception,
-                &mut resolved_address
-            ) {
-                return false;
-            }
-            let ResolvedAddress {
-                mem_region,
-                address_inside_region,
-            } =
-            // SAFETY: we checked the return value
-            unsafe { resolved_address.assume_init() };
-            let mut resolved_value = MaybeUninit::uninit();
-            let mut exception = MaybeUninit::uninit();
-            if !crate::memory::region::ops::memory_region_read_64(
-                mem_region.unwrap(),
-                address_inside_region,
-                &mut resolved_value,
-                &mut exception,
-            ) {
-                // SAFETY: read returned false, so this is initialized
-                let exception = unsafe { exception.assume_init() };
-                if raise_exception {
-                    *machine.cpu_state.exit_request.lock().unwrap() =
-                        Some(exception);
-                }
-                return false;
-            }
-            // SAFETY: read returned true, so this is initialized
-            unsafe { resolved_value.assume_init() }
-        }};
-    }
-    match params.granule {
-        Granule::_4KB => {
-            // Extract translation table indices for each level OR output address bits.
-            let mut base_address = page_table_base_address;
-
-            let table_entry_0 =
-                read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));
+        Err(exit_request) => {
             if raise_exception {
-                tracing::event!(
-                    target: TraceItem::AddressLookup.as_str(),
-                    tracing::Level::TRACE,
-                    ?base_address,
-                    level = params.level,
-                    table_entry_0 = ?tracing::BinaryHex(table_entry_0),
-                );
+                *machine.cpu_state.exit_request.lock().unwrap() = Some(exit_request);
             }
-
-            base_address = match table_entry_0 & 0b11 {
-                0b11 if params.level == 3 => {
-                    // Page descriptor
-                    let page_desc = PageDescriptor::new(table_entry_0, &params);
-                    let output_address = page_desc.stage_output_address(input_address, &params);
-                    if raise_exception {
-                        tracing::event!(
-                            target: TraceItem::AddressLookup.as_str(),
-                            tracing::Level::TRACE,
-                            resolved_address = ?output_address,
-                        );
-                    }
-                    {
-                        let vpn = input_address.0 >> 12;
-                        let page = output_address.0 >> 12;
-                        let page = page << 12;
-                        machine.tlb.insert((params.asid, vpn), page);
-                    }
-                    return physical_address_lookup(
-                        machine,
-                        output_address,
-                        preferred_exception_return,
-                        raise_exception,
-                        ret,
-                    );
-                }
-                0b11 => {
-                    // Table descriptor
-                    TableDescriptor::new(table_entry_0, &params).entry_address
-                }
-                0b01 => {
-                    // Block descriptor
-                    let block_desc = BlockDescriptor::new(table_entry_0, &params);
-                    let output_address = block_desc.stage_output_address(input_address, &params);
-                    if raise_exception {
-                        tracing::event!(
-                            target: TraceItem::AddressLookup.as_str(),
-                            tracing::Level::TRACE,
-                            resolved_address = ?output_address
-                        )
-                    };
-                    {
-                        let vpn = input_address.0 >> 12;
-                        let page = output_address.0 >> 12;
-                        let page = page << 12;
-                        machine.tlb.insert((params.asid, vpn), page);
-                    }
-                    return physical_address_lookup(
-                        machine,
-                        output_address,
-                        preferred_exception_return,
-                        raise_exception,
-                        ret,
-                    );
-                }
-                other => {
-                    tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
-                    if raise_exception {
-                        fault.statuscode = Fault::Translation;
-                        *machine.cpu_state.exit_request.lock().unwrap() =
-                            Some(ExitRequest::Abort {
-                                fault,
-                                preferred_exception_return,
-                            });
-                    }
-                    return false;
-                }
-            };
-            params.level += 1;
-            fault.level += 1;
-
-            let table_entry_1 =
-                read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));
-            if raise_exception {
-                tracing::event!(
-                    target: TraceItem::AddressLookup.as_str(),
-                    tracing::Level::TRACE,
-                    ?base_address,
-                    level = params.level,
-                    table_entry_1 = ?tracing::BinaryHex(table_entry_1),
-                );
-            }
-
-            base_address = match table_entry_1 & 0b11 {
-                0b11 if params.level == 3 => {
-                    // Page descriptor
-                    let page_desc = PageDescriptor::new(table_entry_1, &params);
-                    let output_address = page_desc.stage_output_address(input_address, &params);
-                    if raise_exception {
-                        tracing::event!(
-                            target: TraceItem::AddressLookup.as_str(),
-                            tracing::Level::TRACE,
-                            resolved_address = ?output_address,
-                        );
-                    }
-                    {
-                        let vpn = input_address.0 >> 12;
-                        let page = output_address.0 >> 12;
-                        let page = page << 12;
-                        machine.tlb.insert((params.asid, vpn), page);
-                    }
-                    return physical_address_lookup(
-                        machine,
-                        output_address,
-                        preferred_exception_return,
-                        raise_exception,
-                        ret,
-                    );
-                }
-                0b11 => {
-                    // Table descriptor
-                    TableDescriptor::new(table_entry_1, &params).entry_address
-                }
-                0b01 => {
-                    // Block descriptor
-                    let block_desc = BlockDescriptor::new(table_entry_1, &params);
-                    let output_address = block_desc.stage_output_address(input_address, &params);
-                    if raise_exception {
-                        tracing::event!(
-                            target: TraceItem::AddressLookup.as_str(),
-                            tracing::Level::TRACE,
-                            resolved_address = ?output_address,
-                        );
-                    }
-                    {
-                        let vpn = input_address.0 >> 12;
-                        let page = output_address.0 >> 12;
-                        let page = page << 12;
-                        machine.tlb.insert((params.asid, vpn), page);
-                    }
-                    return physical_address_lookup(
-                        machine,
-                        output_address,
-                        preferred_exception_return,
-                        raise_exception,
-                        ret,
-                    );
-                }
-                other => {
-                    tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
-                    if raise_exception {
-                        fault.statuscode = Fault::Translation;
-                        *machine.cpu_state.exit_request.lock().unwrap() =
-                            Some(ExitRequest::Abort {
-                                fault,
-                                preferred_exception_return,
-                            });
-                    }
-                    return false;
-                }
-            };
-            params.level += 1;
-            fault.level += 1;
-
-            let table_entry_2 =
-                read_table_entry!(base_address, IA4KB::idx(input_address.0, &params));
-            if raise_exception {
-                tracing::event!(
-                    target: TraceItem::AddressLookup.as_str(),
-                    tracing::Level::TRACE,
-                    ?base_address,
-                    level = params.level,
-                    table_entry_2 = ?tracing::BinaryHex(table_entry_2),
-                );
-            }
-
-            base_address = match table_entry_2 & 0b11 {
-                0b11 if params.level == 3 => {
-                    // Page descriptor
-                    let page_desc = PageDescriptor::new(table_entry_2, &params);
-                    let output_address = page_desc.stage_output_address(input_address, &params);
-                    if raise_exception {
-                        tracing::event!(
-                            target: TraceItem::AddressLookup.as_str(),
-                            tracing::Level::TRACE,
-                            resolved_address = ?output_address,
-                        );
-                    }
-                    {
-                        let vpn = input_address.0 >> 12;
-                        let page = output_address.0 >> 12;
-                        let page = page << 12;
-                        machine.tlb.insert((params.asid, vpn), page);
-                    }
-                    return physical_address_lookup(
-                        machine,
-                        output_address,
-                        preferred_exception_return,
-                        raise_exception,
-                        ret,
-                    );
-                }
-                0b11 => {
-                    // Table descriptor
-                    TableDescriptor::new(table_entry_2, &params).entry_address
-                }
-                0b01 => {
-                    // Block descriptor
-                    let block_desc = BlockDescriptor::new(table_entry_2, &params);
-                    let output_address = block_desc.stage_output_address(input_address, &params);
-                    if raise_exception {
-                        tracing::event!(
-                            target: TraceItem::AddressLookup.as_str(),
-                            tracing::Level::TRACE,
-                            resolved_address = ?output_address
-                        );
-                    }
-                    {
-                        let vpn = input_address.0 >> 12;
-                        let page = output_address.0 >> 12;
-                        let page = page << 12;
-                        machine.tlb.insert((params.asid, vpn), page);
-                    }
-                    return physical_address_lookup(
-                        machine,
-                        output_address,
-                        preferred_exception_return,
-                        raise_exception,
-                        ret,
-                    );
-                }
-                other => {
-                    tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
-                    if raise_exception {
-                        fault.statuscode = Fault::Translation;
-                        *machine.cpu_state.exit_request.lock().unwrap() =
-                            Some(ExitRequest::Abort {
-                                fault,
-                                preferred_exception_return,
-                            });
-                    }
-                    return false;
-                }
-            };
-            params.level += 1;
-            // Block descriptor
-            let block_desc = BlockDescriptor::new(base_address.0, &params);
-            let output_address = block_desc.stage_output_address(input_address, &params);
-            if raise_exception {
-                tracing::event!(
-                    target: TraceItem::AddressLookup.as_str(),
-                    tracing::Level::TRACE,
-                    resolved_address = ?output_address
-                );
-            }
-            {
-                let vpn = input_address.0 >> 12;
-                let page = output_address.0 >> 12;
-                let page = page << 12;
-                machine.tlb.insert((params.asid, vpn), page);
-            }
-            physical_address_lookup(
-                machine,
-                output_address,
-                preferred_exception_return,
-                raise_exception,
-                ret,
-            )
-        }
-        Granule::_16KB | Granule::_64KB => {
-            unimplemented!()
+            false
         }
     }
 }
@@ -807,48 +922,99 @@ pub extern "C" fn mem_zero(
     let size =
         4 * 2_u64.pow(get_bits!(machine.cpu_state.id_registers.dczid_el0, off = 0, len = 4) as u32);
     assert!(size <= MAX_ZERO_BLOCK_SIZE);
-    let vaddress = align(input_address.0, size);
+    let mut address = Address(align(input_address.0, size));
 
-    for i in 0..size {
-        let mut resolved_address = MaybeUninit::uninit();
-        if !translate_address(
-            machine,
-            Address(vaddress + i),
-            preferred_exception_return,
-            true,
-            /* unprivileged */
-            false,
-            &mut resolved_address,
-        ) {
-            return false;
-        }
+    for _ in 0..size {
         let ResolvedAddress {
-                mem_region,
-                address_inside_region,
-            } =
-            // SAFETY: we checked the return value
-            unsafe { resolved_address.assume_init() };
-        let mem_region = mem_region.unwrap();
-        let mem_region = machine
-            .memory
-            .find_region_mut(mem_region.phys_offset)
-            .unwrap();
-        let mut exception = MaybeUninit::uninit();
-        if !crate::memory::region::ops::memory_region_write_8(
-            mem_region,
+            mem_region: _,
             address_inside_region,
-            0,
-            &mut exception,
-        ) {
-            // SAFETY: write returned false, so this is initialized
-            let exception = unsafe { exception.assume_init() };
-            *machine.cpu_state.exit_request.lock().unwrap() = Some(exception);
+            physical,
+        } = match machine.translate_address(address, preferred_exception_return, false, true) {
+            Ok(r) => r,
+            Err(exit_request) => {
+                *machine.cpu_state.exit_request.lock().unwrap() = Some(exit_request);
+                return false;
+            }
+        };
+        let mem_region = machine.memory.find_region_mut(physical).unwrap();
+        if let Err(exit_request) = mem_region.write_8(address_inside_region, 0) {
+            *machine.cpu_state.exit_request.lock().unwrap() = Some(exit_request);
             return false;
         }
+        address = Address(address.0 + 1);
+        machine.invalidate.push(physical.0);
     }
     true
 }
 
 pub extern "C" fn tlbi(machine: &Armv8AMachine) {
     machine.tlb.clear();
+}
+
+pub mod ops {
+    //! Helper memory I/O functions for JIT code.
+
+    use std::mem::MaybeUninit;
+
+    use super::*;
+    use crate::cpu_state::ExitRequest;
+
+    macro_rules! def_op {
+        (read $fn:ident: $size:ty) => {
+            /// Helper memory read struct called from JIT code.
+            pub extern "C" fn $fn(
+                machine: &Armv8AMachine,
+                address: Address,
+                ret: &mut MaybeUninit<$size>,
+                unprivileged: bool,
+                preferred_exception_return: Address,
+                exception: &mut MaybeUninit<ExitRequest>,
+            ) -> bool {
+                let mut v = (0 as $size).to_le_bytes();
+                match machine.mem(address, &mut v, unprivileged, preferred_exception_return) {
+                    Ok(()) => {
+                        let value = <$size>::from_le_bytes(v);
+                        ret.write(value);
+                        true
+                    }
+                    Err(err) => {
+                        exception.write(err);
+                        false
+                    }
+                }
+            }
+        };
+        (write $fn:ident: $size:ty) => {
+            /// Helper memory write struct called from JIT code.
+            pub extern "C" fn $fn(
+                machine: &mut Armv8AMachine,
+                address: Address,
+                value: $size,
+                unprivileged: bool,
+                preferred_exception_return: Address,
+                exception: &mut MaybeUninit<ExitRequest>,
+            ) -> bool {
+                let v = value.to_le_bytes();
+                match machine.mem_write(address, &v, unprivileged, preferred_exception_return) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        exception.write(err);
+                        false
+                    }
+                }
+            }
+        };
+    }
+
+    def_op! { write write_8: u8 }
+    def_op! { write write_16: u16 }
+    def_op! { write write_32: u32 }
+    def_op! { write write_64: u64 }
+    def_op! { write write_128: u128 }
+
+    def_op! { read read_8: u8 }
+    def_op! { read read_16: u16 }
+    def_op! { read read_32: u32 }
+    def_op! { read read_64: u64 }
+    def_op! { read read_128: u128 }
 }

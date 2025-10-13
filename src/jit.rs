@@ -150,10 +150,11 @@ fn translate_code_address(
     let ResolvedAddress {
                 mem_region,
                 address_inside_region: pc_offset,
+                physical: _,
             } =
             // SAFETY: we checked the return value
             unsafe { resolved_pc_address.assume_init( )};
-    let Some(mmapped_region) = mem_region.unwrap().as_mmap() else {
+    let Some(mmapped_region) = mem_region.as_mmap() else {
         return Err(format!(
             "Received program counter {} which is mapped in device memory.",
             Address(program_counter),
@@ -343,27 +344,6 @@ impl<'j> JitContext<'j> {
             crate::machine::helper_set_exit_request as usize as u64 as i64,
         );
 
-        // Declare variables for each register.
-        let address_lookup_sigref = {
-            let mut sig = self.module.make_signature();
-            // machine: &mut Armv8AMachine,
-            sig.params
-                .push(AbiParam::new(self.module.target_config().pointer_type()));
-            // input_address: Address,
-            sig.params.push(AbiParam::new(I64));
-            // preferred_exception_return: Address,
-            sig.params.push(AbiParam::new(I64));
-            // raise_exception: bool,
-            sig.params.push(AbiParam::new(I8));
-            // unprivileged: bool,
-            sig.params.push(AbiParam::new(I8));
-            // ret: &mut ResolvedAddress<'_>
-            sig.params
-                .push(AbiParam::new(self.module.target_config().pointer_type()));
-            // -> bool
-            sig.returns.push(AbiParam::new(I8));
-            builder.import_signature(sig)
-        };
         let mut trans = BlockTranslator {
             address: program_counter,
             write_to_sysreg: false,
@@ -372,7 +352,6 @@ impl<'j> JitContext<'j> {
             memops_table,
             machine_ptr,
             set_exception_func,
-            address_lookup_sigref,
             builder,
             module: &self.module,
             registers: IndexMap::new(),
@@ -516,7 +495,6 @@ struct BlockTranslator<'a> {
     set_exception_func: Value,
     pointer_type: Type,
     memops_table: MemOpsTable,
-    address_lookup_sigref: codegen::ir::SigRef,
     registers: IndexMap<bad64::Reg, Variable>,
     sys_registers: IndexMap<SysReg, Variable>,
     loopback_blocks: IndexMap<u64, Block>,

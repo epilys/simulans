@@ -265,10 +265,11 @@ impl GdbStubRunner {
         let crate::memory::mmu::ResolvedAddress {
                 mem_region,
                 address_inside_region,
+                ..
             } =
             // SAFETY: we checked the return value
             unsafe { resolved_address.assume_init( )};
-        let Some(mmapped_region) = mem_region.unwrap().as_mmap() else {
+        let Some(mmapped_region) = mem_region.as_mmap() else {
             tracing::error!(
                 "Cannot read from address {} which is mapped to device memory",
                 start_address
@@ -314,10 +315,11 @@ impl GdbStubRunner {
         let crate::memory::mmu::ResolvedAddress {
                 mem_region,
                 address_inside_region,
+                ..
             } =
             // SAFETY: we checked the return value
             unsafe { resolved_address.assume_init( )};
-        let phys_offset = mem_region.unwrap().phys_offset;
+        let phys_offset = mem_region.phys_offset;
         let Some(mmapped_region) = self
             .machine
             .memory
