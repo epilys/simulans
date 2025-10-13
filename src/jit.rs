@@ -2421,8 +2421,7 @@ impl BlockTranslator<'_> {
                 let a = self.translate_operand(&instruction.operands()[1]);
                 let b = self.translate_operand(&instruction.operands()[2]);
                 let width = self.operand_width(&instruction.operands()[1]);
-                let negb = self.builder.ins().bnot(b);
-                let (result, _nzcv) = ands!(a, negb);
+                let result = self.builder.ins().band_not(a, b);
                 write_to_register!(
                     destination,
                     TypedValue {
