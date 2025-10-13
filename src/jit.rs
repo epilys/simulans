@@ -579,6 +579,7 @@ impl BlockTranslator<'_> {
                 use bad64::Shift;
 
                 let value = self.reg_to_value(reg, None);
+                let width = self.operand_width(operand);
                 match shift {
                     Shift::LSL(_)
                     | Shift::LSR(_)
@@ -587,7 +588,11 @@ impl BlockTranslator<'_> {
                     | Shift::MSL(_) => self.translate_operand(operand),
                     Shift::UXTW(uxtw) => {
                         // [ref:verify_implementation]
-                        let value = self.builder.ins().uextend(extend_to.into(), value);
+                        let value = if extend_to > width {
+                            self.builder.ins().uextend(extend_to.into(), value)
+                        } else {
+                            value
+                        };
                         if *uxtw == 0 {
                             value
                         } else {
@@ -596,7 +601,11 @@ impl BlockTranslator<'_> {
                     }
                     Shift::SXTW(sxtw) => {
                         // [ref:verify_implementation]
-                        let value = self.builder.ins().sextend(extend_to.into(), value);
+                        let value = if extend_to > width {
+                            self.builder.ins().sextend(extend_to.into(), value)
+                        } else {
+                            value
+                        };
                         if *sxtw == 0 {
                             value
                         } else {
@@ -604,7 +613,11 @@ impl BlockTranslator<'_> {
                         }
                     }
                     Shift::SXTX(sxtx) => {
-                        let value = self.builder.ins().sextend(extend_to.into(), value);
+                        let value = if extend_to > width {
+                            self.builder.ins().sextend(extend_to.into(), value)
+                        } else {
+                            value
+                        };
                         if *sxtx == 0 {
                             value
                         } else {
@@ -612,7 +625,11 @@ impl BlockTranslator<'_> {
                         }
                     }
                     Shift::UXTX(uxtx) => {
-                        let value = self.builder.ins().uextend(extend_to.into(), value);
+                        let value = if extend_to > width {
+                            self.builder.ins().uextend(extend_to.into(), value)
+                        } else {
+                            value
+                        };
                         if *uxtx == 0 {
                             value
                         } else {
@@ -651,7 +668,7 @@ impl BlockTranslator<'_> {
                     }
                     Shift::UXTB(uxtb) => {
                         // [ref:verify_implementation]
-                        let value = self.builder.ins().band_imm(value, i64::from(u8::MAX));
+                        let value = self.builder.ins().ireduce(I8, value);
                         let value = self.builder.ins().uextend(extend_to.into(), value);
                         if *uxtb == 0 {
                             value
@@ -804,29 +821,29 @@ impl BlockTranslator<'_> {
                     Some(bad64::Shift::UXTW(ref uxtw)) => {
                         let addr_width = self.reg_width(address_reg);
                         let offset_width = self.reg_width(offset_reg);
-                        let value = if *uxtw == 0 {
+                        let offset = if addr_width > offset_width {
+                            self.builder.ins().uextend(addr_width.into(), offset)
+                        } else {
+                            offset
+                        };
+                        if *uxtw == 0 {
                             offset
                         } else {
                             self.builder.ins().ishl_imm(offset, i64::from(*uxtw))
-                        };
-                        if addr_width > offset_width {
-                            self.builder.ins().uextend(addr_width.into(), value)
-                        } else {
-                            value
                         }
                     }
                     Some(bad64::Shift::SXTW(ref sxtw)) => {
                         let addr_width = self.reg_width(address_reg);
                         let offset_width = self.reg_width(offset_reg);
-                        let value = if *sxtw == 0 {
+                        let offset = if addr_width > offset_width {
+                            self.builder.ins().sextend(addr_width.into(), offset)
+                        } else {
+                            offset
+                        };
+                        if *sxtw == 0 {
                             offset
                         } else {
                             self.builder.ins().ishl_imm(offset, i64::from(*sxtw))
-                        };
-                        if addr_width > offset_width {
-                            self.builder.ins().sextend(addr_width.into(), value)
-                        } else {
-                            value
                         }
                     }
                     other => unimplemented!("unimplemented shift {other:?}"),
