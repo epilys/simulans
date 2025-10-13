@@ -167,7 +167,7 @@ impl<'a> FdtBuilder<'a> {
             fdt.end_node(timer_node)?;
         }
         {
-            let cmdline = self.cmdline.as_deref().unwrap_or("Hello world!");
+            let cmdline = self.cmdline.as_deref().unwrap_or("");
             let chosen_node = fdt.begin_node("chosen")?;
             fdt.property_string("bootargs", cmdline)?;
             if let Some(ref stdout_path) = stdout_path {
