@@ -421,6 +421,7 @@ impl<'j> JitContext<'j> {
                     | Op::RET
                     | Op::UDF
                     | Op::YIELD
+                    | Op::ISB
                     | Op::ERET => break,
                     _ => continue,
                 };
@@ -3300,6 +3301,7 @@ impl BlockTranslator<'_> {
             Op::IRG => todo!(),
             Op::ISB => {
                 // Instruction synchronization barrier
+                return self.r#yield(ExitRequestID::Yield);
             }
             Op::LASTA => todo!(),
             Op::LASTB => todo!(),
