@@ -29,22 +29,22 @@
  *                         [#   1] 0x00002c001000-0x00002c001fff, Device, GICC
  *                 [# 368]---------------------------\
  *                         level 3 table @ 0x40405000
- *                         [#   0] 0x00002e000000-0x00002e000fff, RW_Data, Non-Trusted SRAM
- *                         [#   1] 0x00002e001000-0x00002e001fff, RW_Data, Non-Trusted SRAM
- *                         [#   2] 0x00002e002000-0x00002e002fff, RW_Data, Non-Trusted SRAM
- *                         [#   3] 0x00002e003000-0x00002e003fff, RW_Data, Non-Trusted SRAM
- *                         [#   4] 0x00002e004000-0x00002e004fff, RW_Data, Non-Trusted SRAM
- *                         [#   5] 0x00002e005000-0x00002e005fff, RW_Data, Non-Trusted SRAM
- *                         [#   6] 0x00002e006000-0x00002e006fff, RW_Data, Non-Trusted SRAM
- *                         [#   7] 0x00002e007000-0x00002e007fff, RW_Data, Non-Trusted SRAM
- *                         [#   8] 0x00002e008000-0x00002e008fff, RW_Data, Non-Trusted SRAM
- *                         [#   9] 0x00002e009000-0x00002e009fff, RW_Data, Non-Trusted SRAM
- *                         [#  10] 0x00002e00a000-0x00002e00afff, RW_Data, Non-Trusted SRAM
- *                         [#  11] 0x00002e00b000-0x00002e00bfff, RW_Data, Non-Trusted SRAM
- *                         [#  12] 0x00002e00c000-0x00002e00cfff, RW_Data, Non-Trusted SRAM
- *                         [#  13] 0x00002e00d000-0x00002e00dfff, RW_Data, Non-Trusted SRAM
- *                         [#  14] 0x00002e00e000-0x00002e00efff, RW_Data, Non-Trusted SRAM
- *                         [#  15] 0x00002e00f000-0x00002e00ffff, RW_Data, Non-Trusted SRAM
+ *                         [#   0] 0x00002e000000-0x00002e000fff, Code, CODE
+ *                         [#   1] 0x00002e001000-0x00002e001fff, Code, CODE
+ *                         [#   2] 0x00002e002000-0x00002e002fff, Code, CODE
+ *                         [#   3] 0x00002e003000-0x00002e003fff, Code, CODE
+ *                         [#   4] 0x00002e004000-0x00002e004fff, Code, CODE
+ *                         [#   5] 0x00002e005000-0x00002e005fff, Code, CODE
+ *                         [#   6] 0x00002e006000-0x00002e006fff, Code, CODE
+ *                         [#   7] 0x00002e007000-0x00002e007fff, Code, CODE
+ *                         [#   8] 0x00002e008000-0x00002e008fff, Code, CODE
+ *                         [#   9] 0x00002e009000-0x00002e009fff, Code, CODE
+ *                         [#  10] 0x00002e00a000-0x00002e00afff, Code, CODE
+ *                         [#  11] 0x00002e00b000-0x00002e00bfff, Code, CODE
+ *                         [#  12] 0x00002e00c000-0x00002e00cfff, Code, CODE
+ *                         [#  13] 0x00002e00d000-0x00002e00dfff, Code, CODE
+ *                         [#  14] 0x00002e00e000-0x00002e00efff, Code, CODE
+ *                         [#  15] 0x00002e00f000-0x00002e00ffff, Code, CODE
  *                 [# 376]---------------------------\
  *                         level 3 table @ 0x40406000
  *                         [#   0] 0x00002f000000-0x00002f000fff, Device, GICv3 GICD
@@ -342,7 +342,7 @@
 0xd800020,     1K, DEVICE, TUBE
 0x01C090000,   4K, DEVICE, UART0
 0x02C000000,   8K, DEVICE, GICC
-0x02E000000,  64K, RW_DATA, Non-Trusted SRAM
+0x02E000000,  64K, CODE,   CODE
 0x02F000000,  64K, DEVICE, GICv3 GICD
 0x02F100000,   1M, DEVICE, GICv3 GICR
 0x080000000,   2G, RW_DATA, Non-Trusted DRAM
@@ -498,7 +498,7 @@ program_table_5_entry_0_to_15:
     LDR     x11, =16                     // number of contiguous entries
     LDR     x12, =0x2e000000             // output address of entry[idx]
 1:
-    ORR     x12, x12, x5                 // merge output address with template
+    ORR     x12, x12, x21                // merge output address with template
     STR     X12, [x8, x10, lsl #3]       // write entry into table
     ADD     x10, x10, #1                 // prepare for next entry idx+1
     ADD     x12, x12, x9                 // add chunk to address

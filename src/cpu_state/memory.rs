@@ -124,9 +124,9 @@ pub struct TranslationControlRegister {
     /// `TBI1[38:38]`
     pub TBI1: bool,
     /// `HA[39:39]`
-    pub HA: u1,
+    pub HA: bool,
     /// `HD[40:40]`
-    pub HD: u1,
+    pub HD: bool,
     /// `HPD0[41:41]`
     pub HPD0: u1,
     /// `HPD1[42:42]`

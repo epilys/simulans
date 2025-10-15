@@ -7,6 +7,7 @@ pub mod mmu;
 
 mod map;
 mod region;
+mod tlb;
 
 mod address;
 mod size;
@@ -15,6 +16,7 @@ pub use address::*;
 pub use map::*;
 pub use region::*;
 pub use size::*;
+pub use tlb::TLB;
 
 /// Default guest physical address to load kernel code to.
 pub const KERNEL_ADDRESS: usize = 0x40080000;
@@ -72,4 +74,42 @@ impl From<Width> for cranelift::prelude::Type {
             Width::_128 => I128,
         }
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum AccessType {
+    /// Instruction FETCH
+    IFETCH,
+    /// Software load/store to a General Purpose Register
+    GPR,
+    /// Software ASIMD extension load/store instructions
+    ASIMD,
+    /// Software SVE load/store instructions
+    SVE,
+    /// Software SME load/store instructions
+    SME,
+    /// Sysop IC
+    IC,
+    /// Sysop DC (not DC {Z,G,GZ}VA)
+    DC,
+    /// Sysop DC {Z,G,GZ}VA
+    DCZero,
+    /// Sysop AT
+    AT,
+    /// NV2 memory redirected access
+    NV2,
+    /// Statistical Profiling buffer access
+    SPE,
+    /// Guarded Control Stack access
+    GCS,
+    /// Trace Buffer access
+    TRBE,
+    /// Granule Protection Table Walk
+    GPTW,
+    /// Access to the HACDBS structure
+    HACDBS,
+    /// Access to entries in HDBSS
+    HDBSS,
+    /// Translation Table Walk
+    TTW,
 }

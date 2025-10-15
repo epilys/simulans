@@ -6,11 +6,10 @@ use std::num::NonZero;
 use simulans::{
     cpu_state::{ExceptionLevel, ExitRequest},
     exceptions::{
-        AccessDescriptor, AccessType, ErrorState, Fault, FaultRecord, FullAddress, PASpace,
-        SecurityState,
+        AccessDescriptor, ErrorState, Fault, FaultRecord, FullAddress, PASpace, SecurityState,
     },
     main_loop,
-    memory::{Address, MemorySize},
+    memory::{AccessType, Address, MemorySize},
 };
 
 #[macro_use]
@@ -64,7 +63,7 @@ fn test_mmu_4k() {
                         el: ExceptionLevel::EL1,
                         ss: SecurityState::NonSecure,
                         exclusive: false,
-                        read: false,
+                        read: true,
                         write: false,
                         ispair: false,
                     },
@@ -78,11 +77,11 @@ fn test_mmu_4k() {
                         address: Address(0x0),
                     },
                     gpcfs2walk: false,
-                    s2fs1walk: true,
+                    s2fs1walk: false,
                     write: false,
                     s1tagnotdata: false,
                     tagaccess: false,
-                    level: 1,
+                    level: 2,
                     extflag: false,
                     secondstage: false,
                     assuredonly: false,

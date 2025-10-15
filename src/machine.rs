@@ -8,10 +8,8 @@ use std::{collections::BTreeSet, num::NonZero, pin::Pin};
 use crate::{cpu_state::*, devices::timer::GenericTimer, memory::*, tracing};
 
 mod psci;
-mod tlb;
 mod translation_blocks;
 
-pub use tlb::TLB;
 pub use translation_blocks::{TranslationBlock, TranslationBlocks};
 
 pub mod interrupts;

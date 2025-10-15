@@ -3,7 +3,7 @@
 
 //! Generation of JIT code as translation blocks.
 
-use std::{collections::BTreeSet, mem::MaybeUninit, ops::ControlFlow};
+use std::{collections::BTreeSet, ops::ControlFlow};
 
 use bad64::ArrSpec;
 use codegen::ir::{
@@ -19,8 +19,9 @@ use num_traits::cast::FromPrimitive;
 
 use crate::{
     cpu_state::{ExitRequestID, SysReg, SysRegEncoding},
+    exceptions::AccessDescriptor,
     machine::{Armv8AMachine, TranslationBlock, TranslationBlocks},
-    memory::{mmu::ResolvedAddress, Address, Width},
+    memory::{mmu::ResolvedAddress, AccessType, Address, Width},
     tracing,
 };
 
@@ -141,31 +142,27 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
 
 fn translate_code_address(
     machine: &Armv8AMachine,
-    program_counter: u64,
+    pc: u64,
 ) -> Result<Address, Box<dyn std::error::Error>> {
-    let mut resolved_pc_address = MaybeUninit::uninit();
-    if !crate::memory::mmu::translate_address(
-        machine,
-        Address(program_counter),
-        Address(program_counter),
-        true,
-        false,
-        &mut resolved_pc_address,
-    ) {
-        return Err(format!(
-            "Received program counter {} which is unmapped in physical memory.",
-            Address(program_counter),
-        )
-        .into());
+    let accessdesc = AccessDescriptor {
+        read: true,
+        ..AccessDescriptor::new(true, &machine.cpu_state.PSTATE(), AccessType::IFETCH)
+    };
+    match machine.translate_address(Address(pc), Address(pc), true, accessdesc) {
+        Ok(ResolvedAddress {
+            mem_region: _,
+            address_inside_region: _,
+            physical,
+        }) => Ok(physical),
+        Err(exit_request) => {
+            *machine.cpu_state.exit_request.lock().unwrap() = Some(exit_request);
+            Err(format!(
+                "Received program counter {} which is unmapped in physical memory.",
+                Address(pc),
+            )
+            .into())
+        }
     }
-    let ResolvedAddress {
-                mem_region: _,
-                address_inside_region: _,
-                physical,
-            } =
-            // SAFETY: we checked the return value
-            unsafe { resolved_pc_address.assume_init( )};
-    Ok(physical)
 }
 
 fn code_area(

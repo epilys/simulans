@@ -2,7 +2,6 @@
 // Copyright Contributors to the simulans project.
 
 use std::{
-    mem::MaybeUninit,
     os::unix::net::UnixListener,
     pin::Pin,
     sync::{
@@ -37,7 +36,12 @@ use gdbstub::{
     },
 };
 
-use crate::{cpu_state::SpSel, memory::Address, tracing};
+use crate::{
+    cpu_state::SpSel,
+    exceptions::AccessDescriptor,
+    memory::{mmu::ResolvedAddress, AccessType, Address},
+    tracing,
+};
 
 /// Helper struct for memory map xml
 struct GdbMemoryMap {
@@ -247,39 +251,45 @@ impl GdbStubRunner {
             max_bytes = max_bytes,
             "reading memory",
         );
-        let mut resolved_address = MaybeUninit::uninit();
-        if !crate::memory::mmu::translate_address(
-            &self.machine,
-            start_address,
-            start_address,
-            false,
-            false,
-            &mut resolved_address,
-        ) {
-            tracing::error!(
-                "Cannot read from address {} which is not covered by a RAM memory region.",
-                start_address
-            );
-            return Err(TargetError::NonFatal);
-        }
-        let crate::memory::mmu::ResolvedAddress {
+        let accessdesc = AccessDescriptor {
+            read: true,
+            ..AccessDescriptor::new(true, &self.machine.cpu_state.PSTATE(), AccessType::GPR)
+        };
+        match self
+            .machine
+            .translate_address(start_address, start_address, false, accessdesc)
+        {
+            Ok(ResolvedAddress {
                 mem_region,
                 address_inside_region,
-                ..
-            } =
-            // SAFETY: we checked the return value
-            unsafe { resolved_address.assume_init( )};
-        let Some(mmapped_region) = mem_region.as_mmap() else {
-            tracing::error!(
-                "Cannot read from address {} which is mapped to device memory",
-                start_address
-            );
-            return Err(TargetError::NonFatal);
-        };
-        let r: &[u8] = &mmapped_region.as_ref()[address_inside_region.try_into().unwrap()..];
-        let r = &r[..max_bytes.min(r.len())];
-        let r = r.into();
-        Ok(r)
+                physical: _,
+            }) => {
+                let Some(mmapped_region) = mem_region.as_mmap() else {
+                    tracing::event!(
+                        target: tracing::TraceItem::Gdb.as_str(),
+                        tracing::Level::ERROR,
+                        address = ?start_address,
+                        "Cannot read from address which is mapped to device memory.",
+                    );
+                    return Err(TargetError::NonFatal);
+                };
+                let r: &[u8] =
+                    &mmapped_region.as_ref()[address_inside_region.try_into().unwrap()..];
+                let r = &r[..max_bytes.min(r.len())];
+                let r = r.into();
+                Ok(r)
+            }
+            Err(exit_request) => {
+                tracing::event!(
+                    target: tracing::TraceItem::Gdb.as_str(),
+                    tracing::Level::ERROR,
+                    ?exit_request,
+                    address = ?start_address,
+                    "Cannot read from address which is not covered by a RAM memory region.",
+                );
+                Err(TargetError::NonFatal)
+            }
+        }
     }
 
     #[inline(always)]
@@ -297,49 +307,54 @@ impl GdbStubRunner {
             "writing memory",
         );
 
-        let mut resolved_address = MaybeUninit::uninit();
-        if !crate::memory::mmu::translate_address(
-            &self.machine,
-            start_address,
-            start_address,
-            false,
-            false,
-            &mut resolved_address,
-        ) {
-            tracing::error!(
-                "Cannot write to address {} which is not covered by a RAM memory region.",
-                start_address,
-            );
-            return Err(TargetError::NonFatal);
-        }
-        let crate::memory::mmu::ResolvedAddress {
+        let accessdesc = AccessDescriptor {
+            write: true,
+            ..AccessDescriptor::new(true, &self.machine.cpu_state.PSTATE(), AccessType::GPR)
+        };
+        match self
+            .machine
+            .translate_address(start_address, start_address, false, accessdesc)
+        {
+            Ok(ResolvedAddress {
                 mem_region,
                 address_inside_region,
-                ..
-            } =
-            // SAFETY: we checked the return value
-            unsafe { resolved_address.assume_init( )};
-        let phys_offset = mem_region.phys_offset;
-        let Some(mmapped_region) = self
-            .machine
-            .memory
-            .find_region_mut(phys_offset)
-            .unwrap()
-            .as_mmap_mut()
-        else {
-            tracing::error!(
-                "Cannot write to address {} which is mapped to device memory",
-                start_address
-            );
-            return Err(TargetError::NonFatal);
-        };
-        let r: &mut [u8] = &mut mmapped_region.as_mut()[address_inside_region as usize..];
-        let max_len = value.len().min(r.len());
-        let r = &mut r[..max_len];
-        for (dst, v) in r.iter_mut().zip(value.iter()) {
-            *dst = *v;
+                physical: _,
+            }) => {
+                let phys_offset = mem_region.phys_offset;
+                let Some(mmapped_region) = self
+                    .machine
+                    .memory
+                    .find_region_mut(phys_offset)
+                    .unwrap()
+                    .as_mmap_mut()
+                else {
+                    tracing::event!(
+                        target: tracing::TraceItem::Gdb.as_str(),
+                        tracing::Level::ERROR,
+                        address = ?start_address,
+                        "Cannot write to address which is mapped to device memory.",
+                    );
+                    return Err(TargetError::NonFatal);
+                };
+                let r: &mut [u8] = &mut mmapped_region.as_mut()[address_inside_region as usize..];
+                let max_len = value.len().min(r.len());
+                let r = &mut r[..max_len];
+                for (dst, v) in r.iter_mut().zip(value.iter()) {
+                    *dst = *v;
+                }
+                Ok(())
+            }
+            Err(exit_request) => {
+                tracing::event!(
+                    target: tracing::TraceItem::Gdb.as_str(),
+                    tracing::Level::ERROR,
+                    ?exit_request,
+                    address = ?start_address,
+                    "Cannot write to address which is not covered by a RAM memory region.",
+                );
+                Err(TargetError::NonFatal)
+            }
         }
-        Ok(())
     }
 
     #[inline(always)]

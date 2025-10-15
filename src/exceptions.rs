@@ -13,47 +13,9 @@ use crate::{
         TranslationControlRegister, PSTATE,
     },
     get_bits,
-    memory::Address,
+    memory::{AccessType, Address},
     set_bits, tracing,
 };
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum AccessType {
-    /// Instruction FETCH
-    IFETCH,
-    /// Software load/store to a General Purpose Register
-    GPR,
-    /// Software ASIMD extension load/store instructions
-    ASIMD,
-    /// Software SVE load/store instructions
-    SVE,
-    /// Software SME load/store instructions
-    SME,
-    /// Sysop IC
-    IC,
-    /// Sysop DC (not DC {Z,G,GZ}VA)
-    DC,
-    /// Sysop DC {Z,G,GZ}VA
-    DCZero,
-    /// Sysop AT
-    AT,
-    /// NV2 memory redirected access
-    NV2,
-    /// Statistical Profiling buffer access
-    SPE,
-    /// Guarded Control Stack access
-    GCS,
-    /// Trace Buffer access
-    TRBE,
-    /// Granule Protection Table Walk
-    GPTW,
-    /// Access to the HACDBS structure
-    HACDBS,
-    /// Access to entries in HDBSS
-    HDBSS,
-    /// Translation Table Walk
-    TTW,
-}
 
 /// Fault types
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -351,7 +313,7 @@ impl FaultRecord {
             accessdesc,
             vaddress,
             gpcfs2walk: false,
-            s2fs1walk: true,
+            s2fs1walk: false,
             write,
             s1tagnotdata: false,
             tagaccess: false,
@@ -1082,7 +1044,7 @@ pub extern "C" fn aarch64_exception_return(
 
 /// Abort exception handling for translation regime.
 ///
-/// `AArch64.Abort` and mix of `AArch64.DataAbort`
+/// `AArch64.Abort`
 pub fn aarch64_abort(
     machine: &mut crate::machine::Armv8AMachine,
     fault: FaultRecord,
@@ -1115,7 +1077,14 @@ pub fn aarch64_abort(
         Address(0x0)
     };
 
-    let except = ExceptionRecord::abort_syndrome(Exception::DataAbort, fault);
+    let except = ExceptionRecord::abort_syndrome(
+        if matches!(fault.accessdesc.acctype, AccessType::IFETCH) {
+            Exception::InstructionAbort
+        } else {
+            Exception::DataAbort
+        },
+        fault,
+    );
     tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, ?target_el, ?vect_offset, ?except, ?preferred_exception_return, "AArch64.Abort");
 
     aarch64_take_exception(

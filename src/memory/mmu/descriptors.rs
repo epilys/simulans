@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 // Copyright Contributors to the simulans project.
 
-use super::{align, Granule, TTWState, FINAL_LEVEL};
+use super::{align, Granule, Permissions, TTWState, FINAL_LEVEL};
 use crate::{get_bits, memory::Address};
 
 fn align_bits(x: u64, y: u64, n: u32) -> u64 {
@@ -22,6 +22,27 @@ pub enum Descriptor {
 }
 
 impl Descriptor {
+    pub fn permissions(&self) -> Permissions {
+        match self {
+            Self::Block(d) => d.permissions,
+            Self::Page(d) => d.permissions,
+        }
+    }
+
+    pub fn access_flag(&self) -> bool {
+        match self {
+            Self::Block(d) => d.access_flag,
+            Self::Page(d) => d.access_flag,
+        }
+    }
+
+    pub fn non_global(&self) -> bool {
+        match self {
+            Self::Block(d) => d.non_global,
+            Self::Page(d) => d.non_global,
+        }
+    }
+
     pub fn stage_output_address(self, input_address: Address, ttwstate: &TTWState) -> Address {
         match self {
             Self::Block(d) => d.stage_output_address(input_address, ttwstate),
@@ -34,10 +55,16 @@ impl Descriptor {
 pub struct BlockDescriptor {
     pub output_address: Address,
     pub contiguous: bool,
+    pub permissions: Permissions,
+    pub access_flag: bool,
+    pub non_global: bool,
 }
 
 impl BlockDescriptor {
-    pub fn new(descriptor: u64, ttwstate: &TTWState) -> Self {
+    pub fn new(descriptor: u64, ttwstate: &mut TTWState) -> Self {
+        let access_flag = get_bits!(descriptor, off = 10, len = 1) == 1;
+        let non_global = get_bits!(descriptor, off = 11, len = 1) == 1;
+        ttwstate.s1_apply_output_perms(descriptor);
         assert_eq!(descriptor & 0b11, 1);
         let contiguous = if matches!(ttwstate.granule, Granule::_4KB) {
             if ttwstate.level == 0 {
@@ -48,7 +75,7 @@ impl BlockDescriptor {
         } else {
             unimplemented!()
         };
-        match (ttwstate.granule, ttwstate.ds) {
+        let output_address = match (ttwstate.granule, ttwstate.ds) {
             (Granule::_4KB | Granule::_16KB, true) => {
                 // 52-bit OA
                 let n = match ttwstate.level {
@@ -57,11 +84,7 @@ impl BlockDescriptor {
                     2 => 21,
                     _ => unreachable!(),
                 };
-                let output_address = Address(get_bits!(descriptor, off = n, len = 49 - n) << n);
-                Self {
-                    output_address,
-                    contiguous,
-                }
+                Address(get_bits!(descriptor, off = n, len = 49 - n) << n)
             }
             (Granule::_64KB, true) => unimplemented!(),
             (_, false) => {
@@ -74,12 +97,15 @@ impl BlockDescriptor {
                     Granule::_64KB if ttwstate.level == 2 => 29,
                     other => unreachable!("{other:?} level {:?}", ttwstate.level),
                 };
-                let output_address = Address(get_bits!(descriptor, off = n, len = 47 - n) << n);
-                Self {
-                    output_address,
-                    contiguous,
-                }
+                Address(get_bits!(descriptor, off = n, len = 47 - n) << n)
             }
+        };
+        Self {
+            output_address,
+            contiguous,
+            permissions: ttwstate.permissions,
+            access_flag,
+            non_global,
         }
     }
 
@@ -104,7 +130,8 @@ pub struct TableDescriptor {
 }
 
 impl TableDescriptor {
-    pub fn new(descriptor: u64, ttwstate: &TTWState) -> Self {
+    pub fn new(descriptor: u64, ttwstate: &mut TTWState) -> Self {
+        ttwstate.s1_apply_table_perms(descriptor);
         assert_eq!(descriptor & 0b11, 0b11);
         // AArch64.NextTableBase()
         let mut tablebase = 0;
@@ -145,10 +172,16 @@ impl TableDescriptor {
 pub struct PageDescriptor {
     pub page_address: Address,
     pub contiguous: bool,
+    pub permissions: Permissions,
+    pub access_flag: bool,
+    pub non_global: bool,
 }
 
 impl PageDescriptor {
-    pub fn new(descriptor: u64, ttwstate: &TTWState) -> Self {
+    pub fn new(descriptor: u64, ttwstate: &mut TTWState) -> Self {
+        let access_flag = get_bits!(descriptor, off = 10, len = 1) == 1;
+        let non_global = get_bits!(descriptor, off = 11, len = 1) == 1;
+        ttwstate.s1_apply_output_perms(descriptor);
         assert_eq!(descriptor & 0b11, 0b11);
         let page_address = match ttwstate.granule {
             Granule::_4KB => get_bits!(descriptor, off = 12, len = 47 - 12) << 12,
@@ -168,6 +201,9 @@ impl PageDescriptor {
         Self {
             page_address: Address(page_address),
             contiguous,
+            permissions: ttwstate.permissions,
+            access_flag,
+            non_global,
         }
     }
 
