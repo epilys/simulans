@@ -3,13 +3,15 @@
 
 //! Representation of an emulated machine.
 
-use std::{collections::BTreeSet, num::NonZero, pin::Pin};
+use std::{num::NonZero, pin::Pin};
 
 use crate::{cpu_state::*, devices::timer::GenericTimer, memory::*, tracing};
 
+mod debug_monitor;
 mod psci;
 mod translation_blocks;
 
+pub use debug_monitor::DebugMonitor;
 pub use translation_blocks::{TranslationBlock, TranslationBlocks};
 
 pub mod interrupts;
@@ -34,10 +36,7 @@ pub struct Armv8AMachine {
     pub memory: MemoryMap,
     /// Physical addresses to invalidate translation blocks for.
     pub invalidate: Vec<u64>,
-    /// Whether we have stopped at a breakpoint.
-    pub in_breakpoint: bool,
-    /// List of breakpoint addresses.
-    pub hw_breakpoints: BTreeSet<Address>,
+    pub debug_monitor: DebugMonitor,
     /// Translation lookaside buffer.
     pub tlb: TLB,
     /// Interrupt generators and subscribers/handlers
@@ -57,8 +56,7 @@ impl Armv8AMachine {
             cpu_state: ExecutionState::default(),
             memory,
             invalidate: vec![],
-            in_breakpoint: false,
-            hw_breakpoints: BTreeSet::new(),
+            debug_monitor: DebugMonitor::new(),
             tlb: TLB::new(),
             interrupts_enabled: true,
             interrupts,

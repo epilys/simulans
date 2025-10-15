@@ -106,11 +106,9 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
         return Entry(lookup_block);
     };
 
-    let block = match JitContext::new(machine_addr, &machine.hw_breakpoints, jit).compile(
-        code_area,
-        virtual_pc,
-        physical_pc.0,
-    ) {
+    let block = match JitContext::new(machine_addr, &machine.debug_monitor.hw_breakpoints, jit)
+        .compile(code_area, virtual_pc, physical_pc.0)
+    {
         Ok(b) => b,
         err @ Err(_) => {
             eprintln!("Could not compile pc={virtual_pc:#x}");
