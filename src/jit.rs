@@ -142,7 +142,7 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
     next_entry
 }
 
-fn translate_code_address(
+pub fn translate_code_address(
     machine: &Armv8AMachine,
     pc: u64,
 ) -> Result<Address, Box<dyn std::error::Error>> {

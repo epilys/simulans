@@ -877,6 +877,40 @@ impl GdbStubRunner {
     }
 
     #[inline(always)]
+    fn cpu_exec(&mut self) {
+        let entry = crate::jit::lookup_block(&mut self.jit, &mut self.machine);
+        (entry.0)(&mut self.jit, &mut self.machine);
+        if self
+            .machine
+            .cpu_state
+            .exit_request
+            .lock()
+            .unwrap()
+            .is_some()
+        {
+            return;
+        }
+        if crate::jit::translate_code_address(&self.machine, self.machine.pc).is_err() {
+            let mut exit_request_ref = self.machine.cpu_state.exit_request.lock().unwrap();
+
+            if let Some(crate::cpu_state::ExitRequest::Abort {
+                fault,
+                preferred_exception_return,
+            }) = exit_request_ref.as_ref().copied()
+            {
+                let _ = exit_request_ref.take();
+                drop(exit_request_ref);
+
+                crate::exceptions::aarch64_abort(
+                    &mut self.machine,
+                    fault,
+                    preferred_exception_return,
+                );
+            }
+        }
+    }
+
+    #[inline(always)]
     fn add_breakpoint(&mut self, addr: <AArch64 as Arch>::Usize) {
         debug_assert!(
             addr.rem_euclid(4) == 0,
@@ -966,8 +1000,7 @@ impl GdbStubRunner {
                     let pc = self_.machine.pc;
                     self_.jit.translation_blocks.invalidate(pc);
                     if !self_.machine.is_powered_off() {
-                        let entry = crate::jit::lookup_block(&mut self_.jit, &mut self_.machine);
-                        (entry.0)(&mut self_.jit, &mut self_.machine);
+                        self_.cpu_exec();
                         self_.jit.single_step = false;
                         self_
                             .stop_sender
@@ -1039,8 +1072,7 @@ impl GdbStubRunner {
                                 continue 'main_loop;
                             }
                         }
-                        let entry = crate::jit::lookup_block(&mut self.jit, &mut self.machine);
-                        (entry.0)(&mut self.jit, &mut self.machine);
+                        self.cpu_exec();
                         if self
                             .machine
                             .debug_monitor
