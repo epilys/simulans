@@ -1095,7 +1095,21 @@ pub extern "C" fn mem_zero(
     let mut address = Address(align(input_address.0, size));
     let accessdesc = AccessDescriptor::new(false, &machine.cpu_state.PSTATE(), AccessType::DCZero);
 
-    for _ in 0..size {
+    let double_words = size / 8;
+    let bytes = size % 8;
+    for _ in 0..double_words {
+        if let Err(err) = machine.mem_write(
+            address,
+            &0_u64.to_le_bytes(),
+            false,
+            preferred_exception_return,
+        ) {
+            *machine.cpu_state.exit_request.lock().unwrap() = Some(err);
+            return false;
+        }
+        address = Address(address.0 + 8);
+    }
+    for _ in 0..bytes {
         let ResolvedAddress {
             mem_region: _,
             address_inside_region,
