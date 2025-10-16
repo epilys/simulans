@@ -71,14 +71,12 @@ impl Interrupts {
     }
 
     /// Receive and route any interrupts
-    pub fn rcv(&self, ignore: bool) -> bool {
+    pub fn rcv(&self) -> bool {
         let mut any = false;
 
         while let Ok(irq) = self.generator_rcv.try_recv() {
-            if !ignore {
-                for sub in self.subscribers.values() {
-                    (sub)(irq);
-                }
+            for sub in self.subscribers.values() {
+                (sub)(irq);
             }
 
             any = true;

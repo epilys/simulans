@@ -69,7 +69,7 @@ impl Armv8AMachine {
             let daif = self.cpu_state.PSTATE().DAIF();
             (daif.F(), daif.I())
         };
-        self.interrupts.rcv(f_mask && i_mask);
+        self.interrupts.rcv();
         if !self.interrupts_enabled {
             return true;
         }
