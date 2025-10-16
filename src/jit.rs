@@ -27,6 +27,7 @@ use crate::{
 
 mod arithmetic;
 mod memory;
+mod simd;
 mod sysregs;
 
 use memory::MemOpsTable;
@@ -976,8 +977,11 @@ impl BlockTranslator<'_> {
     }
 
     #[cold]
-    fn simd_reg_to_value(&mut self, reg: &bad64::Reg, element: Option<ArrSpec>) -> Value {
-        let reg = self.simd_reg_to_var(reg, element, false);
+    fn simd_reg_view_to_value(
+        &mut self,
+        reg: TypedRegisterView,
+        element: Option<ArrSpec>,
+    ) -> Value {
         let mut value = self.builder.use_var(reg.var);
 
         match reg.width {
@@ -1016,6 +1020,12 @@ impl BlockTranslator<'_> {
             Width::_16 => self.builder.ins().ireduce(I16, value),
             Width::_8 => self.builder.ins().ireduce(I8, value),
         }
+    }
+
+    #[cold]
+    fn simd_reg_to_value(&mut self, reg: &bad64::Reg, element: Option<ArrSpec>) -> Value {
+        let reg = self.simd_reg_to_var(reg, element, false);
+        self.simd_reg_view_to_value(reg, element)
     }
 
     #[inline]
@@ -3318,7 +3328,35 @@ impl BlockTranslator<'_> {
             }
             Op::LASTA => todo!(),
             Op::LASTB => todo!(),
-            Op::LD1 => todo!(),
+            Op::LD1 => {
+                let (targets, arrspec) = match instruction.operands()[0] {
+                    bad64::Operand::MultiReg { regs, arrspec } => (regs, arrspec.unwrap()),
+                    other => unexpected_operand!(other),
+                };
+                let element_address = self.translate_operand(&instruction.operands()[1]);
+                let element_width = arrspec.into();
+                for (i, v) in targets.into_iter().enumerate() {
+                    let Some(reg) = v else {
+                        break;
+                    };
+                    let target = self.simd_reg_to_var(&reg, Some(arrspec), true);
+                    let value = self.simd_reg_view_to_value(target, Some(arrspec));
+                    let element_address = self.builder.ins().iadd_imm(
+                        element_address,
+                        i as i64 * i64::from(element_width as i32 / 8),
+                    );
+                    let element_value = self.generate_read(element_address, element_width);
+                    let value = self.set_elem(value, i as i64, element_width, element_value);
+                    write_to_register!(
+                        target,
+                        TypedValue {
+                            value,
+                            width: target.width,
+                        }
+                    );
+                }
+                write_back!();
+            }
             Op::LD1B => todo!(),
             Op::LD1D => todo!(),
             Op::LD1H => todo!(),
@@ -4597,7 +4635,30 @@ impl BlockTranslator<'_> {
             Op::SWPL => todo!(),
             Op::SWPLB => todo!(),
             Op::SWPLH => todo!(),
-            Op::SXTL => todo!(),
+            Op::SXTL => {
+                let target = get_destination_register!();
+                let target_element_size = Width::from(target.element.unwrap());
+                let (source_reg, source_element_size) = match instruction.operands()[1] {
+                    bad64::Operand::Reg { reg, arrspec } => (reg, Width::from(arrspec.unwrap())),
+                    other => unexpected_operand!(other),
+                };
+                let source_value = self.simd_reg_to_value(&source_reg, None);
+                let elements = i64::from(i32::from(target.width) / i32::from(target_element_size));
+
+                let mut value = self.simd_iconst(target.width, 0);
+                for i in 0..elements {
+                    let elem = self.get_elem(source_value, i, source_element_size);
+                    let elem = self.builder.ins().sextend(target_element_size.into(), elem);
+                    value = self.set_elem(value, i, target_element_size, elem);
+                }
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: target.width,
+                    }
+                );
+            }
             Op::SXTL2 => todo!(),
             Op::SYS => todo!(),
             Op::SYSL => todo!(),
@@ -4926,7 +4987,30 @@ impl BlockTranslator<'_> {
             Op::UUNPKLO => todo!(),
             Op::UXTB => todo!(),
             Op::UXTH => todo!(),
-            Op::UXTL => todo!(),
+            Op::UXTL => {
+                let target = get_destination_register!();
+                let target_element_size = Width::from(target.element.unwrap());
+                let (source_reg, source_element_size) = match instruction.operands()[1] {
+                    bad64::Operand::Reg { reg, arrspec } => (reg, Width::from(arrspec.unwrap())),
+                    other => unexpected_operand!(other),
+                };
+                let source_value = self.simd_reg_to_value(&source_reg, None);
+                let elements = i64::from(i32::from(target.width) / i32::from(target_element_size));
+
+                let mut value = self.simd_iconst(target.width, 0);
+                for i in 0..elements {
+                    let elem = self.get_elem(source_value, i, source_element_size);
+                    let elem = self.builder.ins().uextend(target_element_size.into(), elem);
+                    value = self.set_elem(value, i, target_element_size, elem);
+                }
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: target.width,
+                    }
+                );
+            }
             Op::UXTL2 => todo!(),
             Op::UXTW => todo!(),
             Op::UZP1 => todo!(),

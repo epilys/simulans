@@ -40,6 +40,24 @@ pub enum Width {
     _8 = 8,
 }
 
+impl From<Width> for i64 {
+    fn from(w: Width) -> Self {
+        Self::from(w as i32)
+    }
+}
+
+impl From<Width> for i32 {
+    fn from(w: Width) -> Self {
+        w as Self
+    }
+}
+
+impl From<Width> for u32 {
+    fn from(w: Width) -> Self {
+        w as i32 as Self
+    }
+}
+
 impl std::fmt::Debug for Width {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
