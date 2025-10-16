@@ -380,7 +380,7 @@ impl DeviceMemoryOps for GicV2DistMemoryOps {
                 field = "Reserved";
                 0
             }
-            (0x800..0x820) => {
+            (0x800..0x8FC) => {
                 // GICD_ITARGETSR RO f IMPLEMENTATION DEFINED Interrupt Processor Targets
                 // Registers
                 field = "GICD_ITARGETSR";
@@ -398,11 +398,6 @@ impl DeviceMemoryOps for GicV2DistMemoryOps {
                 } else {
                     value
                 }
-            }
-            (0x820..0xBFC) => {
-                // RW f 0x00000000
-                field = "GICD_ITARGETSR";
-                0
             }
             (0xBFC..0xC00) => {
                 field = "Reserved";
@@ -577,14 +572,19 @@ impl DeviceMemoryOps for GicV2DistMemoryOps {
                 // Reserved
                 field = "Reserved";
             }
-            (0x800..0x820) => {
+            (0x800..0xBFC) => {
                 // GICD_ITARGETSR RO f IMPLEMENTATION DEFINED Interrupt Processor Targets
                 // Registers
                 field = "GICD_ITARGETSR";
-            }
-            (0x820..0xBFC) => {
-                // RW f 0x00000000
-                field = "GICD_ITARGETSR";
+                let idx = (offset - 0x800) / 0x4;
+                let byte_offset = (offset - 0x800) % 0x4;
+                if idx < 8 {
+                    // GICD_ITARGETSR0 to GICD_ITARGETSR7 are read-only
+                } else if byte_offset != 0 {
+                    gicd.write_itargets((offset - 0x800) as u16, value as u8);
+                } else {
+                    gicd.itargetsr[idx as usize] = value;
+                }
             }
             (0xBFC..0xC00) => {
                 // Reserved
@@ -1128,10 +1128,24 @@ impl Gicd {
         let byte_offset = interrupt_id % 4;
         if idx == 0 {
             assert!(interrupt_id < 32);
-            self.ipriorityr0[cpu_id as usize].to_le_bytes()[byte_offset as usize] = value;
+            let mut tmp = self.ipriorityr0[cpu_id as usize].to_le_bytes();
+            tmp[byte_offset as usize] = value;
+            self.ipriorityr0[cpu_id as usize] = u32::from_le_bytes(tmp);
         } else {
-            self.ipriorityr[idx as usize].to_le_bytes()[byte_offset as usize] = value;
+            let mut tmp = self.ipriorityr[idx as usize].to_le_bytes();
+            tmp[byte_offset as usize] = value;
+            self.ipriorityr[idx as usize] = u32::from_le_bytes(tmp);
         }
+    }
+
+    const fn write_itargets(&mut self, interrupt_id: u16, value: u8) {
+        // banked
+        let idx = interrupt_id / 4;
+        let byte_offset = interrupt_id % 4;
+        assert!(idx > 0);
+        let mut tmp = self.itargetsr[idx as usize].to_le_bytes();
+        tmp[byte_offset as usize] = value;
+        self.itargetsr[idx as usize] = u32::from_le_bytes(tmp);
     }
 
     pub const fn group0_enabled(&self) -> bool {
@@ -1166,6 +1180,8 @@ impl Gicd {
         let byte_offset = interrupt_id % 4;
         if idx < 8 {
             assert!(interrupt_id < 32);
+            1 << cpu_id
+        } else if self.cpu_count() == 1 {
             1 << cpu_id
         } else {
             self.itargetsr[idx as usize].to_le_bytes()[byte_offset as usize]
