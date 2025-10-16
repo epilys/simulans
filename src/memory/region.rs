@@ -22,6 +22,10 @@ use crate::memory::{Address, MemorySize, Width};
 
 pub type MemoryTxResult<T = ()> = Result<T, crate::cpu_state::ExitRequest>;
 
+pub trait CharBackendExt: DeviceMemoryOps {
+    fn receive(&self, buf: &[u8]);
+}
+
 /// Trait for device memory operations.
 pub trait DeviceMemoryOps: std::fmt::Debug + Send + Sync {
     /// Returns unique device ID.
@@ -30,7 +34,15 @@ pub trait DeviceMemoryOps: std::fmt::Debug + Send + Sync {
     fn read(&self, address_inside_region: u64, width: Width) -> MemoryTxResult<u64>;
     /// Performs a write.
     fn write(&self, address_inside_region: u64, value: u64, width: Width) -> MemoryTxResult;
+
+    #[inline(always)]
+    fn supports_char_backend(&'_ self) -> Option<CharBackendOps<'_>> {
+        // disabled by default
+        None
+    }
 }
+
+pub type CharBackendOps<'a> = &'a dyn CharBackendExt;
 
 impl PartialEq for &dyn DeviceMemoryOps {
     fn eq(&self, other: &Self) -> bool {
@@ -190,6 +202,15 @@ impl MemoryRegion {
             );
         }
         Address(self.phys_offset.0 + self.size.0.get())
+    }
+
+    #[inline]
+    /// Returns reference to device memory.
+    pub fn as_device(&self) -> Option<&dyn DeviceMemoryOps> {
+        if let MemoryBacking::Device(ref inner) = self.backing {
+            return Some(inner.as_ref());
+        }
+        None
     }
 
     #[inline]
