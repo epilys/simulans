@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 // Copyright Contributors to the simulans project.
 
-use std::num::NonZero;
+use std::{num::NonZero, sync::Arc};
 
 use simulans::{
     devices::Device,
@@ -23,7 +23,15 @@ fn test_uart_write_str() {
     let entry_point = Address(0);
     let pl011_addr = Address(4 * TEST_INPUT.len() as u64);
     {
-        let pl011 = simulans::devices::pl011::PL011State::new(0, pl011_addr);
+        let buffer = Default::default();
+        let char_backend = CharBackend::new_sink(Arc::clone(&buffer));
+        let interrupts = Default::default();
+        let pl011 = simulans::devices::pl011::PL011State::new(
+            0,
+            pl011_addr,
+            char_backend.writer.clone(),
+            &interrupts,
+        );
         let tube = simulans::devices::tube::Tube::new(0, Address(0x0d800020));
         let memory = MemoryMap::builder()
             .with_region(MemoryRegion::new("ram", DRAM_MEMORY_SIZE, entry_point).unwrap())
@@ -33,11 +41,7 @@ fn test_uart_write_str() {
             .with_region(tube.into_memory_regions().pop().unwrap())
             .unwrap()
             .build();
-        let mut machine = Armv8AMachine::new(
-            memory,
-            CharBackend::new_sink(Default::default()),
-            Default::default(),
-        );
+        let mut machine = Armv8AMachine::new(memory, char_backend, interrupts);
         machine.cpu_state.registers.x0 = pl011_addr.0;
         machine.cpu_state.registers.x2 = "Hello world\n".len() as u64;
 
@@ -50,5 +54,7 @@ fn test_uart_write_str() {
         }
 
         assert_hex_eq!(reg!(x0), 0x0);
+
+        assert_eq!(buffer.lock().unwrap().as_slice(), b"Hello world\n");
     }
 }

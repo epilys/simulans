@@ -3,13 +3,17 @@
 
 //! Emulated PL011 UART.
 
-use std::{
-    io::{Stdout, StdoutLock, Write},
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use crate::{
-    memory::{Address, DeviceMemoryOps, MemoryRegion, MemorySize, MemoryTxResult, Width},
+    machine::{
+        interrupts::{InterruptGenerator, InterruptRequest, Interrupts},
+        CharBackendWriter,
+    },
+    memory::{
+        Address, CharBackendExt, CharBackendOps, DeviceMemoryOps, MemoryRegion, MemorySize,
+        MemoryTxResult, Width,
+    },
     tracing,
 };
 
@@ -86,6 +90,8 @@ pub struct PL011State {
     /// Device ID.
     pub device_id: u64,
     address: Address,
+    char_backend: CharBackendWriter,
+    irq_generator: InterruptGenerator,
 }
 
 impl PL011State {
@@ -98,15 +104,22 @@ impl crate::devices::Device for PL011State {
     }
 
     fn into_memory_regions(self) -> Vec<MemoryRegion> {
-        let Self { device_id, address } = self;
+        let Self {
+            device_id,
+            address,
+            irq_generator,
+            char_backend,
+        } = self;
 
         vec![MemoryRegion::new_io(
             MemorySize::new(0x1000).unwrap(),
             address,
             Box::new(PL011MemoryOps {
                 device_id,
-                char_backend: std::io::stdout(),
+                char_backend,
                 regs: Default::default(),
+                interrupts: [33; 6],
+                irq_generator,
             }),
         )
         .unwrap()]
@@ -158,12 +171,7 @@ impl PL011Registers {
         (update, result)
     }
 
-    pub(self) fn write(
-        &mut self,
-        offset: RegisterOffset,
-        value: u32,
-        _char_backend: StdoutLock<'static>,
-    ) -> bool {
+    pub(self) fn write(&mut self, offset: RegisterOffset, value: u32) -> bool {
         use RegisterOffset::*;
 
         tracing::event!(
@@ -388,29 +396,60 @@ impl PL011Registers {
         false
     }
 
-    const fn update(&self) {
-        // /// Which bits in the interrupt status matter for each outbound IRQ
-        // line ? const IRQMASK: [u32; 6] = [
-        //     /* combined IRQ */
-        //     Interrupt::E.0 | Interrupt::MS.0 | Interrupt::RT.0 |
-        // Interrupt::TX.0 | Interrupt::RX.0,     Interrupt::RX.0,
-        //     Interrupt::TX.0,
-        //     Interrupt::RT.0,
-        //     Interrupt::MS.0,
-        //     Interrupt::E.0,
-        // ];
-        // let flags = self.int_level & self.int_enabled;
-        // for (irq, i) in self.interrupts.iter().zip(IRQMASK) {
-        //     irq.set(flags & i != 0);
-        // }
+    fn receive(&mut self, buf: &[u8], interrupts: &[u16], generator: &InterruptGenerator) {
+        if self.loopback_enabled() {
+            // In loopback mode, the RX input signal is internally disconnected
+            // from the entire receiving logics; thus, all inputs are ignored,
+            // and BREAK detection on RX input signal is also not performed.
+            // return;
+        }
+
+        let mut update_irq = false;
+        for &c in buf {
+            let c: u32 = c.into();
+            update_irq |= self.put_fifo(c.into());
+        }
+
+        if update_irq {
+            self.update(interrupts, generator);
+        }
+    }
+
+    fn update(&self, interrupts: &[u16], generator: &InterruptGenerator) {
+        /// Which bits in the interrupt status matter for each outbound IRQ line
+        /// ?
+        const IRQMASK: [u32; 6] = [
+            // combined IRQ
+            Interrupt::E.0 | Interrupt::MS.0 | Interrupt::RT.0 | Interrupt::TX.0 | Interrupt::RX.0,
+            Interrupt::RX.0,
+            Interrupt::TX.0,
+            Interrupt::RT.0,
+            Interrupt::MS.0,
+            Interrupt::E.0,
+        ];
+        let flags = self.int_level & self.int_enabled;
+        let mut any = None;
+        for (irq, i) in interrupts.iter().zip(IRQMASK) {
+            if flags & i > 0 {
+                any = Some(*irq);
+            }
+        }
+        if let Some(irq) = any {
+            _ = generator.irq_sender.try_send(InterruptRequest {
+                interrupt_id: irq,
+                cpu_id: None,
+            });
+        }
     }
 }
 
 #[derive(Debug)]
 struct PL011MemoryOps {
     device_id: u64,
-    char_backend: Stdout,
+    char_backend: CharBackendWriter,
+    interrupts: [u16; 6],
     regs: Arc<Mutex<PL011Registers>>,
+    irq_generator: InterruptGenerator,
 }
 
 impl DeviceMemoryOps for PL011MemoryOps {
@@ -430,11 +469,17 @@ impl DeviceMemoryOps for PL011MemoryOps {
             }
             Ok(field) => {
                 let result = {
-                    let mut regs = self.regs.lock().unwrap();
+                    let Self {
+                        ref interrupts,
+                        ref irq_generator,
+                        ref regs,
+                        ..
+                    } = self;
+                    let mut regs = regs.lock().unwrap();
                     let (update_irq, result) = regs.read(field);
                     let remainder = offset - field as u64;
                     if update_irq {
-                        regs.update();
+                        regs.update(interrupts, irq_generator);
                         drop(regs);
                         // self.char_backend.accept_input();
                     }
@@ -459,28 +504,65 @@ impl DeviceMemoryOps for PL011MemoryOps {
 
     fn write(&self, offset: u64, value: u64, _width: Width) -> MemoryTxResult {
         if let Ok(field) = RegisterOffset::try_from(offset) {
-            let mut char_backend = self.char_backend.lock();
-            if field == RegisterOffset::DR {
-                // ??? Check if transmitter is enabled.
-                let ch: [u8; 1] = [value as u8];
-                char_backend.write_all(&ch).unwrap();
+            let Self {
+                ref interrupts,
+                ref irq_generator,
+                ref regs,
+                ref char_backend,
+                ..
+            } = self;
+            {
+                if field == RegisterOffset::DR {
+                    // ??? Check if transmitter is enabled.
+                    let ch: [u8; 1] = [value as u8];
+                    (char_backend.write_all)(&ch);
+                }
             }
 
-            let mut regs = self.regs.lock().unwrap();
-            let update_irq = regs.write(field, value as u32, char_backend);
+            let mut regs = regs.lock().unwrap();
+            let update_irq = regs.write(field, value as u32);
             if update_irq {
-                regs.update();
+                regs.update(interrupts, irq_generator);
             }
         } else {
             tracing::error!("write bad offset 0x{offset:x} value 0x{value:x}");
         }
         Ok(())
     }
+
+    #[inline(always)]
+    fn supports_char_backend(&'_ self) -> Option<CharBackendOps<'_>> {
+        Some(self)
+    }
+}
+
+impl CharBackendExt for PL011MemoryOps {
+    fn receive(&self, buf: &[u8]) {
+        let Self {
+            ref interrupts,
+            ref irq_generator,
+            ref regs,
+            ..
+        } = self;
+        let mut regs = regs.lock().unwrap();
+        regs.receive(buf, interrupts, irq_generator);
+    }
 }
 
 impl PL011State {
-    pub fn new(device_id: u64, address: Address) -> Self {
-        Self { device_id, address }
+    pub fn new(
+        device_id: u64,
+        address: Address,
+        char_backend: CharBackendWriter,
+        interrupts: &Interrupts,
+    ) -> Self {
+        let irq_generator = interrupts.generator.clone();
+        Self {
+            device_id,
+            address,
+            char_backend,
+            irq_generator,
+        }
     }
 }
 
@@ -999,11 +1081,11 @@ mod registers {
     pub struct Interrupt(pub u32);
 
     impl Interrupt {
-        // pub const OE: Self = Self(1 << 10);
-        // pub const BE: Self = Self(1 << 9);
-        // pub const PE: Self = Self(1 << 8);
-        // pub const FE: Self = Self(1 << 7);
-        // pub const RT: Self = Self(1 << 6);
+        pub const OE: Self = Self(1 << 10);
+        pub const BE: Self = Self(1 << 9);
+        pub const PE: Self = Self(1 << 8);
+        pub const FE: Self = Self(1 << 7);
+        pub const RT: Self = Self(1 << 6);
         pub const TX: Self = Self(1 << 5);
         pub const RX: Self = Self(1 << 4);
         pub const DSR: Self = Self(1 << 3);
@@ -1011,7 +1093,7 @@ mod registers {
         pub const CTS: Self = Self(1 << 1);
         pub const RI: Self = Self(1 << 0);
 
-        // pub const E: Self = Self(Self::OE.0 | Self::BE.0 | Self::PE.0 | Self::FE.0);
+        pub const E: Self = Self(Self::OE.0 | Self::BE.0 | Self::PE.0 | Self::FE.0);
         pub const MS: Self = Self(Self::RI.0 | Self::DSR.0 | Self::DCD.0 | Self::CTS.0);
     }
 }

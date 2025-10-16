@@ -128,9 +128,15 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         MemoryRegion::new("ram", dram_size, args.dram_start_address())?
     };
+    let char_backend = machine::CharBackend::new_stdio();
     let mut interrupts = machine::Interrupts::new();
     let mut memory_map_builder = MemoryMap::builder().with_region(dram)?;
-    let pl011 = simulans::devices::pl011::PL011State::new(0, Address(0x9000000));
+    let pl011 = simulans::devices::pl011::PL011State::new(
+        0,
+        Address(0x9000000),
+        char_backend.writer.clone(),
+        &interrupts,
+    );
     for mem in pl011.into_memory_regions() {
         memory_map_builder.add_region(mem)?;
     }
@@ -158,8 +164,7 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
         memory_map_builder.add_region(boot_rom)?;
     }
     let memory = memory_map_builder.build();
-    let mut machine =
-        machine::Armv8AMachine::new(memory, machine::CharBackend::new_stdio(), interrupts);
+    let mut machine = machine::Armv8AMachine::new(memory, char_backend, interrupts);
     machine
         .cpu_state
         .PSTATE_mut()
