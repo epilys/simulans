@@ -24,7 +24,7 @@ use std::pin::Pin;
 
 use simulans::{
     devices::Device,
-    machine::Armv8AMachine,
+    machine::{Armv8AMachine, CharBackend},
     memory::{Address, MemoryMap, MemoryRegion, MemorySize},
 };
 
@@ -74,7 +74,11 @@ pub fn make_test_machine(
         memory.add_region(mem).unwrap();
     }
     let memory = memory.build();
-    Armv8AMachine::new(memory, Default::default())
+    Armv8AMachine::new(
+        memory,
+        CharBackend::new_sink(Default::default()),
+        Default::default(),
+    )
 }
 
 #[allow(dead_code)]

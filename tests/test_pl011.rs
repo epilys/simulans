@@ -5,7 +5,7 @@ use std::num::NonZero;
 
 use simulans::{
     devices::Device,
-    machine::Armv8AMachine,
+    machine::{Armv8AMachine, CharBackend},
     main_loop,
     memory::{Address, MemoryMap, MemoryRegion, MemorySize},
 };
@@ -33,7 +33,11 @@ fn test_uart_write_str() {
             .with_region(tube.into_memory_regions().pop().unwrap())
             .unwrap()
             .build();
-        let mut machine = Armv8AMachine::new(memory, Default::default());
+        let mut machine = Armv8AMachine::new(
+            memory,
+            CharBackend::new_sink(Default::default()),
+            Default::default(),
+        );
         machine.cpu_state.registers.x0 = pl011_addr.0;
         machine.cpu_state.registers.x2 = "Hello world\n".len() as u64;
 

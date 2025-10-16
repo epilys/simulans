@@ -7,10 +7,12 @@ use std::{num::NonZero, pin::Pin};
 
 use crate::{cpu_state::*, devices::timer::GenericTimer, memory::*, tracing};
 
+mod char_frontend;
 mod debug_monitor;
 mod psci;
 mod translation_blocks;
 
+pub use char_frontend::{CharBackend, CharBackendWriter};
 pub use debug_monitor::DebugMonitor;
 pub use translation_blocks::{TranslationBlock, TranslationBlocks};
 
@@ -44,11 +46,16 @@ pub struct Armv8AMachine {
     pub interrupts_enabled: bool,
     /// Generic timer
     pub timer: GenericTimer,
+    pub char_backend: CharBackend,
 }
 
 impl Armv8AMachine {
     /// Returns a new machine with given memory map.
-    pub fn new(memory: MemoryMap, interrupts: Interrupts) -> Pin<Box<Self>> {
+    pub fn new(
+        memory: MemoryMap,
+        char_backend: CharBackend,
+        interrupts: Interrupts,
+    ) -> Pin<Box<Self>> {
         let timer = GenericTimer::new(&interrupts);
         Box::pin(Self {
             pc: 0,
@@ -61,6 +68,7 @@ impl Armv8AMachine {
             interrupts_enabled: true,
             interrupts,
             timer,
+            char_backend,
         })
     }
 
@@ -129,6 +137,19 @@ impl Armv8AMachine {
         self.poll();
 
         retval
+    }
+
+    pub fn receive_input(&mut self, buf: &[u8]) {
+        let Some(dev) = self
+            .memory
+            .iter()
+            .filter_map(|d| d.as_device()?.supports_char_backend())
+            .next()
+        else {
+            return;
+        };
+        dev.receive(buf);
+        self.poll();
     }
 
     /// Generates a flattened device tree

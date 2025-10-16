@@ -158,7 +158,8 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
         memory_map_builder.add_region(boot_rom)?;
     }
     let memory = memory_map_builder.build();
-    let mut machine = machine::Armv8AMachine::new(memory, interrupts);
+    let mut machine =
+        machine::Armv8AMachine::new(memory, machine::CharBackend::new_stdio(), interrupts);
     machine
         .cpu_state
         .PSTATE_mut()

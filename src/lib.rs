@@ -168,6 +168,9 @@ pub fn main_loop(
     while !machine.is_powered_off() {
         let entry = crate::jit::lookup_block(&mut jit, machine);
         (entry.0)(&mut jit, machine);
+        if let Ok(c) = machine.char_backend.receiver.try_recv() {
+            machine.receive_input(&c);
+        }
     }
     Ok(())
 }
