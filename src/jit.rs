@@ -59,6 +59,10 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
     {
         crate::tracing::print_registers(machine);
     }
+    if machine.cpu_state.exit_request.lock().unwrap().is_some() {
+        // Exception raised
+        return Entry(lookup_block);
+    };
     let Ok(physical_pc) = translate_code_address(machine, virtual_pc) else {
         // Exception raised
         return Entry(lookup_block);
