@@ -370,6 +370,7 @@ impl<'j> JitContext<'j> {
             registers: IndexMap::new(),
             sys_registers: IndexMap::new(),
             loopback_blocks: IndexMap::default(),
+            writebacks: vec![],
         };
         // Emit code to load register values into variables.
         trans.load_cpu_state(true);
@@ -495,11 +496,15 @@ impl<'j> JitContext<'j> {
         let BlockTranslator {
             mut builder,
             loopback_blocks,
+            writebacks,
             ..
         } = trans;
         for (_, block) in loopback_blocks.into_iter() {
             builder.seal_block(block);
         }
+        // abort if writebacks is not empty, that means we have forgotten to perform
+        // them in `translate_instruction`.
+        assert!(writebacks.is_empty(), "{writebacks:?}");
 
         // Tell the builder we're done with this block (function in Cranelift terms).
         builder.finalize();
@@ -521,6 +526,12 @@ struct BlockTranslator<'a> {
     registers: IndexMap<bad64::Reg, Variable>,
     sys_registers: IndexMap<SysReg, Variable>,
     loopback_blocks: IndexMap<u64, Block>,
+    /// Register write backs (load/store pre/post index increments)
+    ///
+    /// They are performed after the load/store are finished and any destination
+    /// registers (for stores) are written. A data abort might interrupt
+    /// this, so we save them here and do the write backs on success.
+    writebacks: Vec<(bad64::Reg, Value)>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -708,35 +719,20 @@ impl BlockTranslator<'_> {
             }
             Operand::MemPreIdx { ref reg, imm } => {
                 let reg_val = self.reg_to_value(reg, None);
-                match imm {
-                    Imm::Unsigned(imm) => {
-                        let value = self.builder.ins().iadd_imm(reg_val, *imm as i64);
-                        let reg_view = self.reg_to_var(reg, None, true);
-                        self.def_view(&reg_view, value);
-                        self.reg_to_value(reg, None)
-                    }
-                    Imm::Signed(imm) => {
-                        let value = self.builder.ins().iadd_imm(reg_val, *imm);
-                        let reg_view = self.reg_to_var(reg, None, true);
-                        self.def_view(&reg_view, value);
-                        self.reg_to_value(reg, None)
-                    }
-                }
+                let value = match imm {
+                    Imm::Unsigned(imm) => self.builder.ins().iadd_imm(reg_val, *imm as i64),
+                    Imm::Signed(imm) => self.builder.ins().iadd_imm(reg_val, *imm),
+                };
+                self.writebacks.push((*reg, value));
+                value
             }
             Operand::MemPostIdxImm { ref reg, imm } => {
                 let reg_val = self.reg_to_value(reg, None);
-                match imm {
-                    Imm::Unsigned(imm) => {
-                        let post_value = self.builder.ins().iadd_imm(reg_val, *imm as i64);
-                        let reg_view = self.reg_to_var(reg, None, true);
-                        self.def_view(&reg_view, post_value);
-                    }
-                    Imm::Signed(imm) => {
-                        let post_value = self.builder.ins().iadd_imm(reg_val, *imm);
-                        let reg_view = self.reg_to_var(reg, None, true);
-                        self.def_view(&reg_view, post_value);
-                    }
-                }
+                let post_value = match imm {
+                    Imm::Unsigned(imm) => self.builder.ins().iadd_imm(reg_val, *imm as i64),
+                    Imm::Signed(imm) => self.builder.ins().iadd_imm(reg_val, *imm),
+                };
+                self.writebacks.push((*reg, post_value));
                 reg_val
             }
             Operand::Imm64 { imm, shift } => {
@@ -1539,6 +1535,20 @@ impl BlockTranslator<'_> {
                 _ = self.builder.inst_results(call);
             }};
         }
+        /// Perform register writeback for load/stores, after load/store is
+        /// successful.
+        macro_rules! write_back {
+            () => {{
+                if !self.writebacks.is_empty() {
+                    let writebacks = std::mem::take(&mut self.writebacks);
+                    for (reg, value) in writebacks {
+                        let reg_view = self.reg_to_var(&reg, None, true);
+                        self.def_view(&reg_view, value);
+                    }
+                }
+            }};
+        }
+
         macro_rules! unexpected_operand {
             ($other:expr) => {{
                 let other = $other;
@@ -1605,6 +1615,7 @@ impl BlockTranslator<'_> {
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[0]);
                 self.generate_write(target, value, width);
+                write_back!();
             }
             Op::STLRH | Op::STURH | Op::STRH => {
                 // [ref:atomics]: STLRH We don't model semantics (yet).
@@ -1613,6 +1624,7 @@ impl BlockTranslator<'_> {
                 let value = self.builder.ins().ireduce(I16, value);
                 let target = self.translate_operand(&instruction.operands()[1]);
                 self.generate_write(target, value, Width::_16);
+                write_back!();
             }
             Op::STLRB | Op::STRB => {
                 // For STLRB: [ref:atomics]: We don't model semantics (yet).
@@ -1620,6 +1632,7 @@ impl BlockTranslator<'_> {
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().ireduce(I8, value);
                 self.generate_write(target, value, Width::_8);
+                write_back!();
             }
             Op::STNP | Op::STP => {
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -1632,6 +1645,7 @@ impl BlockTranslator<'_> {
                     .ins()
                     .iadd_imm(target, i64::from(width as i32) / 8);
                 self.generate_write(target, data2, width);
+                write_back!();
             }
             Op::LDXR | Op::LDAR | Op::LDR => {
                 // For LDAR: [ref:atomics]: We don't model semantics (yet).
@@ -1643,6 +1657,7 @@ impl BlockTranslator<'_> {
                 }
                 let value = self.generate_read(source_address, width);
                 write_to_register!(target, TypedValue { value, width });
+                write_back!();
             }
             Op::LDNP | Op::LDP => {
                 let target1 = get_destination_register!();
@@ -1660,6 +1675,7 @@ impl BlockTranslator<'_> {
                     .iadd_imm(source_address, i64::from(width as i32) / 8);
                 let value = self.generate_read(source_address, width);
                 write_to_register!(target2, TypedValue { value, width });
+                write_back!();
             }
             Op::LDARH | Op::LDRH => {
                 // [ref:atomics]: We don't model semantics (yet).
@@ -1673,6 +1689,7 @@ impl BlockTranslator<'_> {
                         width: Width::_16
                     }
                 );
+                write_back!();
             }
             Op::LDUR => {
                 let target = get_destination_register!();
@@ -1680,6 +1697,7 @@ impl BlockTranslator<'_> {
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, width);
                 write_to_register!(target, TypedValue { value, width });
+                write_back!();
             }
             Op::LDURB | Op::LDRB => {
                 let target = get_destination_register!();
@@ -1692,6 +1710,7 @@ impl BlockTranslator<'_> {
                         width: Width::_8
                     },
                 );
+                write_back!();
             }
             Op::LDURH => {
                 let target = get_destination_register!();
@@ -1704,6 +1723,7 @@ impl BlockTranslator<'_> {
                         width: Width::_16
                     },
                 );
+                write_back!();
             }
             Op::LDURSB | Op::LDRSB => {
                 // Load register signed byte (register)
@@ -1717,13 +1737,15 @@ impl BlockTranslator<'_> {
                 write_to_register!(signed target, TypedValue {
                     value,
                     width: Width::_8,
-                })
+                });
+                write_back!();
             }
             Op::LDURSH | Op::LDRSH => {
                 let target = get_destination_register!();
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read(source_address, Width::_16);
                 write_to_register!(signed target, TypedValue { value, width: Width::_16 });
+                write_back!();
             }
             Op::LDURSW | Op::LDRSW => {
                 let target = get_destination_register!();
@@ -1732,7 +1754,8 @@ impl BlockTranslator<'_> {
                 write_to_register!(signed target, TypedValue {
                     value,
                     width: Width::_32
-                })
+                });
+                write_back!();
             }
             Op::LDPSW => {
                 // Load Pair of Registers Signed Word
@@ -1759,6 +1782,7 @@ impl BlockTranslator<'_> {
                         width: Width::_32
                     }
                 );
+                write_back!();
             }
             // Moves
             Op::MOV => {
@@ -3367,6 +3391,7 @@ impl BlockTranslator<'_> {
                 monitor!(load_excl source_address);
                 let value = self.generate_read(source_address, width);
                 write_to_register!(target, TypedValue { value, width });
+                write_back!();
             }
             Op::LDARB | Op::LDAXRB => {
                 // [ref:atomics]: We don't model semantics (yet).
@@ -3383,6 +3408,7 @@ impl BlockTranslator<'_> {
                         width: Width::_8
                     },
                 );
+                write_back!();
             }
             Op::LDAXRH => {
                 // [ref:atomics]: We don't model semantics (yet).
@@ -3397,6 +3423,7 @@ impl BlockTranslator<'_> {
                         width: Width::_16
                     },
                 );
+                write_back!();
             }
             Op::LDCLR => todo!(),
             Op::LDCLRA => todo!(),
@@ -3492,6 +3519,7 @@ impl BlockTranslator<'_> {
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read_unprivileged(source_address, width);
                 write_to_register!(target, TypedValue { value, width });
+                write_back!();
             }
             Op::LDTRB => {
                 let target = get_destination_register!();
@@ -3504,6 +3532,7 @@ impl BlockTranslator<'_> {
                         width: Width::_8
                     },
                 );
+                write_back!();
             }
             Op::LDTRH => {
                 let target = get_destination_register!();
@@ -3516,6 +3545,7 @@ impl BlockTranslator<'_> {
                         width: Width::_16
                     }
                 );
+                write_back!();
             }
             Op::LDTRSB => {
                 let target = get_destination_register!();
@@ -3524,13 +3554,15 @@ impl BlockTranslator<'_> {
                 write_to_register!(signed target, TypedValue {
                     value,
                     width: Width::_8,
-                })
+                });
+                write_back!();
             }
             Op::LDTRSH => {
                 let target = get_destination_register!();
                 let source_address = self.translate_operand(&instruction.operands()[1]);
                 let value = self.generate_read_unprivileged(source_address, Width::_16);
                 write_to_register!(signed target, TypedValue { value, width: Width::_16 });
+                write_back!();
             }
             Op::LDTRSW => {
                 let target = get_destination_register!();
@@ -3539,7 +3571,8 @@ impl BlockTranslator<'_> {
                 write_to_register!(signed target, TypedValue {
                     value,
                     width: Width::_32
-                })
+                });
+                write_back!();
             }
             Op::LDUMAX => todo!(),
             Op::LDUMAXA => todo!(),
@@ -3583,6 +3616,7 @@ impl BlockTranslator<'_> {
                     .iadd_imm(source_address, i64::from(width as i32) / 8);
                 let value = self.generate_read(source_address, width);
                 write_to_register!(target2, TypedValue { value, width });
+                write_back!();
             }
             Op::LDXRB => {
                 // [ref:atomics]: We don't model semantics (yet).
@@ -3597,6 +3631,7 @@ impl BlockTranslator<'_> {
                         width: Width::_8
                     },
                 );
+                write_back!();
             }
             Op::LDXRH => {
                 // [ref:atomics]: We don't model semantics (yet).
@@ -3611,6 +3646,7 @@ impl BlockTranslator<'_> {
                         width: Width::_16
                     },
                 );
+                write_back!();
             }
             Op::LSLR => todo!(),
             Op::LSLV => todo!(),
@@ -4402,6 +4438,7 @@ impl BlockTranslator<'_> {
                         .iadd_imm(target, i64::from(width as i32) / 8);
                     self.generate_write(target, data2, width);
                 );
+                write_back!();
             }
             Op::STLXRB => {
                 // [ref:atomics]: We don't model semantics (yet).
@@ -4413,6 +4450,7 @@ impl BlockTranslator<'_> {
                     let value = self.builder.ins().ireduce(I8, value);
                     self.generate_write(target, value, Width::_8);
                 );
+                write_back!();
             }
             Op::STLXRH => {
                 // [ref:atomics]: We don't model semantics (yet).
@@ -4424,6 +4462,7 @@ impl BlockTranslator<'_> {
                     let value = self.builder.ins().ireduce(I16, value);
                     self.generate_write(target, value, Width::_16);
                 );
+                write_back!();
             }
             Op::STNT1B => todo!(),
             Op::STNT1D => todo!(),
@@ -4452,12 +4491,14 @@ impl BlockTranslator<'_> {
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[0]);
                 self.generate_write_unprivileged(target, value, width);
+                write_back!();
             }
             Op::STTRB => {
                 let value = self.translate_operand(&instruction.operands()[0]);
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().ireduce(I8, value);
                 self.generate_write_unprivileged(target, value, Width::_8);
+                write_back!();
             }
             Op::STTRH => {
                 let value = self.translate_operand(&instruction.operands()[0]);
@@ -4465,6 +4506,7 @@ impl BlockTranslator<'_> {
                 let value = self.builder.ins().ireduce(I16, value);
                 let target = self.translate_operand(&instruction.operands()[1]);
                 self.generate_write_unprivileged(target, value, Width::_16);
+                write_back!();
             }
             Op::STUMAX => todo!(),
             Op::STUMAXB => todo!(),
@@ -4483,6 +4525,7 @@ impl BlockTranslator<'_> {
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let width = self.operand_width(&instruction.operands()[0]);
                 self.generate_write(target, value, width);
+                write_back!();
             }
             Op::STURB => {
                 // [ref:needs_unit_test]
@@ -4490,6 +4533,7 @@ impl BlockTranslator<'_> {
                 let target = self.translate_operand(&instruction.operands()[1]);
                 let value = self.builder.ins().ireduce(I8, value);
                 self.generate_write(target, value, Width::_8);
+                write_back!();
             }
             Op::STLXR | Op::STXR => {
                 // [ref:atomics]: We don't model semantics (yet).
@@ -4500,6 +4544,7 @@ impl BlockTranslator<'_> {
                 monitor!(store_excl target, status_target,
                     self.generate_write(target, value, width);
                 );
+                write_back!();
             }
             Op::STXRB => {
                 // [ref:atomics]: We don't model semantics (yet).
@@ -4510,6 +4555,7 @@ impl BlockTranslator<'_> {
                     let value = self.builder.ins().ireduce(I8, value);
                     self.generate_write(target, value, Width::_8);
                 );
+                write_back!();
             }
             Op::STXRH => {
                 // [ref:atomics]: We don't model semantics (yet).
@@ -4520,6 +4566,7 @@ impl BlockTranslator<'_> {
                     let value = self.builder.ins().ireduce(I16, value);
                     self.generate_write(target, value, Width::_16);
                 );
+                write_back!();
             }
             Op::STZ2G => todo!(),
             Op::STZG => todo!(),
