@@ -139,8 +139,7 @@ impl BlockTranslator<'_> {
             SysReg::ID_AA64ZFR0_EL1 => self.builder.ins().iconst(I64, 0),
             SysReg::ID_AA64SMFR0_EL1 => self.builder.ins().iconst(I64, 0),
             SysReg::GMID_EL1 => self.builder.ins().iconst(I64, 0),
-            // [ref:TODO]: ID_AA64DFR0_EL1 AArch64 Debug Feature Register 0
-            SysReg::ID_AA64DFR0_EL1 => self.builder.ins().iconst(I64, 0),
+            SysReg::ID_AA64DFR0_EL1 => self.builder.ins().iconst(I64, 0b0110),
             SysReg::ID_AA64MMFR1_EL1 => register_field!(read self, id_registers.id_aa64mmfr1_el1),
             SysReg::ID_AA64MMFR3_EL1 => register_field!(read self, id_registers.id_aa64mmfr3_el1),
             SysReg::DCZID_EL0 => register_field!(read self, id_registers.dczid_el0),
