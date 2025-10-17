@@ -133,10 +133,7 @@ impl BlockTranslator<'_> {
             SysReg::ID_AA64ISAR2_EL1 => self.builder.ins().iconst(I64, 0),
             SysReg::MIDR_EL1 => register_field!(read self, id_registers.midr_el1),
             SysReg::MPIDR_EL1 => self.builder.ins().iconst(I64, 0),
-            SysReg::CTR_EL0 => {
-                // [ref:FIXME]: CTR_EL0
-                self.builder.ins().iconst(I64, 0xb444c004)
-            }
+            SysReg::CTR_EL0 => self.builder.ins().iconst(I64, 0xb444c004),
             SysReg::ID_AA64PFR0_EL1 => register_field!(read self, id_registers.id_aa64pfr0_el1),
             SysReg::ID_AA64PFR1_EL1 => register_field!(read self, id_registers.id_aa64pfr1_el1),
             SysReg::ID_AA64ZFR0_EL1 => self.builder.ins().iconst(I64, 0),

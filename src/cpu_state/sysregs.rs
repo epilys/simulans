@@ -28,7 +28,7 @@ pub enum SysReg {
     MIDR_EL1,
     /// `MPIDR_EL1`, Multiprocessor Affinity Register
     MPIDR_EL1,
-    /// [ref:FIXME]: CTR_EL0
+    /// `CTR_EL0`
     CTR_EL0,
     /// `CNTVCT_EL0`, Counter-timer Virtual Count Register
     CNTVCT_EL0,
