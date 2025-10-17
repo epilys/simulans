@@ -678,6 +678,21 @@ fn exception_class(
     (ec, true)
 }
 
+fn generate_esr(
+    machine: &crate::machine::Armv8AMachine,
+    except: &ExceptionRecord,
+    target_el: ExceptionLevel,
+) -> u64 {
+    let (ec, il) = exception_class(except.exceptype, &machine.cpu_state.PSTATE(), target_el);
+    let iss = except.syndrome.iss();
+    let iss2 = except.syndrome.iss2();
+    //0  <63:56>
+    u64::from(iss2) << 32 // <55:32>
+             | u64::from(get_bits!(ec, off = 0, len = 6)) << 26 // ec<5:0>  <31:26>
+             | u64::from(il) << 25 // <25>
+             | u64::from(iss) // <24:0>
+}
+
 /// Report syndrome information for exception taken to `AArch64` state
 ///
 /// `AArch64.ReportException`
@@ -686,14 +701,7 @@ fn aarch64_report_exception(
     except: &ExceptionRecord,
     target_el: ExceptionLevel,
 ) {
-    let (ec, il) = exception_class(except.exceptype, &machine.cpu_state.PSTATE(), target_el);
-    let iss = except.syndrome.iss();
-    let iss2 = except.syndrome.iss2();
-    let esr = //0  <63:56>
-             u64::from(iss2) << 32 // <55:32>
-             | u64::from(get_bits!(ec, off = 0, len = 6)) << 26 // ec<5:0>  <31:26>
-             | u64::from(il) << 25 // <25>
-             | u64::from(iss); // <24:0>
+    let esr = generate_esr(machine, except, target_el);
     machine.cpu_state.set_esr_elx(esr, target_el);
 
     if [
@@ -1085,7 +1093,16 @@ pub fn aarch64_abort(
         },
         fault,
     );
-    tracing::event!(target: tracing::TraceItem::Exception.as_str(), tracing::Level::TRACE, ?target_el, ?vect_offset, ?except, ?preferred_exception_return, "AArch64.Abort");
+    tracing::event!(
+        target: tracing::TraceItem::Exception.as_str(),
+        tracing::Level::TRACE,
+        ?target_el,
+        ?vect_offset,
+        ?except,
+        ?preferred_exception_return,
+        esr = ?tracing::Hex(generate_esr(machine, &except, target_el)),
+        "AArch64.Abort"
+    );
 
     aarch64_take_exception(
         machine,
