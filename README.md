@@ -17,8 +17,8 @@ See also [DEVELOPMENT.md](./DEVELOPMENT.md).
 - `Aarch64` mode only
 - `4KB` MMU translation granule
 - `pl011` UART device
-- `gic` v2 interrupt controller (WIP)
-- Generic architectural timer (WIP)
+- `gic` v2 interrupt controller
+- Generic architectural timer
 - `FEAT_AA64` parity (WIP)
 - Devicetrees
 - Full GDB support for debugging guest code
