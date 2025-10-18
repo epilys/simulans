@@ -763,7 +763,7 @@ impl DeviceMemoryOps for GicV2CPUMemoryOps {
             (0x1000..0x1004) => {
                 // GICC_DIR WO - Deactivate Interrupt Register
                 field = "GICC_DIR";
-                gicc.dir
+                0
             }
             _ => {
                 // Invalid offset
@@ -791,7 +791,12 @@ impl DeviceMemoryOps for GicV2CPUMemoryOps {
         let value = value as u32;
 
         let mut state = self.state.lock().unwrap();
-        let gicc = &mut state.giccs[self.cpu_id as usize];
+
+        let State {
+            ref mut gicd,
+            ref mut giccs,
+        } = &mut *state;
+        let gicc = &mut giccs[self.cpu_id as usize];
         let field: &'static str;
         match offset {
             (0x0000..0x0004) => {
@@ -831,7 +836,13 @@ impl DeviceMemoryOps for GicV2CPUMemoryOps {
             (0x0010..0x0014) => {
                 // GICC_EOIR WO - End of Interrupt Register
                 field = "GICC_EOIR";
-                gicc.eoir = value;
+                let int_id = get_bits!(value, off = 0, len = 10) as u16;
+                if Some(int_id) == gicd.last_acknowledged_interrupt {
+                    gicd.last_acknowledged_interrupt = None;
+                    if !gicc.eo_imode() {
+                        gicd.set_active(int_id, self.cpu_id, false);
+                    }
+                }
             }
             (0x0014..0x0018) => {
                 // GICC_RPR RO 0x000000FF Running Priority Register
@@ -853,7 +864,7 @@ impl DeviceMemoryOps for GicV2CPUMemoryOps {
             (0x0024..0x0028) => {
                 // GICC_AEOIR WO - Aliased End of Interrupt Register
                 field = "GICC_AEOIR";
-                gicc.aeoir = value;
+                // TODO
             }
             (0x0028..0x002c) => {
                 // GICC_AHPPIR RO 0x000003FF Aliased Highest Priority Pending Interrupt Register
@@ -885,7 +896,10 @@ impl DeviceMemoryOps for GicV2CPUMemoryOps {
             (0x1000..0x1004) => {
                 // GICC_DIR WO - Deactivate Interrupt Register
                 field = "GICC_DIR";
-                gicc.dir = value;
+                let int_id = get_bits!(value, off = 0, len = 10) as u16;
+                if gicc.eo_imode() {
+                    gicd.set_active(int_id, self.cpu_id, false);
+                }
             }
             _ => {
                 // Invalid offset
@@ -945,6 +959,8 @@ pub struct Gicd {
     _reserved_1: [u32; 0x80],
     /// Software Generated Interrupt Register.
     pub sgir: u32,
+    /// Last valid Interrupt ID read from the `GICC_IAR`.
+    pub last_acknowledged_interrupt: Option<u16>,
 }
 
 impl Gicd {
@@ -970,6 +986,7 @@ impl Gicd {
             icfgr1: [0; 8],
             _reserved_1: [0; 0x80],
             sgir: 0,
+            last_acknowledged_interrupt: None,
         }
     }
 
@@ -1055,7 +1072,7 @@ impl Gicd {
         }
     }
 
-    pub const fn set_active(&mut self, interrupt_id: u16, cpu_id: u8) {
+    pub const fn set_active(&mut self, interrupt_id: u16, cpu_id: u8, value: bool) {
         assert!(interrupt_id < 1024);
         let idx = interrupt_id / 32;
         let bit = interrupt_id % 32;
@@ -1066,14 +1083,14 @@ impl Gicd {
                 self.active_interrupts0[cpu_id as usize],
                 off = bit,
                 len = 1,
-                val = 1
+                val = value as u32
             );
         } else {
             self.active_interrupts[idx as usize] = set_bits!(
                 self.active_interrupts[idx as usize],
                 off = bit,
                 len = 1,
-                val = 1
+                val = value as u32
             );
         }
     }
@@ -1242,7 +1259,8 @@ impl Gicd {
     /// interrupt associated with the argument `interrupt_id`
     #[doc(alias("AcknowledgeInterrupt"))]
     fn acknowledge_interrupt(&mut self, interrupt_id: u16, cpu_id: u8) {
-        self.set_active(interrupt_id, cpu_id);
+        self.last_acknowledged_interrupt = Some(interrupt_id);
+        self.set_active(interrupt_id, cpu_id, true);
         self.set_pending(interrupt_id, cpu_id, false);
     }
 }
@@ -1351,8 +1369,6 @@ pub struct Gicc {
     pub bpr: u32,
     /// Interrupt Acknowledge Register.
     pub iar: u32,
-    /// End of Interrupt Register.
-    pub eoir: u32,
     /// Running Priority Register.
     pub rpr: u32,
     /// Highest Priority Pending Interrupt Register.
@@ -1361,8 +1377,6 @@ pub struct Gicc {
     pub abpr: u32,
     /// Aliased Interrupt Acknowledge Register
     pub aiar: u32,
-    /// Aliased End of Interrupt Register
-    pub aeoir: u32,
     /// Aliased Highest Priority Pending Interrupt Register
     pub ahppir: u32,
     _reserved_0: [u32; 0x34],
@@ -1381,12 +1395,10 @@ impl Gicc {
             pmr: 0,
             bpr: MINIMUM_BINARY_POINT as u32,
             iar: 0x000003ff,
-            eoir: 0,
             rpr: 0x000000ff,
             hppir: 0x000003ff,
             abpr: MINIMUM_BINARY_POINT as u32 + 1,
             aiar: 0x000003ff,
-            aeoir: 0,
             ahppir: 0x000003ff,
             _reserved_0: [0; 0x34],
             iidr: 0x2 << 16,
@@ -1447,6 +1459,19 @@ impl Gicc {
     const fn irq_byp_dis_grp1(&self) -> bool {
         // GICC_CTLR[cpu_id].IRQBypDisGrp1 == '1'
         get_bits!(self.ctlr, off = 8, len = 1) == 1
+    }
+
+    #[doc(alias("EOImode"))]
+    /// Controls the behavior of accesses to `GICC_EOIR` and `GICC_DIR`
+    /// registers.
+    ///
+    /// - `0`: `GICC_EOIR` has both priority drop and deactivate interrupt
+    ///   functionality. Accesses to the `GICC_DIR` are unpredictable.
+    /// - `1`: `GICC_EOIR` has priority drop functionality only. `GICC_DIR` has
+    ///   deactivate interrupt functionality.
+    const fn eo_imode(&self) -> bool {
+        // GICC_CTLR[cpu_id].EOImode == '1'
+        get_bits!(self.ctlr, off = 9, len = 1) == 1
     }
 
     #[doc(alias("ReadGICC_IAR"))]
