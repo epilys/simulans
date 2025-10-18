@@ -20,10 +20,10 @@ pub enum SysReg {
     ID_AA64ISAR1_EL1,
     /// `ID_AA64ISAR0_EL1`, `AArch64` Instruction Set Attribute Register 0
     ID_AA64ISAR0_EL1,
-    /// `ID_AA64MMFR2_EL1`, `AArch64` Memory Model Feature Register 2
-    ID_AA64MMFR2_EL1,
     /// `ID_AA64ISAR2_EL1`, `AArch64` Instruction Set Attribute Register 2
     ID_AA64ISAR2_EL1,
+    /// `ID_AA64ISAR3_EL1` (RO)
+    ID_AA64ISAR3_EL1,
     /// `MIDR_EL1`
     MIDR_EL1,
     /// `MPIDR_EL1`, Multiprocessor Affinity Register
@@ -36,6 +36,10 @@ pub enum SysReg {
     ID_AA64PFR0_EL1,
     /// `ID_AA64PFR1_EL1`, `AArch64` Processor Feature Register 1
     ID_AA64PFR1_EL1,
+    /// `ID_AA64PFR1_EL1`, `AArch64` Processor Feature Register 2
+    ID_AA64PFR2_EL1,
+    // `ID_AA64FPFR0_EL1`, AArch64 Floating-point Feature Register 0
+    ID_AA64FPFR0_EL1,
     /// `ID_AA64ZFR0_EL1`, SVE Feature ID Register 0
     ID_AA64ZFR0_EL1,
     /// `ID_AA64SMFR0_EL1`, SME Feature ID Register 0
@@ -46,14 +50,21 @@ pub enum SysReg {
     ID_AA64DFR0_EL1,
     /// `ID_AA64MMFR1_EL1`, `AArch64` Memory Model Feature Register 1
     ID_AA64MMFR1_EL1,
+    /// `ID_AA64MMFR2_EL1`, `AArch64` Memory Model Feature Register 2
+    ID_AA64MMFR2_EL1,
     /// `ID_AA64MMFR3_EL1`, `AArch64` Memory Model Feature Register 3
     ID_AA64MMFR3_EL1,
+    /// `ID_AA64MMFR4_EL1`, `AArch64` Memory Model Feature Register 4
+    ID_AA64MMFR4_EL1,
     /// `DCZID_EL0`, Data Cache Zero ID Register
     DCZID_EL0,
     /// `CLIDR_EL1`, Cache Level ID Register
     CLIDR_EL1,
     /// `REVIDR_EL1`, Revision ID Register
     REVIDR_EL1,
+    /// `MPAMIDR_EL1`, MPAM ID Register
+    MPAMIDR_EL1,
+    MPAM1_EL1,
     /// `ID_AA64DFR1_EL1`, `AArch64` Debug Feature Register 1
     ID_AA64DFR1_EL1,
     /// `ID_DFR0_EL1`, `AArch32` Debug Feature Register 0
@@ -165,9 +176,12 @@ pub enum SysReg {
     CNTKCTL_EL1,
     CNTV_CTL_EL0,
     CNTV_CVAL_EL0,
+    CNTV_TVAL_EL0,
     CNTP_CTL_EL0,
     CNTP_CVAL_EL0,
     CNTP_TVAL_EL0,
+    /// `CNTPCT_EL0` (RO)
+    CNTPCT_EL0,
     // Debugger locks, ignore
     OSLAR_EL1,
     // Debugger locks, ignore
@@ -244,6 +258,13 @@ impl From<SysRegEncoding> for SysReg {
             } => Self::ID_AA64ISAR2_EL1,
             SysRegEncoding {
                 o0: 0b11,
+                o1: 0b000,
+                cm: 0b0000,
+                cn: 0b0110,
+                o2: 0b011,
+            } => Self::ID_AA64ISAR3_EL1,
+            SysRegEncoding {
+                o0: 0b11,
                 o1: 0,
                 cm: 0,
                 cn: 0,
@@ -271,6 +292,20 @@ impl From<SysRegEncoding> for SysReg {
                 o2: 0b10,
             } => Self::CNTVCT_EL0,
             SysRegEncoding {
+                o0: 0b11,
+                o1: 0b011,
+                cm: 0b1110,
+                cn: 0b0000,
+                o2: 0b001,
+            } => Self::CNTPCT_EL0,
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b000,
+                cm: 0b0000,
+                cn: 0b0100,
+                o2: 0b111,
+            } => Self::ID_AA64FPFR0_EL1,
+            SysRegEncoding {
                 o0: 3,
                 o1: 0,
                 cm: 0,
@@ -284,6 +319,13 @@ impl From<SysRegEncoding> for SysReg {
                 cn: 4,
                 o2: 1,
             } => Self::ID_AA64PFR1_EL1,
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b000,
+                cm: 0b0000,
+                cn: 0b0100,
+                o2: 0b010,
+            } => Self::ID_AA64PFR2_EL1,
             SysRegEncoding {
                 o0: 0b11,
                 o1: 0,
@@ -391,6 +433,13 @@ impl From<SysRegEncoding> for SysReg {
             } => Self::ID_AA64MMFR3_EL1,
             SysRegEncoding {
                 o0: 0b11,
+                o1: 0b000,
+                cm: 0b0000,
+                cn: 0b0111,
+                o2: 0b100,
+            } => Self::ID_AA64MMFR4_EL1,
+            SysRegEncoding {
+                o0: 0b11,
                 o1: 0b11,
                 cm: 0,
                 cn: 0,
@@ -410,6 +459,13 @@ impl From<SysRegEncoding> for SysReg {
                 cn: 0,
                 o2: 0b110,
             } => Self::REVIDR_EL1,
+            SysRegEncoding {
+                o0: 0b11,
+                o1: 0b000,
+                cm: 0b1010,
+                cn: 0b0100,
+                o2: 0b100,
+            } => Self::MPAMIDR_EL1,
             SysRegEncoding {
                 o0: 0b11,
                 o1: 0,
@@ -559,6 +615,7 @@ impl From<&bad64::SysReg> for SysReg {
             bad64::SysReg::DAIFCLR => Self::DAIFClr,
             bad64::SysReg::CURRENTEL => Self::CurrentEL,
             bad64::SysReg::PSTATE_SPSEL => Self::SpSel,
+            bad64::SysReg::SPSEL => Self::SpSel,
             bad64::SysReg::PMUSERENR_EL0 => Self::PMUSERENR_EL0,
             bad64::SysReg::AMUSERENR_EL0 => Self::AMUSERENR_EL0,
             bad64::SysReg::MDSCR_EL1 => Self::MDSCR_EL1,
@@ -595,6 +652,7 @@ impl From<&bad64::SysReg> for SysReg {
             bad64::SysReg::CNTKCTL_EL1 => Self::CNTKCTL_EL1,
             bad64::SysReg::CNTV_CTL_EL0 => Self::CNTV_CTL_EL0,
             bad64::SysReg::CNTV_CVAL_EL0 => Self::CNTV_CVAL_EL0,
+            bad64::SysReg::CNTV_TVAL_EL0 => Self::CNTV_TVAL_EL0,
             bad64::SysReg::CNTP_CTL_EL0 => Self::CNTP_CTL_EL0,
             bad64::SysReg::CNTP_CVAL_EL0 => Self::CNTP_CVAL_EL0,
             bad64::SysReg::CNTP_TVAL_EL0 => Self::CNTP_TVAL_EL0,
@@ -630,6 +688,7 @@ impl From<&bad64::SysReg> for SysReg {
             bad64::SysReg::APIAKEYHI_EL1 => Self::APIAKEYHI_EL1,
             bad64::SysReg::APIBKEYLO_EL1 => Self::APIBKEYLO_EL1,
             bad64::SysReg::APIAKEYLO_EL1 => Self::APIAKEYLO_EL1,
+            bad64::SysReg::MPAM1_EL1 => Self::MPAM1_EL1,
             bad64::SysReg::SP_EL0 => Self::SP_EL0,
             bad64::SysReg::SP_EL1 => Self::SP_EL1,
             bad64::SysReg::SP_EL2 => Self::SP_EL2,

@@ -260,6 +260,8 @@ pub struct IDRegisterFile {
     pub id_aa64mmfr2_el1: u64,
     /// `AArch64` Memory Model Feature Register 3
     pub id_aa64mmfr3_el1: u64,
+    /// `AArch64` Memory Model Feature Register 4
+    pub id_aa64mmfr4_el1: u64,
     /// `AArch64` Instruction Set Attribute Register 0
     pub id_aa64isar0_el1: u64,
     /// Data Cache Zero ID Register
@@ -323,6 +325,7 @@ impl Default for IDRegisterFile {
             id_aa64mmfr1_el1: 0,
             id_aa64mmfr2_el1: 0,
             id_aa64mmfr3_el1: 0,
+            id_aa64mmfr4_el1: 0,
             id_aa64isar0_el1,
             dczid_el0,
         }
