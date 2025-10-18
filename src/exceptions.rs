@@ -1017,7 +1017,7 @@ fn aarch64_branch_addr(
         && get_bits!(vaddress.0, off = msbit, len = 1) == 1
     {
         // sign extend:
-        let mask = u64::MAX & (2_u64.pow(msbit) - 1);
+        let mask = u64::MAX & !(2_u64.pow(msbit) - 1);
         Address(mask | vaddress.0)
     } else {
         Address(get_bits!(vaddress.0, off = 0, len = msbit))
