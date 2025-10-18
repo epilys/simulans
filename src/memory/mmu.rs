@@ -518,13 +518,46 @@ impl Armv8AMachine {
                     }
                 };
                 ttwstate.level += 1;
+
+                let table_entry_3 =
+                    read_table_entry!(base_address, IA4KB::idx(input_address.0, ttwstate));
                 fault.level = ttwstate.level;
                 fault_in.level = ttwstate.level;
-                // Block descriptor
-                Ok(Descriptor::Block(BlockDescriptor::new(
-                    base_address.0,
-                    ttwstate,
-                )))
+                if trace {
+                    tracing::event!(
+                        target: TraceItem::AddressLookup.as_str(),
+                        tracing::Level::TRACE,
+                        ?base_address,
+                        level = ttwstate.level,
+                        table_entry_3 = ?tracing::BinaryHex(table_entry_3),
+                    );
+                }
+
+                match table_entry_3 & 0b11 {
+                    0b11 => {
+                        assert_eq!(ttwstate.level, 3);
+                        // Page descriptor
+                        Ok(Descriptor::Page(PageDescriptor::new(
+                            table_entry_3,
+                            ttwstate,
+                        )))
+                    }
+                    0b01 => {
+                        // Block descriptor
+                        Ok(Descriptor::Block(BlockDescriptor::new(
+                            table_entry_3,
+                            ttwstate,
+                        )))
+                    }
+                    other => {
+                        tracing::debug!(target: TraceItem::AddressLookup.as_str(), "invalid table entry type 0b{other:b}");
+                        fault.statuscode = Fault::Translation;
+                        Err(ExitRequest::Abort {
+                            fault,
+                            preferred_exception_return,
+                        })
+                    }
+                }
             }
             Granule::_16KB | Granule::_64KB => {
                 unimplemented!()
