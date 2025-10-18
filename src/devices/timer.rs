@@ -109,16 +109,15 @@ pub struct GenericTimer {
 
 impl GenericTimer {
     pub fn new(interrupts: &Interrupts) -> Self {
-        let frq = 62_500_000;
+        let frq = 1_000_000_000;
         let generator = interrupts.generator.clone();
         let cntp_ctl_el0 = Arc::new(AtomicU64::new(0));
         let cntp_cval_el0 = Arc::new(AtomicU64::new(0));
         let cntp_tval_el0 = Arc::new(AtomicI32::new(0));
-        let cntpct_el0 = Arc::new(AtomicU64::new(frq));
+        let cntpct_el0 = Arc::new(AtomicU64::new(0));
         let cntv_ctl_el0 = Arc::new(AtomicU64::new(0));
         let cntv_cval_el0 = Arc::new(AtomicU64::new(0));
         let cntv_tval_el0 = Arc::new(AtomicI32::new(0));
-        // let cntv_ctl_el0 = Arc::new(0.into());
         std::thread::Builder::new()
             .name("timer".into())
             .spawn({
@@ -131,9 +130,9 @@ impl GenericTimer {
                 let cntv_cval_el0 = Arc::clone(&cntv_cval_el0);
                 let cntv_tval_el0 = Arc::clone(&cntv_tval_el0);
 
-                let adjust: u64 = (frq / 1_000_000) * 100;
+                let adjust: u64 = 1_000_000;
 
-                let sleep_dur = std::time::Duration::from_micros(frq / (1_000_000));
+                let sleep_dur = std::time::Duration::from_micros(1000);
                 move || {
                     loop {
                         std::thread::sleep(sleep_dur);
