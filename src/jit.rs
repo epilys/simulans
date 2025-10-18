@@ -3744,7 +3744,13 @@ impl BlockTranslator<'_> {
                 };
                 write_to_register!(target, TypedValue { value, width });
             }
-            Op::MOVN => todo!(),
+            Op::MOVN => {
+                let target = get_destination_register!();
+                let imm_value = self.translate_operand(&instruction.operands()[1]);
+                let value = self.builder.ins().bnot(imm_value);
+                let width = self.operand_width(&instruction.operands()[1]);
+                write_to_register!(target, TypedValue { value, width },);
+            }
             Op::MOVPRFX => todo!(),
             Op::MOVS => todo!(),
             Op::MSB => todo!(),
