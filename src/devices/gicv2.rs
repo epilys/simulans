@@ -326,7 +326,7 @@ impl DeviceMemoryOps for GicV2DistMemoryOps {
             (0x200..0x280) => {
                 // GICD_ISPENDR RW 0x00000000 Interrupt Set-Pending Registers
                 field = "GICD_ISPENDR";
-                let idx = (offset - 0x180) / 0x4;
+                let idx = (offset - 0x200) / 0x4;
                 if idx == 0 {
                     gicd.pending_interrupts0[self.cpu_id as usize]
                 } else {
@@ -534,7 +534,7 @@ impl DeviceMemoryOps for GicV2DistMemoryOps {
             (0x200..0x280) => {
                 // GICD_ISPENDR RW 0x00000000 Interrupt Set-Pending Registers
                 field = "GICD_ISPENDR";
-                let idx = (offset - 0x180) / 0x4;
+                let idx = (offset - 0x200) / 0x4;
                 gicd.write_ispendr(idx as usize, value, self.cpu_id);
             }
             (0x280..0x300) => {
