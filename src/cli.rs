@@ -121,6 +121,10 @@ pub struct Args {
     #[arg(short, long, default_value_t = true)]
     pub generate_fdt: bool,
 
+    /// Pass boot arguments to kernel (requires Devicetree generation)
+    #[arg(long)]
+    pub bootargs: Option<String>,
+
     /// Dump generated device tree blob to file.
     #[arg(long)]
     pub dump_dtb: Option<PathBuf>,

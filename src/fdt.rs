@@ -24,7 +24,7 @@ pub struct Fdt {
 /// A builder struct for FDT blobs.
 pub struct FdtBuilder<'a> {
     memory_map: &'a MemoryMap,
-    cmdline: Option<String>,
+    bootargs: Option<String>,
     num_vcpus: NonZero<u32>,
 }
 
@@ -33,7 +33,7 @@ impl<'a> FdtBuilder<'a> {
     pub fn new(memory_map: &'a MemoryMap) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self {
             memory_map,
-            cmdline: None,
+            bootargs: None,
             num_vcpus: NonZero::new(1).unwrap(),
         })
     }
@@ -45,8 +45,8 @@ impl<'a> FdtBuilder<'a> {
     }
 
     /// Set `bootargs` node.
-    pub fn cmdline(mut self, cmdline: Option<String>) -> Self {
-        self.cmdline = cmdline;
+    pub fn bootargs(mut self, bootargs: Option<String>) -> Self {
+        self.bootargs = bootargs;
         self
     }
 
@@ -167,9 +167,9 @@ impl<'a> FdtBuilder<'a> {
             fdt.end_node(timer_node)?;
         }
         {
-            let cmdline = self.cmdline.as_deref().unwrap_or("");
+            let bootargs = self.bootargs.as_deref().unwrap_or("");
             let chosen_node = fdt.begin_node("chosen")?;
-            fdt.property_string("bootargs", cmdline)?;
+            fdt.property_string("bootargs", bootargs)?;
             if let Some(ref stdout_path) = stdout_path {
                 fdt.property_string("stdout-path", stdout_path)?;
             }

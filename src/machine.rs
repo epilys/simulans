@@ -164,12 +164,13 @@ impl Armv8AMachine {
     /// Returns the generated fdt on success.
     pub fn generate_fdt(
         &mut self,
+        bootargs: Option<String>,
         entry_point: Address,
     ) -> Result<crate::fdt::Fdt, Box<dyn std::error::Error>> {
         // [ref:needs_unit_test]
         let fdt = crate::fdt::FdtBuilder::new(&self.memory)?
             .num_vcpus(NonZero::new(1).unwrap())
-            .cmdline(None)
+            .bootargs(bootargs)
             .build()?;
 
         self.load_code(&fdt.bytes, fdt.address)?;
