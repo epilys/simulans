@@ -3,7 +3,7 @@
 
 //! Translation block cache
 
-use std::{collections::BTreeMap, ops::RangeInclusive};
+use std::cmp::Ordering;
 
 use crate::jit::Entry;
 
@@ -56,7 +56,7 @@ impl TranslationBlock {
 /// Helper container struct for translated blocks.
 pub struct TranslationBlocks {
     /// A map from program counter to block.
-    pub entries: BTreeMap<u64, TranslationBlock>,
+    pub entries: Vec<(u64, TranslationBlock)>,
 }
 
 impl Drop for TranslationBlocks {
@@ -76,30 +76,42 @@ impl TranslationBlocks {
     #[inline]
     /// Create an empty container.
     pub fn new() -> Self {
-        Self {
-            entries: BTreeMap::default(),
-        }
+        Self { entries: vec![] }
     }
 
     #[inline]
     /// Get a translated block for this program counter.
     pub fn get(&mut self, physical_pc: &u64, virtual_pc: &u64) -> Option<&TranslationBlock> {
-        self.entries
-            .get(physical_pc)
-            .filter(|tb| tb.virtual_addr == *virtual_pc)
+        let idx = self
+            .entries
+            .binary_search_by(|probe| {
+                (&probe.0, &probe.1.virtual_addr).cmp(&(physical_pc, virtual_pc))
+            })
+            .ok()?;
+        Some(&self.entries[idx].1)
     }
 
     #[inline]
     /// Insert translated block.
     pub fn insert(&mut self, block: TranslationBlock) {
         let start = block.start;
-        self.entries.insert(start, block);
+        match self.entries.binary_search_by(|probe| {
+            (probe.0, probe.1.virtual_addr).cmp(&(start, block.virtual_addr))
+        }) {
+            Ok(idx) => {
+                let (_, tb) = std::mem::replace(&mut self.entries[idx], (start, block));
+                tb.free();
+            }
+            Err(idx) => {
+                self.entries.insert(idx, (start, block));
+            }
+        }
     }
 
     #[inline]
     /// Pop and free all blocks.
     pub fn clear(&mut self) {
-        while let Some((_, b)) = self.entries.pop_first() {
+        for (_, b) in self.entries.drain(..) {
             b.free();
         }
     }
@@ -107,48 +119,17 @@ impl TranslationBlocks {
     #[inline]
     /// Invalidate all translated blocks that touch this program counter.
     pub fn invalidate(&mut self, pc: u64) {
-        let invalidated_keys = self
-            .entries
-            .range(pc..=pc)
-            .map(|(k, _)| *k)
-            .collect::<Vec<_>>();
-        if !invalidated_keys.is_empty() {
-            tracing::trace!(
-                "Invalidating {} translation block{} at address 0x{:x}",
-                invalidated_keys.len(),
-                if invalidated_keys.len() == 1 { "" } else { "s" },
-                pc
-            );
-            for k in invalidated_keys {
-                if let Some(b) = self.entries.remove(&k) {
-                    b.free();
-                }
+        while let Ok(idx) = self.entries.binary_search_by(|(_, probe)| {
+            if pc < probe.start {
+                Ordering::Greater
+            } else if pc > probe.end {
+                Ordering::Less
+            } else {
+                Ordering::Equal
             }
-        }
-    }
-
-    #[inline]
-    /// Invalidate all translated blocks that touch this range of program
-    /// counters.
-    pub fn invalidate_range(&mut self, range: RangeInclusive<u64>) {
-        let invalidated_keys = self
-            .entries
-            .range(range.clone())
-            .map(|(k, _)| *k)
-            .collect::<Vec<_>>();
-        if !invalidated_keys.is_empty() {
-            tracing::trace!(
-                "Invalidating {} translation block{} at address range 0x{:x}-0x{:x}",
-                invalidated_keys.len(),
-                if invalidated_keys.len() == 1 { "" } else { "s" },
-                range.start(),
-                range.end()
-            );
-            for k in invalidated_keys {
-                if let Some(b) = self.entries.remove(&k) {
-                    b.free();
-                }
-            }
+        }) {
+            let (_, tb) = self.entries.remove(idx);
+            tb.free();
         }
     }
 }
