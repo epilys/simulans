@@ -3,7 +3,7 @@
 
 //! Translation lookaside buffer
 
-use std::{cell::RefCell, collections::BTreeMap};
+use std::cell::RefCell;
 
 use uluru::LRUCache;
 
@@ -17,9 +17,9 @@ pub struct Page {
 }
 
 struct TLBInner {
-    global_map: BTreeMap<u64, Page>,
+    global_map: Vec<(u64, Page)>,
     global_lru: LRUCache<u64, 1024>,
-    map: BTreeMap<(u16, u64), Page>,
+    map: Vec<((u16, u64), Page)>,
     lru: LRUCache<(u16, u64), 2048>,
 }
 
@@ -33,9 +33,9 @@ impl TLB {
     pub fn new() -> Self {
         Self {
             inner: TLBInner {
-                global_map: BTreeMap::new(),
+                global_map: Vec::with_capacity(1024),
                 global_lru: LRUCache::default(),
-                map: BTreeMap::new(),
+                map: Vec::with_capacity(2048),
                 lru: LRUCache::default(),
             }
             .into(),
@@ -45,11 +45,16 @@ impl TLB {
     /// Get a page for an address
     pub fn get(&self, key: &(u16, u64)) -> Option<Page> {
         let mut inner = self.inner.borrow_mut();
-        if let Some(page) = inner.global_map.get(&key.1).copied() {
+        if let Ok(idx) = inner
+            .global_map
+            .binary_search_by(|probe| probe.0.cmp(&key.1))
+        {
+            let page = inner.global_map[idx].1;
             inner.global_lru.touch(|a| a == &key.1);
             return Some(page);
         }
-        if let Some(page) = inner.map.get(key).copied() {
+        if let Ok(idx) = inner.map.binary_search_by(|probe| probe.0.cmp(key)) {
+            let page = inner.map[idx].1;
             inner.lru.touch(|a| a == key);
             return Some(page);
         }
@@ -68,28 +73,46 @@ impl TLB {
         let mut inner = self.inner.borrow_mut();
         if is_global {
             if let Some(to_remove) = inner.global_lru.insert(vaddress) {
-                inner.global_map.remove(&to_remove);
+                let idx = inner
+                    .global_map
+                    .binary_search_by(|probe| probe.0.cmp(&to_remove))
+                    .unwrap();
+                inner.global_map.remove(idx);
             }
+            let idx = inner
+                .global_map
+                .partition_point(|probe| probe.0 <= vaddress);
             inner.global_map.insert(
-                vaddress,
-                Page {
-                    paddress,
-                    permissions,
-                    walkstate,
-                },
+                idx,
+                (
+                    vaddress,
+                    Page {
+                        paddress,
+                        permissions,
+                        walkstate,
+                    },
+                ),
             );
         } else {
             let key = (walkstate.asid, vaddress);
             if let Some(to_remove) = inner.lru.insert(key) {
-                inner.map.remove(&to_remove);
+                let idx = inner
+                    .map
+                    .binary_search_by(|probe| probe.0.cmp(&to_remove))
+                    .unwrap();
+                inner.map.remove(idx);
             }
+            let idx = inner.map.partition_point(|probe| probe.0 <= key);
             inner.map.insert(
-                key,
-                Page {
-                    paddress,
-                    permissions,
-                    walkstate,
-                },
+                idx,
+                (
+                    key,
+                    Page {
+                        paddress,
+                        permissions,
+                        walkstate,
+                    },
+                ),
             );
         }
     }
