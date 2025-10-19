@@ -539,7 +539,6 @@ struct BlockTranslator<'a> {
 struct TypedRegisterView {
     var: Variable,
     width: Width,
-    shift: Option<Width>,
     extend_to: Option<Width>,
     element: Option<ArrSpec>,
 }
@@ -854,36 +853,28 @@ impl BlockTranslator<'_> {
         self.write_to_simd |= write;
 
         let reg_no = *reg as u32;
-        let (i, width, shift) = if ((Reg::V0 as u32)..=(Reg::V31 as u32)).contains(&reg_no) {
-            (reg_no - (Reg::V0 as u32), Width::_128, None)
+        let (i, width) = if ((Reg::V0 as u32)..=(Reg::V31 as u32)).contains(&reg_no) {
+            (reg_no - (Reg::V0 as u32), Width::_128)
         } else if ((Reg::Q0 as u32)..=(Reg::Q31 as u32)).contains(&reg_no) {
             // Registers Q0-Q31 map directly to registers V0-V31.
-            (reg_no - (Reg::Q0 as u32), Width::_128, None)
+            (reg_no - (Reg::Q0 as u32), Width::_128)
         } else if ((Reg::D0 as u32)..=(Reg::D31 as u32)).contains(&reg_no) {
-            (reg_no - (Reg::D0 as u32), Width::_64, None)
+            (reg_no - (Reg::D0 as u32), Width::_64)
         } else if ((Reg::S0 as u32)..=(Reg::S31 as u32)).contains(&reg_no) {
             // 32 bits
-            let no = reg_no - (Reg::S0 as u32);
-            let shift = if no.is_multiple_of(2) {
-                Some(Width::_32)
-            } else {
-                None
-            };
-            let reg_no = no / 2;
-            (reg_no, Width::_32, shift)
+            (reg_no - (Reg::S0 as u32), Width::_32)
         } else if ((Reg::H0 as u32)..=(Reg::H31 as u32)).contains(&reg_no) {
             // 16 bits
-            (reg_no - (Reg::H0 as u32), Width::_16, None)
+            (reg_no - (Reg::H0 as u32), Width::_16)
         } else {
             // 8 bits
             assert!(((Reg::B0 as u32)..=(Reg::B31 as u32)).contains(&reg_no));
-            (reg_no - (Reg::B0 as u32), Width::_8, None)
+            (reg_no - (Reg::B0 as u32), Width::_8)
         };
         let reg = Reg::from_u32(i + Reg::V0 as u32).unwrap();
         TypedRegisterView {
             var: self.registers[&reg],
             width,
-            shift,
             extend_to: if matches!(width, Width::_128) {
                 None
             } else {
@@ -952,7 +943,6 @@ impl BlockTranslator<'_> {
                 return TypedRegisterView {
                     var: self.registers[&Reg::XZR],
                     width: Width::_32,
-                    shift: None,
                     extend_to: Some(Width::_64),
                     element,
                 }
@@ -961,7 +951,6 @@ impl BlockTranslator<'_> {
                 return TypedRegisterView {
                     var: self.registers[reg],
                     width: Width::_64,
-                    shift: None,
                     extend_to: None,
                     element,
                 };
@@ -970,7 +959,6 @@ impl BlockTranslator<'_> {
         TypedRegisterView {
             var: self.registers[&reg_64],
             width: Width::_32,
-            shift: None,
             extend_to: Some(Width::_64),
             element,
         }
@@ -1198,9 +1186,6 @@ impl BlockTranslator<'_> {
                 if target.width > current_width {
                     value = self.builder.ins().uextend(target.width.into(), value);
                 }
-                if let Some(shift) = target.shift {
-                    value = self.builder.ins().ishl_imm(value, shift as i64);
-                }
                 self.def_view(&target, value);
             }};
             (signed $target:expr, $val:expr$(,)?) => {{
@@ -1219,9 +1204,6 @@ impl BlockTranslator<'_> {
                     if extend_to > current_width {
                         value = self.builder.ins().uextend(extend_to.into(), value);
                     }
-                }
-                if let Some(shift) = target.shift {
-                    value = self.builder.ins().ishl_imm(value, shift as i64);
                 }
                 self.def_view(&target, value);
             }};
