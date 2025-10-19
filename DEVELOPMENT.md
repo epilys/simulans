@@ -3,6 +3,7 @@
 <!-- mdformat-toc start --slug=github --no-anchors --maxlevel=6 --minlevel=1 -->
 
 - [Development](#development)
+  - [Running a Linux guest](#running-a-linux-guest)
   - [Tracing and logs](#tracing-and-logs)
   - [Debugging the VM as a remote `aarch64` target with the integrated GDB stub](#debugging-the-vm-as-a-remote-aarch64-target-with-the-integrated-gdb-stub)
   - [Emulating specific instructions](#emulating-specific-instructions)
@@ -20,6 +21,37 @@
     - [Running the stand-alone test unikernel](#running-the-stand-alone-test-unikernel)
 
 <!-- mdformat-toc end -->
+
+## Running a Linux guest
+
+Since there is no block storage device support yet, we will need to compile a kernel with a rootfs ramdisk.
+
+For a rootfs you can use [Alpine `minirootfs`](https://alpinelinux.org/downloads/).
+Extract the archive, and create the `cpio` archive file:
+
+```sh
+find . -print0 | cpio --null --create --verbose --owner root:root --format=newc > /path/to/initramfs.cpio
+```
+
+Then, compile the kernel with config option:
+
+```text
+CONFIG_INITRAMFS_SOURCE="/path/to/initramfs.cpio"
+```
+
+After building, strip `vmlinux` with `objcopy`.
+
+Example when cross-compiling:
+
+```sh
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j32 && aarch64-linux-gnu-objcopy -O binary vmlinux vmlinux.bin
+```
+
+Running it is straightforward:
+
+```sh
+cargo run ---release -- --entry-point-address 0x40200000 /path/to/vmlinux.bin
+```
 
 ## Tracing and logs
 
