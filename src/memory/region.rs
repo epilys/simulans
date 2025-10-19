@@ -29,14 +29,16 @@ pub enum MemoryBacking {
     /// A mmapped region.
     Mmap(MmappedMemory),
     /// Device memory.
-    Device(Box<dyn DeviceOps>),
+    Device((u64, Box<dyn DeviceOps>)),
 }
 
 impl PartialEq for MemoryBacking {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Mmap(ref a), Self::Mmap(ref b)) => a == b,
-            (Self::Device(ref a), Self::Device(ref b)) => a.id() == b.id(),
+            (Self::Device((ref id_a, ref a)), Self::Device((ref id_b, ref b))) => {
+                (id_a, a.id()) == (id_b, b.id())
+            }
             _ => false,
         }
     }
@@ -137,6 +139,7 @@ impl MemoryRegion {
     pub fn new_io(
         size: MemorySize,
         phys_offset: Address,
+        id: u64,
         ops: Box<dyn DeviceOps>,
     ) -> Result<Self, Errno> {
         if size.get().checked_add(phys_offset.0).is_none() {
@@ -145,7 +148,7 @@ impl MemoryRegion {
         Ok(Self {
             phys_offset,
             size,
-            backing: MemoryBacking::Device(ops),
+            backing: MemoryBacking::Device((id, ops)),
         })
     }
 
@@ -177,9 +180,9 @@ impl MemoryRegion {
 
     #[inline]
     /// Returns reference to device memory.
-    pub fn as_device(&self) -> Option<&dyn DeviceOps> {
-        if let MemoryBacking::Device(ref inner) = self.backing {
-            return Some(inner.as_ref());
+    pub fn as_device(&self) -> Option<(u64, &dyn DeviceOps)> {
+        if let MemoryBacking::Device((ref id, ref inner)) = self.backing {
+            return Some((*id, inner.as_ref()));
         }
         None
     }
@@ -269,7 +272,7 @@ pub mod ops {
                             // size. We don't check for this, so FIXME
                             Ok(unsafe { std::ptr::write_unaligned(destination.cast::<$size>(), value) })
                         }
-                        MemoryBacking::Device(ref ops) => {
+                        MemoryBacking::Device((_, ref ops)) => {
                             ops.write(
                                 address_inside_region,
                                 // [ref:TODO] allow for device 128bit IO?
@@ -330,7 +333,7 @@ pub mod ops {
                             Ok(unsafe { std::ptr::read_unaligned(destination.cast::<$size>()) })
                         }
                         #[allow(clippy::cast_lossless)]
-                        MemoryBacking::Device(ref ops) => match ops.read(
+                        MemoryBacking::Device((_, ref ops)) => match ops.read(
                             address_inside_region,
                             match std::mem::size_of::<$size>() {
                                 1 => Width::_8,

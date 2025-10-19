@@ -110,7 +110,8 @@
 #![allow(
     clippy::multiple_crate_versions,
     clippy::missing_const_for_fn,
-    clippy::cognitive_complexity
+    clippy::cognitive_complexity,
+    clippy::tuple_array_conversions
 )]
 
 #[cfg(not(target_pointer_width = "64"))]

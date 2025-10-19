@@ -143,7 +143,7 @@ impl Armv8AMachine {
         let Some(dev) = self
             .memory
             .iter()
-            .filter_map(|d| d.as_device()?.supports_char_backend())
+            .filter_map(|d| d.as_device()?.1.supports_char_backend())
             .next()
         else {
             return;

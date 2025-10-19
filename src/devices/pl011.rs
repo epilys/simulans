@@ -112,6 +112,7 @@ impl crate::devices::Device for PL011State {
         vec![MemoryRegion::new_io(
             MemorySize::new(0x1000).unwrap(),
             address,
+            0,
             Box::new(PL011MemoryOps {
                 device_id,
                 char_backend,
@@ -531,6 +532,45 @@ impl DeviceOps for PL011MemoryOps {
     #[inline(always)]
     fn supports_char_backend(&'_ self) -> Option<CharBackendOps<'_>> {
         Some(self)
+    }
+
+    #[inline(always)]
+    fn supports_device_tree(&'_ self) -> Option<crate::devices::DeviceTreeOps<'_>> {
+        Some(self)
+    }
+}
+
+impl crate::devices::DeviceTreeExt for PL011MemoryOps {
+    fn kind(&self) -> Option<crate::fdt::NodeKind> {
+        Some(crate::fdt::NodeKind::Stdout("pl011".to_string()))
+    }
+
+    fn insert(
+        &self,
+        ctx: &crate::fdt::FdtContext,
+        writer: &mut crate::fdt::FdtWriter,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (start, len) = ctx
+            .memory_regions
+            .first()
+            .map(|mr| (mr.phys_offset.0, mr.size.get()))
+            .unwrap();
+        assert_eq!(len, 0x1000);
+
+        let pl011_node = writer.begin_node(&format!("pl011@{start:x?}"))?;
+        writer.property_string_list(
+            "clock-names",
+            vec!["uartclk".to_string(), "apb_pclk".to_string()],
+        )?;
+        writer.property_array_u32("clocks", &[ctx.phandle_clk, ctx.phandle_clk])?;
+        writer.property_array_u32("interrupts", &[0x00, 0x01, 0x04])?;
+        writer.property_array_u64("reg", &[start, len])?;
+        writer.property_string_list(
+            "compatible",
+            vec!["arm,pl011".to_string(), "arm,primecell".to_string()],
+        )?;
+        writer.end_node(pl011_node)?;
+        Ok(())
     }
 }
 

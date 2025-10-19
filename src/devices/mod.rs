@@ -39,9 +39,17 @@ pub trait DeviceOps: std::fmt::Debug + Send + Sync {
         // disabled by default
         None
     }
+
+    #[inline(always)]
+    fn supports_device_tree(&'_ self) -> Option<DeviceTreeOps<'_>> {
+        // disabled by default
+        None
+    }
 }
 
+pub use crate::fdt::DeviceTreeExt;
 pub type CharBackendOps<'a> = &'a dyn CharBackendExt;
+pub type DeviceTreeOps<'a> = &'a dyn DeviceTreeExt;
 
 impl PartialEq for &dyn DeviceOps {
     fn eq(&self, other: &Self) -> bool {
@@ -87,6 +95,7 @@ pub mod tube {
             vec![MemoryRegion::new_io(
                 MemorySize::new(0x100).unwrap(),
                 address,
+                0,
                 Box::new(TubeOps { device_id }),
             )
             .unwrap()]

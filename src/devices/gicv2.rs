@@ -12,7 +12,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    devices::{DeviceOps, MemoryTxResult},
+    devices::{DeviceOps, DeviceTreeExt, DeviceTreeOps, MemoryTxResult},
     get_bits,
     machine::interrupts::{FiqSignal, InterruptRequest, Interrupts, IrqSignal},
     memory::{Address, MemoryRegion, MemorySize, Width},
@@ -156,6 +156,9 @@ pub struct GicV2 {
 }
 
 impl GicV2 {
+    const DIST_MEM_ID: u64 = 0;
+    const CPUIF_MEM_ID: u64 = 1;
+
     pub fn new(
         device_id: u64,
         dist: Address,
@@ -221,6 +224,7 @@ impl crate::devices::Device for GicV2 {
             MemoryRegion::new_io(
                 MemorySize::new(0x10000).unwrap(),
                 dist,
+                Self::DIST_MEM_ID,
                 Box::new(GicV2DistMemoryOps {
                     cpu_id: 0,
                     device_id,
@@ -231,6 +235,7 @@ impl crate::devices::Device for GicV2 {
             MemoryRegion::new_io(
                 MemorySize::new(0x10000).unwrap(),
                 cpu_if,
+                Self::CPUIF_MEM_ID,
                 Box::new(GicV2CPUMemoryOps {
                     cpu_id: 0,
                     device_id,
@@ -649,6 +654,62 @@ impl DeviceOps for GicV2DistMemoryOps {
             field,
             value = ?tracing::BinaryHex(value),
         );
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn supports_device_tree(&'_ self) -> Option<DeviceTreeOps<'_>> {
+        Some(self)
+    }
+}
+
+impl DeviceTreeExt for GicV2DistMemoryOps {
+    fn kind(&self) -> Option<crate::fdt::NodeKind> {
+        Some(crate::fdt::NodeKind::InterruptController)
+    }
+
+    fn insert(
+        &self,
+        ctx: &crate::fdt::FdtContext,
+        writer: &mut crate::fdt::FdtWriter,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(ctx.phandle, ctx.phandle_gic);
+        let (dist_start, dist_len) = ctx
+            .memory_regions
+            .iter()
+            .find_map(|mr| {
+                if mr.device_memory_id != GicV2::DIST_MEM_ID {
+                    None
+                } else {
+                    Some((mr.phys_offset.0, mr.size.get()))
+                }
+            })
+            .unwrap();
+        assert_eq!(dist_len, 0x10000);
+        let (cpuif_start, cpuif_len) = ctx
+            .memory_regions
+            .iter()
+            .find_map(|mr| {
+                if mr.device_memory_id != GicV2::CPUIF_MEM_ID {
+                    None
+                } else {
+                    Some((mr.phys_offset.0, mr.size.get()))
+                }
+            })
+            .unwrap();
+        assert_eq!(cpuif_len, 0x10000);
+
+        let intc_node = writer.begin_node(&format!("intc@{dist_start:x?}"))?;
+        writer.property_u32("phandle", ctx.phandle)?;
+        let reg_prop = [dist_start, 0x10000, cpuif_start, 0x10000];
+        writer.property_array_u64("reg", &reg_prop)?;
+        writer.property_string("compatible", "arm,cortex-a15-gic")?;
+        writer.property_null("ranges")?;
+        writer.property_u32("#size-cells", 0x02)?;
+        writer.property_u32("#address-cells", 0x02)?;
+        writer.property_null("interrupt-controller")?;
+        writer.property_u32("#interrupt-cells", 0x03)?;
+        writer.end_node(intc_node)?;
         Ok(())
     }
 }

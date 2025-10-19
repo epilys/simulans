@@ -3,11 +3,11 @@
 
 //! Flattened device-tree (FDT) blob generation.
 
-use std::num::NonZero;
+use std::{collections::BTreeMap, num::NonZero};
 
-use vm_fdt::FdtWriter;
+pub use vm_fdt::FdtWriter;
 
-use crate::memory::{Address, MemoryMap};
+use crate::memory::{Address, MemoryMap, MemorySize};
 
 /// Maximum allowed size in bytes.
 pub const FDT_MAX_SIZE: u64 = 0x200000;
@@ -19,6 +19,37 @@ pub struct Fdt {
     pub bytes: Vec<u8>,
     /// Address to load it into.
     pub address: Address,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct DeviceMemoryDescription {
+    pub device_memory_id: u64,
+    pub phys_offset: Address,
+    pub size: MemorySize,
+}
+
+#[derive(Clone, Debug)]
+pub struct FdtContext {
+    pub phandle_clk: u32,
+    pub phandle_gic: u32,
+    pub phandle: u32,
+    pub memory_regions: Vec<DeviceMemoryDescription>,
+}
+
+#[derive(Clone, Debug)]
+pub enum NodeKind {
+    Stdout(String),
+    InterruptController,
+    Clock,
+}
+
+pub trait DeviceTreeExt: crate::devices::DeviceOps {
+    fn kind(&self) -> Option<NodeKind>;
+    fn insert(
+        &self,
+        ctx: &FdtContext,
+        writer: &mut FdtWriter,
+    ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 /// A builder struct for FDT blobs.
@@ -53,9 +84,33 @@ impl<'a> FdtBuilder<'a> {
     /// Generate binary blob.
     pub fn build(self) -> Result<Fdt, Box<dyn std::error::Error>> {
         let mut fdt = FdtWriter::new()?;
+        let mut stdout_path = None;
+        let mut device_mem_desc: BTreeMap<u64, Vec<DeviceMemoryDescription>> = BTreeMap::new();
+
+        for (r, mem_id, ops, dt_ops) in self
+            .memory_map
+            .iter()
+            .filter_map(|r| Some((r, r.as_device()?)))
+            .map(|(r, (mem_id, ops))| (r, mem_id, ops, ops.supports_device_tree()))
+        {
+            if let Some(dt_ops) = dt_ops {
+                if let (Some(NodeKind::Stdout(node_name)), true) =
+                    (dt_ops.kind(), stdout_path.is_none())
+                {
+                    stdout_path = Some(format!("/{node_name}@{:x?}", r.phys_offset.0));
+                }
+            }
+            device_mem_desc
+                .entry(ops.id())
+                .or_default()
+                .push(DeviceMemoryDescription {
+                    device_memory_id: mem_id,
+                    phys_offset: r.phys_offset,
+                    size: r.size,
+                });
+        }
 
         let root_node = fdt.begin_node("")?;
-        let stdout_path;
         // [ref:TODO][ref:serial]: implement hypervisor calls?
 
         let phandle_clk = 0x8000;
@@ -92,40 +147,23 @@ impl<'a> FdtBuilder<'a> {
             fdt.property_string("compatible", "fixed-clock")?;
             fdt.end_node(clk_node)?;
         }
+        for (ops, dt_ops) in self
+            .memory_map
+            .iter()
+            .filter_map(|r| r.as_device())
+            .filter_map(|(_, ops)| Some((ops, ops.supports_device_tree()?)))
         {
-            let pl011_id = "pl011@9000000";
-            // [ref:FIXME]: get address from device instance
-            stdout_path = Some(format!("/{pl011_id}"));
-            let pl011_node = fdt.begin_node(pl011_id)?;
-            fdt.property_string_list(
-                "clock-names",
-                vec!["uartclk".to_string(), "apb_pclk".to_string()],
-            )?;
-            fdt.property_array_u32("clocks", &[phandle_clk, phandle_clk])?;
-            fdt.property_array_u32("interrupts", &[0x00, 0x01, 0x04])?;
-            fdt.property_array_u64("reg", &[0x9000000, 0x1000])?;
-            fdt.property_string_list(
-                "compatible",
-                vec!["arm,pl011".to_string(), "arm,primecell".to_string()],
-            )?;
-            fdt.end_node(pl011_node)?;
-        }
-
-        {
-            // [ref:FIXME]: get address from device instance
-            let gic_start = 0x8000000;
-
-            let intc_node = fdt.begin_node(&format!("intc@{gic_start:x?}"))?;
-            fdt.property_u32("phandle", phandle_gic)?;
-            let reg_prop = [gic_start, 0x10000, gic_start + 0x10000, 0x10000];
-            fdt.property_array_u64("reg", &reg_prop)?;
-            fdt.property_string("compatible", "arm,cortex-a15-gic")?;
-            fdt.property_null("ranges")?;
-            fdt.property_u32("#size-cells", 0x02)?;
-            fdt.property_u32("#address-cells", 0x02)?;
-            fdt.property_null("interrupt-controller")?;
-            fdt.property_u32("#interrupt-cells", 0x03)?;
-            fdt.end_node(intc_node)?;
+            let ctx = FdtContext {
+                phandle_clk,
+                phandle_gic,
+                phandle: if matches!(dt_ops.kind(), Some(NodeKind::InterruptController)) {
+                    phandle_gic
+                } else {
+                    0
+                },
+                memory_regions: device_mem_desc.get(&ops.id()).cloned().unwrap_or_default(),
+            };
+            dt_ops.insert(&ctx, &mut fdt)?;
         }
         {
             let cpus_node = fdt.begin_node("cpus")?;
