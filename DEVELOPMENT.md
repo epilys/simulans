@@ -18,7 +18,6 @@
       - [With `xtask` utility](#with-xtask-utility)
       - [Manually](#manually)
     - [Generating binary from assembly code, manually](#generating-binary-from-assembly-code-manually)
-    - [Running the stand-alone test unikernel](#running-the-stand-alone-test-unikernel)
 
 <!-- mdformat-toc end -->
 
@@ -93,15 +92,15 @@ Running a binary with `--gdb-stub-path <PATH_TO_GDB_SOCKET>` arguments will crea
 You can then connect to the stub server by launching `gdb-multiarch` and running the gdb command `target remote <PATH_TO_GDB_SOCKET>`.
 
 ```sh
-$ cargo run -- ./test_kernel.bin --gdb-stub-path ./gdb
+$ cargo run -- ./kernel.bin --gdb-stub-path ./gdb
 [INFO  simulans::gdb] Waiting for a GDB connection on ./gdb...
 ```
 
 From another terminal:
 
 ```sh
-$ gdb-multiarch ./test_kernel
-Reading symbols from ./test_kernel....
+$ gdb-multiarch ./kernel
+Reading symbols from ./kernel....
 (gdb) target remote ./gdb
 Remote debugging using ./gdb
 0x0000000000000004 in ?? ()
@@ -212,7 +211,7 @@ Example gdb session to demonstrate this:
 (gdb) tbreak lookup_block
 Temporary breakpoint 1 at 0x970aca: file src/jit.rs, line 41.
 (gdb) run
-Starting program: target/debug/simulans -vvv ./test_kernel/target/aarch64-unknown-none/release/test_kernel.bin
+Starting program: target/debug/simulans -vvv ./kernel/target/aarch64-unknown-none/release/kernel.bin
 Temporary breakpoint 1, simulans::jit::lookup_block (context=0x5555568c1290, machine=0x5555568b2bd0) at src/jit.rs:41
 41          let pc: u64 = machine.pc;
 (gdb) print machine
@@ -289,14 +288,4 @@ Pass the `program.bin` path as an argument when you run the application e.g.
 
 ```shell
 cargo run -- ./program.bin
-```
-
-### Running the stand-alone test unikernel
-
-A unikernel in Rust that prints a "hello world" message and halts is included in the `test_kernel/` sub-directory.
-
-After building it you can run it by passing the unikernel path as an argument e.g.:
-
-```shell
-cargo run -- ./test_kernel/target/aarch64-unknown-none/release/test_kernel.bin
 ```
