@@ -12,9 +12,10 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{
+    devices::{DeviceOps, MemoryTxResult},
     get_bits,
     machine::interrupts::{FiqSignal, InterruptRequest, Interrupts, IrqSignal},
-    memory::{Address, DeviceMemoryOps, MemoryRegion, MemorySize, MemoryTxResult, Width},
+    memory::{Address, MemoryRegion, MemorySize, Width},
     set_bits, tracing,
 };
 
@@ -250,7 +251,7 @@ struct GicV2DistMemoryOps {
 
 // Note: The GICD_IPRIORITYR, GICD_ITARGETSR, GICD_CPENDSGIR, ad GICD_SPENDSGIR
 // registers support byte accesses
-impl DeviceMemoryOps for GicV2DistMemoryOps {
+impl DeviceOps for GicV2DistMemoryOps {
     fn id(&self) -> u64 {
         self.device_id
     }
@@ -659,7 +660,7 @@ struct GicV2CPUMemoryOps {
     state: Arc<Mutex<State>>,
 }
 
-impl DeviceMemoryOps for GicV2CPUMemoryOps {
+impl DeviceOps for GicV2CPUMemoryOps {
     fn id(&self) -> u64 {
         self.device_id
     }

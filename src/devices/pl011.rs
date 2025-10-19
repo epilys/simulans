@@ -6,14 +6,12 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{
+    devices::{CharBackendExt, CharBackendOps, DeviceOps, MemoryTxResult},
     machine::{
         interrupts::{InterruptGenerator, InterruptRequest, Interrupts},
         CharBackendWriter,
     },
-    memory::{
-        Address, CharBackendExt, CharBackendOps, DeviceMemoryOps, MemoryRegion, MemorySize,
-        MemoryTxResult, Width,
-    },
+    memory::{Address, MemoryRegion, MemorySize, Width},
     tracing,
 };
 
@@ -452,7 +450,7 @@ struct PL011MemoryOps {
     irq_generator: InterruptGenerator,
 }
 
-impl DeviceMemoryOps for PL011MemoryOps {
+impl DeviceOps for PL011MemoryOps {
     fn id(&self) -> u64 {
         self.device_id
     }

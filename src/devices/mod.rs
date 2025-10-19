@@ -8,7 +8,8 @@
 pub mod gicv2;
 pub mod pl011;
 pub mod timer;
-use crate::memory::MemoryRegion;
+
+use crate::memory::{MemoryRegion, Width};
 
 /// Trait for device operations.
 pub trait Device: std::fmt::Debug {
@@ -18,12 +19,45 @@ pub trait Device: std::fmt::Debug {
     fn into_memory_regions(self) -> Vec<MemoryRegion>;
 }
 
+pub type MemoryTxResult<T = ()> = Result<T, crate::cpu_state::ExitRequest>;
+
+pub trait CharBackendExt: DeviceOps {
+    fn receive(&self, buf: &[u8]);
+}
+
+/// Trait for device memory operations.
+pub trait DeviceOps: std::fmt::Debug + Send + Sync {
+    /// Returns unique device ID.
+    fn id(&self) -> u64;
+    /// Performs a read.
+    fn read(&self, address_inside_region: u64, width: Width) -> MemoryTxResult<u64>;
+    /// Performs a write.
+    fn write(&self, address_inside_region: u64, value: u64, width: Width) -> MemoryTxResult;
+
+    #[inline(always)]
+    fn supports_char_backend(&'_ self) -> Option<CharBackendOps<'_>> {
+        // disabled by default
+        None
+    }
+}
+
+pub type CharBackendOps<'a> = &'a dyn CharBackendExt;
+
+impl PartialEq for &dyn DeviceOps {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
+    }
+}
+
+impl Eq for &dyn DeviceOps {}
+
 pub mod tube {
     //! Tube testing device (Memory mapped register)
 
     use crate::{
         cpu_state::ExitRequest,
-        memory::{Address, DeviceMemoryOps, MemoryRegion, MemorySize, MemoryTxResult, Width},
+        devices::{DeviceOps, MemoryTxResult},
+        memory::{Address, MemoryRegion, MemorySize, Width},
     };
 
     #[derive(Debug)]
@@ -64,7 +98,7 @@ pub mod tube {
         device_id: u64,
     }
 
-    impl DeviceMemoryOps for TubeOps {
+    impl DeviceOps for TubeOps {
         fn id(&self) -> u64 {
             self.device_id
         }

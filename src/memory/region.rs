@@ -18,39 +18,10 @@ pub use linux::MmappedMemory;
 pub use macos::MmappedMemory;
 use nix::errno::Errno;
 
-use crate::memory::{Address, MemorySize, Width};
-
-pub type MemoryTxResult<T = ()> = Result<T, crate::cpu_state::ExitRequest>;
-
-pub trait CharBackendExt: DeviceMemoryOps {
-    fn receive(&self, buf: &[u8]);
-}
-
-/// Trait for device memory operations.
-pub trait DeviceMemoryOps: std::fmt::Debug + Send + Sync {
-    /// Returns unique device ID.
-    fn id(&self) -> u64;
-    /// Performs a read.
-    fn read(&self, address_inside_region: u64, width: Width) -> MemoryTxResult<u64>;
-    /// Performs a write.
-    fn write(&self, address_inside_region: u64, value: u64, width: Width) -> MemoryTxResult;
-
-    #[inline(always)]
-    fn supports_char_backend(&'_ self) -> Option<CharBackendOps<'_>> {
-        // disabled by default
-        None
-    }
-}
-
-pub type CharBackendOps<'a> = &'a dyn CharBackendExt;
-
-impl PartialEq for &dyn DeviceMemoryOps {
-    fn eq(&self, other: &Self) -> bool {
-        self.id() == other.id()
-    }
-}
-
-impl Eq for &dyn DeviceMemoryOps {}
+use crate::{
+    devices::DeviceOps,
+    memory::{Address, MemorySize, Width},
+};
 
 #[derive(Debug)]
 /// Kind of memory backing.
@@ -58,7 +29,7 @@ pub enum MemoryBacking {
     /// A mmapped region.
     Mmap(MmappedMemory),
     /// Device memory.
-    Device(Box<dyn DeviceMemoryOps>),
+    Device(Box<dyn DeviceOps>),
 }
 
 impl PartialEq for MemoryBacking {
@@ -166,7 +137,7 @@ impl MemoryRegion {
     pub fn new_io(
         size: MemorySize,
         phys_offset: Address,
-        ops: Box<dyn DeviceMemoryOps>,
+        ops: Box<dyn DeviceOps>,
     ) -> Result<Self, Errno> {
         if size.get().checked_add(phys_offset.0).is_none() {
             return Err(Errno::E2BIG);
@@ -206,7 +177,7 @@ impl MemoryRegion {
 
     #[inline]
     /// Returns reference to device memory.
-    pub fn as_device(&self) -> Option<&dyn DeviceMemoryOps> {
+    pub fn as_device(&self) -> Option<&dyn DeviceOps> {
         if let MemoryBacking::Device(ref inner) = self.backing {
             return Some(inner.as_ref());
         }
