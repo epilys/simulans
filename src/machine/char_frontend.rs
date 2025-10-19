@@ -7,7 +7,7 @@ use std::sync::{
 };
 
 use nix::{
-    fcntl::{fcntl, FcntlArg},
+    fcntl::{fcntl, FcntlArg, OFlag},
     sys::termios::{tcgetattr, tcsetattr, Termios},
 };
 
@@ -25,7 +25,7 @@ impl std::fmt::Debug for CharBackendWriter {
 }
 
 struct StdioFrontend {
-    oldtty: Option<(Termios, i32, i32)>,
+    oldtty: Option<(Termios, OFlag, OFlag)>,
 }
 
 enum Frontend {
@@ -51,14 +51,8 @@ impl Drop for StdioFrontend {
         let stdout = std::io::stdout();
 
         _ = tcsetattr(&stdin, nix::sys::termios::SetArg::TCSANOW, &oldtty);
-        _ = fcntl(
-            &stdin,
-            FcntlArg::F_SETFL(nix::fcntl::OFlag::from_bits(old_fd0_flags).unwrap()),
-        );
-        _ = fcntl(
-            &stdout,
-            FcntlArg::F_SETFL(nix::fcntl::OFlag::from_bits(old_fd1_flags).unwrap()),
-        );
+        _ = fcntl(&stdin, FcntlArg::F_SETFL(old_fd0_flags));
+        _ = fcntl(&stdout, FcntlArg::F_SETFL(old_fd1_flags));
     }
 }
 
@@ -66,8 +60,8 @@ impl CharBackend {
     pub fn new_stdio() -> Self {
         let mut stdin = std::io::stdin();
         let stdout = std::io::stdout();
-        let old_fd0_flags = fcntl(&stdin, FcntlArg::F_GETFL).unwrap();
-        let old_fd1_flags = fcntl(&stdout, FcntlArg::F_GETFL).unwrap();
+        let old_fd0_flags = OFlag::from_bits_truncate(fcntl(&stdin, FcntlArg::F_GETFL).unwrap());
+        let old_fd1_flags = OFlag::from_bits_truncate(fcntl(&stdout, FcntlArg::F_GETFL).unwrap());
         let oldtty = tcgetattr(&stdin).unwrap();
         {
             use nix::sys::termios::{ControlFlags, InputFlags, LocalFlags, OutputFlags};
