@@ -44,3 +44,6 @@ default = ["accurate-pc", "gdbstub"]
 accurate-pc = []
 # Add support for running a guest under a gdbstub server listening on a Unix socket. See output of `--help` for how to use.
 gdbstub = ["dep:gdbstub", "dep:gdbstub_arch"]
+
+[profile.release]
+debug = "full"
