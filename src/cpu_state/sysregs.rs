@@ -139,6 +139,7 @@ pub enum SysReg {
     CurrentEL,
     SpSel,
     TCO,
+    UNDEFINED,
     /// `PMUSERENR_EL0`, Performance Monitors User Enable Register
     PMUSERENR_EL0,
     /// `AMUSERENR_EL0`, Activity Monitors User Enable Register
@@ -155,6 +156,7 @@ pub enum SysReg {
     TPIDR_EL0,
     TPIDRRO_EL0,
     TPIDR_EL1,
+    TPIDR_EL2,
     CONTEXTIDR_EL1,
     ESR_EL1,
     ESR_EL2,
@@ -600,7 +602,8 @@ impl From<SysRegEncoding> for SysReg {
                 o2: 0b011,
             } => Self::TCR2_EL1,
             _other => {
-                unimplemented!("unimplemented sysreg encoding: {:?}", reg)
+                // unimplemented!("unimplemented sysreg encoding: {:?}", reg)
+                Self::UNDEFINED
             }
         }
     }
@@ -628,6 +631,7 @@ impl From<&bad64::SysReg> for SysReg {
             bad64::SysReg::TPIDR_EL0 => Self::TPIDR_EL0,
             bad64::SysReg::TPIDRRO_EL0 => Self::TPIDRRO_EL0,
             bad64::SysReg::TPIDR_EL1 => Self::TPIDR_EL1,
+            bad64::SysReg::TPIDR_EL2 => Self::TPIDR_EL2,
             bad64::SysReg::CONTEXTIDR_EL1 => Self::CONTEXTIDR_EL1,
             bad64::SysReg::ESR_EL1 => Self::ESR_EL1,
             bad64::SysReg::ESR_EL2 => Self::ESR_EL2,
@@ -697,7 +701,8 @@ impl From<&bad64::SysReg> for SysReg {
             bad64::SysReg::SPSR_EL2 => Self::SPSR_EL2,
             bad64::SysReg::SPSR_EL3 => Self::SPSR_EL3,
             _other => {
-                unimplemented!("unimplemented sysreg: {:?}", reg)
+                // unimplemented!("unimplemented sysreg: {:?}", reg)
+                Self::UNDEFINED
             }
         }
     }

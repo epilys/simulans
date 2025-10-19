@@ -47,7 +47,7 @@ impl BlockTranslator<'_> {
         let value = self.builder.ins().bor(n, z);
         let value = self.builder.ins().bor(value, c);
         let value = self.builder.ins().bor(value, v);
-        self.write_sysreg(&SysReg::NZCV, value);
+        self.write_sysreg(&SysReg::NZCV, value).unwrap();
     }
 
     /// Perform `AddWithCarry` operation.
@@ -92,7 +92,7 @@ impl BlockTranslator<'_> {
     pub fn condition_holds(&mut self, condition: bad64::Condition) -> Value {
         use bad64::Condition;
 
-        let var = self.read_sysreg(&SysReg::NZCV);
+        let var = self.read_sysreg(&SysReg::NZCV).unwrap();
 
         macro_rules! cmp_pstate {
             (PSTATE.N) => {{

@@ -14,7 +14,7 @@ use codegen::ir::{
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use num_traits::cast::FromPrimitive;
 
 use crate::{
@@ -371,20 +371,84 @@ impl<'j> JitContext<'j> {
             registers: IndexMap::new(),
             sys_registers: IndexMap::new(),
             loopback_blocks: IndexMap::default(),
+            pending_loopback_blocks: IndexMap::default(),
             writebacks: vec![],
         };
+        const MAX_INSN: u64 = 150;
         // Emit code to load register values into variables.
         trans.load_cpu_state(true);
         if !self.single_step {
+            let mut first_cnt = 0;
+            let mut last_insn_addr = program_counter;
+            let max_range = program_counter..=(program_counter + MAX_INSN * 4);
+
+            let mut pending_labels = IndexSet::new();
+
+            for ins in bad64::disasm(code_area, program_counter) {
+                let Ok(insn) = ins else {
+                    break;
+                };
+                if first_cnt >= MAX_INSN {
+                    break;
+                }
+                last_insn_addr = insn.address();
+                pending_labels.shift_remove(&last_insn_addr);
+                first_cnt += 1;
+                use bad64::Op;
+                let label_idx = match insn.op() {
+                    Op::CBNZ | Op::CBZ => Some(1),
+                    Op::TBNZ | Op::TBZ => Some(2),
+                    Op::B
+                    | Op::BL
+                    | Op::B_AL
+                    | Op::B_CC
+                    | Op::B_CS
+                    | Op::B_EQ
+                    | Op::B_GE
+                    | Op::B_GT
+                    | Op::B_HI
+                    | Op::B_LE
+                    | Op::B_LS
+                    | Op::B_LT
+                    | Op::B_MI
+                    | Op::B_NE
+                    | Op::B_NV
+                    | Op::B_PL
+                    | Op::B_VC
+                    | Op::B_VS => Some(0),
+                    Op::UDF | Op::RET | Op::ERET if pending_labels.is_empty() => break,
+                    _ => None,
+                };
+                if let Some(label_idx) = label_idx {
+                    let label = match insn.operands()[label_idx] {
+                        bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
+                        _ => unreachable!(),
+                    };
+                    if max_range.contains(&label) {
+                        pending_labels.insert(label);
+                    }
+                }
+            }
+
+            let first_pass_range = program_counter..=last_insn_addr;
+
+            let mut cnt = 0;
+
             for ins in bad64::disasm(code_area, program_counter) {
                 let Ok(ins) = ins else {
                     break;
                 };
+                if cnt == first_cnt {
+                    break;
+                }
+                cnt += 1;
                 use bad64::Op;
                 let label_idx = match ins.op() {
                     Op::CBNZ | Op::CBZ => 1,
                     Op::TBNZ | Op::TBZ => 2,
-                    Op::B_AL
+                    Op::B
+                    | Op::BL
+                    | Op::B_AL
                     | Op::B_CC
                     | Op::B_CS
                     | Op::B_EQ
@@ -400,31 +464,19 @@ impl<'j> JitContext<'j> {
                     | Op::B_PL
                     | Op::B_VC
                     | Op::B_VS => 0,
-                    Op::BRK
-                    | Op::HVC
-                    | Op::SVC
-                    | Op::WFI
-                    | Op::WFIT
-                    | Op::WFE
-                    | Op::B
-                    | Op::BR
-                    | Op::BL
-                    | Op::BLR
-                    | Op::RET
-                    | Op::UDF
-                    | Op::YIELD
-                    | Op::ISB
-                    | Op::ERET => break,
-                    _ => continue,
+                    _ => {
+                        continue;
+                    }
                 };
 
                 let label = match ins.operands()[label_idx] {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     _ => unreachable!(),
                 };
-                if label >= program_counter && label < ins.address() {
+                if first_pass_range.contains(&label) {
                     let ins_block = trans.builder.create_block();
                     trans.loopback_blocks.insert(label, ins_block);
+                    trans.pending_loopback_blocks.insert(label, ins_block);
                 }
             }
         }
@@ -474,7 +526,7 @@ impl<'j> JitContext<'j> {
                                 break;
                             }
                             count += 1;
-                            if count == 12_000 {
+                            if count == MAX_INSN {
                                 next_pc = Some(BlockExit::Branch(
                                     trans.builder.ins().iconst(I64, insn.address() as i64 + 4),
                                 ));
@@ -493,16 +545,25 @@ impl<'j> JitContext<'j> {
             _ = trans.throw_undefined();
             BlockExit::Exception
         });
+        let pending_loopback_blocks = std::mem::take(&mut trans.pending_loopback_blocks);
+        let loopback_blocks = std::mem::take(&mut trans.loopback_blocks);
         trans.direct_exit(block_exit);
+
+        for (label, block) in pending_loopback_blocks {
+            trans.builder.switch_to_block(block);
+            let label_value = trans.builder.ins().iconst(I64, label as i64);
+            trans.direct_exit(BlockExit::Branch(label_value));
+        }
+
+        for (_, block) in loopback_blocks {
+            trans.builder.seal_block(block);
+        }
+
         let BlockTranslator {
-            mut builder,
-            loopback_blocks,
+            builder,
             writebacks,
             ..
         } = trans;
-        for (_, block) in loopback_blocks.into_iter() {
-            builder.seal_block(block);
-        }
         // abort if writebacks is not empty, that means we have forgotten to perform
         // them in `translate_instruction`.
         assert!(writebacks.is_empty(), "{writebacks:?}");
@@ -527,6 +588,7 @@ struct BlockTranslator<'a> {
     registers: IndexMap<bad64::Reg, Variable>,
     sys_registers: IndexMap<SysReg, Variable>,
     loopback_blocks: IndexMap<u64, Block>,
+    pending_loopback_blocks: IndexMap<u64, Block>,
     /// Register write backs (load/store pre/post index increments)
     ///
     /// They are performed after the load/store are finished and any destination
@@ -787,9 +849,29 @@ impl BlockTranslator<'_> {
             Operand::Label(Imm::Signed(imm)) => self.builder.ins().iconst(I64, *imm),
             Operand::ImplSpec { o0, o1, cm, cn, o2 } => {
                 let (o0, o1, cm, cn, o2) = (*o0, *o1, *cm, *cn, *o2);
-                self.read_sysreg(&SysRegEncoding { o0, o1, cm, cn, o2 }.into())
+                if let Ok(val) = self.read_sysreg(&SysRegEncoding { o0, o1, cm, cn, o2 }.into()) {
+                    val
+                } else {
+                    _ = self.throw_undefined();
+                    self.direct_exit(BlockExit::Exception);
+                    let merge_block = self.builder.create_block();
+                    self.builder.switch_to_block(merge_block);
+                    self.builder.seal_block(merge_block);
+                    self.builder.ins().iconst(I64, 0)
+                }
             }
-            Operand::SysReg(reg) => self.read_sysreg(&reg.into()),
+            Operand::SysReg(reg) => {
+                if let Ok(val) = self.read_sysreg(&reg.into()) {
+                    val
+                } else {
+                    _ = self.throw_undefined();
+                    self.direct_exit(BlockExit::Exception);
+                    let merge_block = self.builder.create_block();
+                    self.builder.switch_to_block(merge_block);
+                    self.builder.seal_block(merge_block);
+                    self.builder.ins().iconst(I64, 0)
+                }
+            }
             Operand::MemExt {
                 regs: [ref address_reg, ref offset_reg],
                 shift,
@@ -1174,6 +1256,9 @@ impl BlockTranslator<'_> {
         if let Some(loopback_block) = self.loopback_blocks.get(&instruction.address()).copied() {
             self.builder.ins().jump(loopback_block, &[]);
             self.builder.switch_to_block(loopback_block);
+            self.pending_loopback_blocks
+                .shift_remove(&instruction.address())
+                .unwrap();
         }
         if cfg!(feature = "accurate-pc") {
             self.store_pc(None);
@@ -1565,6 +1650,11 @@ impl BlockTranslator<'_> {
                 panic!("unexpected lhs in {op:?}: {other:?}. Instruction: {instruction:?}")
             }};
         }
+        macro_rules! todo {
+            () => {{
+                return self.throw_undefined();
+            }};
+        }
         match op {
             Op::NOP => {}
             // Special registers
@@ -1575,19 +1665,23 @@ impl BlockTranslator<'_> {
                 if !matches!(width, Width::_64) {
                     value = self.builder.ins().uextend(I64, value);
                 }
-                match instruction.operands()[0] {
+                let result = match instruction.operands()[0] {
                     bad64::Operand::SysReg(bad64::SysReg::DAIFSET)
                         if !matches!(&instruction.operands()[1], bad64::Operand::Imm32 { .. }) =>
                     {
                         // bad64 decodes DAIF as DAIFSet, fix it manually.
                         value = self.builder.ins().ushr_imm(value, 6);
                         sysregs::DAIF::generate_write(self, value);
+                        Ok(())
                     }
                     bad64::Operand::SysReg(ref reg) => self.write_sysreg(&reg.into(), value),
                     bad64::Operand::ImplSpec { o0, o1, cm, cn, o2 } => {
                         self.write_sysreg(&SysRegEncoding { o0, o1, cm, cn, o2 }.into(), value)
                     }
                     other => unexpected_operand!(other),
+                };
+                if result.is_err() {
+                    return self.throw_undefined();
                 }
             }
             Op::MRS => {
@@ -2037,8 +2131,15 @@ impl BlockTranslator<'_> {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     other => unexpected_operand!(other),
                 };
-                let next_pc = self.builder.ins().iconst(I64, label as i64);
-                return self.unconditional_jump_epilogue(next_pc);
+                if let Some(loopback_block) = self.loopback_blocks.get(&label).copied() {
+                    self.builder.ins().jump(loopback_block, &[]);
+                } else {
+                    let label_value = self.builder.ins().iconst(I64, label as i64);
+                    self.direct_exit(BlockExit::Branch(label_value));
+                }
+                let merge_block = self.builder.create_block();
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
             }
             Op::BR => {
                 // This instruction branches unconditionally to an address in a register, with a
@@ -2047,14 +2148,20 @@ impl BlockTranslator<'_> {
                 // constant boolean branch_conditional = FALSE;
                 // BranchTo(target, BranchType_INDIR, branch_conditional);
                 let next_pc = self.translate_operand(&instruction.operands()[0]);
-                return self.unconditional_jump_epilogue(next_pc);
+                self.direct_exit(BlockExit::Branch(next_pc));
+                let merge_block = self.builder.create_block();
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
             }
             Op::RET => {
                 let next_pc = match instruction.operands().first() {
                     Some(reg) => self.translate_operand(reg),
                     None => self.reg_to_value(&bad64::Reg::X30, None),
                 };
-                return self.unconditional_jump_epilogue(next_pc);
+                self.direct_exit(BlockExit::Branch(next_pc));
+                let merge_block = self.builder.create_block();
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
             }
             // Compares
             Op::CBNZ => {
@@ -2490,15 +2597,25 @@ impl BlockTranslator<'_> {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     other => unexpected_operand!(other),
                 };
-                let label_value = self.builder.ins().iconst(I64, label as i64);
-                return self.unconditional_jump_epilogue(label_value);
+                if let Some(loopback_block) = self.loopback_blocks.get(&label).copied() {
+                    self.builder.ins().jump(loopback_block, &[]);
+                } else {
+                    let label_value = self.builder.ins().iconst(I64, label as i64);
+                    self.direct_exit(BlockExit::Branch(label_value));
+                }
+                let merge_block = self.builder.create_block();
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
             }
             Op::BLR => {
                 let next_pc = self.translate_operand(&instruction.operands()[0]);
                 let link_pc = self.builder.ins().iconst(I64, (self.address + 4) as i64);
                 let link_register = self.reg_to_var(&bad64::Reg::X30, None, true);
                 self.def_view(&link_register, link_pc);
-                return self.unconditional_jump_epilogue(next_pc);
+                self.direct_exit(BlockExit::Branch(next_pc));
+                let merge_block = self.builder.create_block();
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
             }
             Op::BLRAA => todo!(),
             Op::BLRAAZ => todo!(),
@@ -2628,7 +2745,7 @@ impl BlockTranslator<'_> {
                         new_nzcv = self.builder.ins().uextend(I64, new_nzcv);
                     }
                     new_nzcv = self.builder.ins().ishl_imm(new_nzcv, 28);
-                    self.write_sysreg(&SysReg::NZCV, new_nzcv);
+                    self.write_sysreg(&SysReg::NZCV, new_nzcv).unwrap();
                 }
                 self.builder.ins().jump(merge_block, &[]);
                 self.builder.switch_to_block(merge_block);
@@ -2672,7 +2789,7 @@ impl BlockTranslator<'_> {
                         new_nzcv = self.builder.ins().uextend(I64, new_nzcv);
                     }
                     new_nzcv = self.builder.ins().ishl_imm(new_nzcv, 28);
-                    self.write_sysreg(&SysReg::NZCV, new_nzcv);
+                    self.write_sysreg(&SysReg::NZCV, new_nzcv).unwrap();
                 }
                 self.builder.ins().jump(merge_block, &[]);
                 self.builder.switch_to_block(merge_block);
@@ -5072,22 +5189,6 @@ impl BlockTranslator<'_> {
             }
         }
         ControlFlow::Continue(())
-    }
-
-    /// Save state and exit to lookup function
-    fn unconditional_jump_epilogue(&mut self, dest_label: Value) -> ControlFlow<Option<BlockExit>> {
-        // [ref:can_trap]: Check `dest_label` alignment.
-        {
-            let pc = self.builder.ins().iconst(I64, self.address as i64);
-            self.builder.ins().store(
-                TRUSTED_MEMFLAGS,
-                pc,
-                self.machine_ptr,
-                std::mem::offset_of!(Armv8AMachine, prev_pc) as i32,
-            );
-        }
-        self.store_pc(Some(dest_label));
-        ControlFlow::Break(Some(BlockExit::Branch(dest_label)))
     }
 
     /// Save state and call a simulans function that stops execution

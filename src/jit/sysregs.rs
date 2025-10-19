@@ -36,18 +36,19 @@ macro_rules! register_field {
 
 impl BlockTranslator<'_> {
     #[inline]
-    fn sysreg_to_var(&mut self, reg: &SysReg, write: bool) -> &Variable {
+    fn sysreg_to_var(&mut self, reg: &SysReg, write: bool) -> Result<&Variable, ()> {
         self.write_to_sysreg |= write;
-        self.sys_registers.get(reg).unwrap_or_else(|| {
-            unimplemented!(
-                "{op} unimplemented sysreg {reg:?}",
-                op = if write { "write" } else { "read" }
-            );
-        })
+        self.sys_registers.get(reg).ok_or_else(|| ())
+        // self.sys_registers.get(reg).unwrap_or_else(|| {
+        //     unimplemented!(
+        //         "{op} unimplemented sysreg {reg:?}",
+        //         op = if write { "write" } else { "read" }
+        //     );
+        // })
     }
 
-    pub fn read_sysreg(&mut self, reg: &SysReg) -> Value {
-        match reg {
+    pub fn read_sysreg(&mut self, reg: &SysReg) -> Result<Value, ()> {
+        Ok(match reg {
             SysReg::NZCV => NZCV::generate_read(self),
             SysReg::DAIF => DAIF::generate_read(self),
             SysReg::CurrentEL => CurrentEl::generate_read(self),
@@ -72,6 +73,7 @@ impl BlockTranslator<'_> {
             SysReg::TPIDR_EL0 => register_field!(read self, mmu_registers.tpidr_el0),
             SysReg::TPIDRRO_EL0 => register_field!(read self, mmu_registers.tpidrro_el0),
             SysReg::TPIDR_EL1 => register_field!(read self, mmu_registers.tpidr_el1),
+            SysReg::TPIDR_EL2 => register_field!(read self, mmu_registers.tpidr_el2),
             SysReg::CONTEXTIDR_EL1 => register_field!(read self, mmu_registers.contextidr_el1),
             SysReg::ESR_EL1 => register_field!(read self, exception_registers.esr_el1),
             SysReg::ESR_EL2 => register_field!(read self, exception_registers.esr_el2),
@@ -181,10 +183,10 @@ impl BlockTranslator<'_> {
             SysReg::RNDR => RNDRRS::generate_read(self),
             SysReg::TPIDR2_EL0 => register_field!(read self, mmu_registers.tpidr2_el0),
             _ => {
-                let var = *self.sysreg_to_var(reg, false);
+                let var = *self.sysreg_to_var(reg, false)?;
                 self.builder.use_var(var)
             }
-        }
+        })
     }
 
     fn timer_read(&mut self, reg: timer::RegisterID) -> Value {
@@ -229,7 +231,7 @@ impl BlockTranslator<'_> {
         self.builder.inst_results(call);
     }
 
-    pub fn write_sysreg(&mut self, reg: &SysReg, value: Value) {
+    pub fn write_sysreg(&mut self, reg: &SysReg, value: Value) -> Result<(), ()> {
         self.write_to_sysreg = true;
         match reg {
             SysReg::NZCV => NZCV::generate_write(self, value),
@@ -261,6 +263,7 @@ impl BlockTranslator<'_> {
             SysReg::TPIDR_EL0 => register_field!(write self, value, mmu_registers.tpidr_el0),
             SysReg::TPIDRRO_EL0 => register_field!(write self, value, mmu_registers.tpidrro_el0),
             SysReg::TPIDR_EL1 => register_field!(write self, value, mmu_registers.tpidr_el1),
+            SysReg::TPIDR_EL2 => register_field!(write self, value, mmu_registers.tpidr_el2),
             SysReg::ESR_EL1 => register_field!(write self, value, exception_registers.esr_el1),
             SysReg::ESR_EL2 => register_field!(write self, value, exception_registers.esr_el2),
             SysReg::ESR_EL3 => register_field!(write self, value, exception_registers.esr_el3),
@@ -331,10 +334,11 @@ impl BlockTranslator<'_> {
             SysReg::TCR2_EL1 => {}
             SysReg::TPIDR2_EL0 => register_field!(write self, value, mmu_registers.tpidr2_el0),
             _ => {
-                let target = *self.sysreg_to_var(reg, true);
+                let target = *self.sysreg_to_var(reg, true)?;
                 self.builder.def_var(target, value);
             }
         }
+        Ok(())
     }
 }
 

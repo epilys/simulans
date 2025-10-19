@@ -50,6 +50,7 @@ pub struct MMURegisterFile {
     pub tpidrro_el0: u64,
     /// Thread ID Register, privileged accesses only
     pub tpidr_el1: u64,
+    pub tpidr_el2: u64,
 }
 
 #[bitsize(64)]
