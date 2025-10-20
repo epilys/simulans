@@ -1127,6 +1127,26 @@ pub extern "C" fn mem_zero(
     assert!(size <= MAX_ZERO_BLOCK_SIZE);
     let mut address = Address(align(input_address.0, size));
     let accessdesc = AccessDescriptor::new(false, &machine.cpu_state.PSTATE(), AccessType::DCZero);
+    {
+        let ResolvedAddress {
+            mem_region: _,
+            address_inside_region,
+            physical,
+        } = match machine.translate_address(address, preferred_exception_return, true, accessdesc) {
+            Ok(r) => r,
+            Err(exit_request) => {
+                *machine.cpu_state.exit_request.lock().unwrap() = Some(exit_request);
+                return false;
+            }
+        };
+        let mem_region = machine.memory.find_region_mut(physical).unwrap();
+        if let Some(mmap) = mem_region.as_mmap_mut() {
+            if mmap[address_inside_region as usize..].len() >= size as usize {
+                mmap[address_inside_region as usize..][..size as usize].fill(0);
+                return true;
+            }
+        }
+    }
 
     let double_words = size / 8;
     let bytes = size % 8;
