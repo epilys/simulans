@@ -404,7 +404,6 @@ impl<'j> JitContext<'j> {
                     | Op::HVC
                     | Op::SVC
                     | Op::WFI
-                    | Op::WFIT
                     | Op::WFE
                     | Op::B
                     | Op::BR
@@ -2190,7 +2189,7 @@ impl BlockTranslator<'_> {
                 let width = self.operand_width(&instruction.operands()[1]);
                 write_to_register!(target, TypedValue { value, width });
             }
-            Op::ASR => {
+            Op::ASRV | Op::ASR => {
                 // Arithmetic shift right (alias of SBFM)
                 // [ref:needs_unit_test]
                 let target = get_destination_register!();
@@ -2322,16 +2321,14 @@ impl BlockTranslator<'_> {
                 );
                 self.update_nzcv(nzcv);
             }
-            Op::ADCLB => todo!(),
-            Op::ADCLT => todo!(),
-            Op::ADDG => todo!(),
-            Op::ADDHA => todo!(),
-            Op::ADDHN => todo!(),
-            Op::ADDHN2 => todo!(),
-            Op::ADDHNB => todo!(),
-            Op::ADDHNT => todo!(),
-            Op::ADDP => todo!(),
-            Op::ADDPL => todo!(),
+            Op::ADDHN => {
+                // FEAT_AdvSIMD
+                todo!()
+            }
+            Op::ADDHN2 => {
+                // FEAT_AdvSIMD
+                todo!()
+            }
             Op::ADDS => {
                 let target = get_destination_register!();
                 let width = self.operand_width(&instruction.operands()[0]);
@@ -2348,13 +2345,10 @@ impl BlockTranslator<'_> {
                 );
                 self.update_nzcv(nzcv);
             }
-            Op::ADDV => todo!(),
-            Op::ADDVA => todo!(),
-            Op::ADDVL => todo!(),
-            Op::AESD => todo!(),
-            Op::AESE => todo!(),
-            Op::AESIMC => todo!(),
-            Op::AESMC => todo!(),
+            Op::ADDV => {
+                // FEAT_AdvSIMD
+                todo!()
+            }
             Op::ANDS => {
                 // Bitwise AND
                 // This instruction performs a bitwise AND of two values and
@@ -2373,27 +2367,22 @@ impl BlockTranslator<'_> {
                 );
                 self.update_nzcv(nzcv);
             }
-            Op::ANDV => todo!(),
-            Op::ASRD => todo!(),
-            Op::ASRR => todo!(),
-            Op::ASRV => todo!(),
             Op::AT => todo!(),
-            Op::AXFLAG => todo!(),
-            Op::BCAX => todo!(),
-            Op::BDEP => todo!(),
-            Op::BEXT => todo!(),
-            Op::BFCVT => todo!(),
-            Op::BFCVTN => todo!(),
-            Op::BFCVTN2 => todo!(),
-            Op::BFCVTNT => todo!(),
-            Op::BFDOT => todo!(),
+            Op::BFMMLA
+            | Op::BFMLALB
+            | Op::BFMLALT
+            | Op::BFCVTNT
+            | Op::BFCVTN2
+            | Op::BFDOT
+            | Op::BFCVT => {
+                // FEAT_BF16
+                todo!()
+            }
             Op::BFM => todo!(),
-            Op::BFMLAL => todo!(),
-            Op::BFMLALB => todo!(),
-            Op::BFMLALT => todo!(),
-            Op::BFMMLA => todo!(),
-            Op::BFMOPA => todo!(),
-            Op::BFMOPS => todo!(),
+            Op::BFMOPS | Op::BFMOPA => {
+                // FEAT_SME_B16B16
+                todo!()
+            }
             Op::BFXIL => {
                 // Bitfield Extract and Insert Low (alias of BFM)
                 let destination = get_destination_register!();
@@ -2429,7 +2418,6 @@ impl BlockTranslator<'_> {
                     },
                 );
             }
-            Op::BGRP => todo!(),
             Op::BIC => {
                 // [ref:needs_unit_test]
                 let destination = get_destination_register!();
@@ -2462,8 +2450,14 @@ impl BlockTranslator<'_> {
                     },
                 );
             }
-            Op::BIF => todo!(),
-            Op::BIT => todo!(),
+            Op::BIF => {
+                // FEAT_AdvSIMD
+                todo!()
+            }
+            Op::BIT => {
+                // FEAT_AdvSIMD
+                todo!()
+            }
             Op::BL => {
                 let link_pc = self.builder.ins().iconst(I64, (self.address + 4) as i64);
                 let link_register = self.reg_to_var(&bad64::Reg::X30, None, true);
@@ -2482,14 +2476,19 @@ impl BlockTranslator<'_> {
                 self.def_view(&link_register, link_pc);
                 return self.unconditional_jump_epilogue(next_pc);
             }
-            Op::BLRAA => todo!(),
-            Op::BLRAAZ => todo!(),
-            Op::BLRAB => todo!(),
-            Op::BLRABZ => todo!(),
-            Op::BRAA => todo!(),
-            Op::BRAAZ => todo!(),
-            Op::BRAB => todo!(),
-            Op::BRABZ => todo!(),
+            Op::ERETAA
+            | Op::ERETAB
+            | Op::BLRAA
+            | Op::BLRAAZ
+            | Op::BLRAB
+            | Op::BLRABZ
+            | Op::BRAA
+            | Op::BRAAZ
+            | Op::BRAB
+            | Op::BRABZ => {
+                // FEAT_PAuth
+                todo!()
+            }
             Op::BRK => {
                 let imm: u64 = match instruction.operands()[0] {
                     bad64::Operand::Imm32 {
@@ -2522,19 +2521,6 @@ impl BlockTranslator<'_> {
                     &[self.machine_ptr, pc, imm],
                 );
             }
-            Op::BRKA => todo!(),
-            Op::BRKAS => todo!(),
-            Op::BRKB => todo!(),
-            Op::BRKBS => todo!(),
-            Op::BRKN => todo!(),
-            Op::BRKNS => todo!(),
-            Op::BRKPA => todo!(),
-            Op::BRKPAS => todo!(),
-            Op::BRKPB => todo!(),
-            Op::BRKPBS => todo!(),
-            Op::BSL => todo!(),
-            Op::BSL1N => todo!(),
-            Op::BSL2N => todo!(),
             Op::BTI => {
                 // NOP
             }
@@ -2554,23 +2540,25 @@ impl BlockTranslator<'_> {
             Op::B_PL => b_cnd!(PL),
             Op::B_VC => b_cnd!(VC),
             Op::B_VS => b_cnd!(VS),
-            Op::CADD => todo!(),
-            Op::CAS => todo!(),
-            Op::CASA => todo!(),
-            Op::CASAB => todo!(),
-            Op::CASAH => todo!(),
-            Op::CASAL => todo!(),
-            Op::CASALB => todo!(),
-            Op::CASALH => todo!(),
-            Op::CASB => todo!(),
-            Op::CASH => todo!(),
-            Op::CASL => todo!(),
-            Op::CASLB => todo!(),
-            Op::CASLH => todo!(),
-            Op::CASP => todo!(),
-            Op::CASPA => todo!(),
-            Op::CASPAL => todo!(),
-            Op::CASPL => todo!(),
+            Op::CASAB
+            | Op::CASAH
+            | Op::CASALB
+            | Op::CASALH
+            | Op::CASB
+            | Op::CASH
+            | Op::CASLB
+            | Op::CASLH
+            | Op::CASP
+            | Op::CASPA
+            | Op::CASPAL
+            | Op::CASPL
+            | Op::CASA
+            | Op::CASAL
+            | Op::CASL
+            | Op::CAS => {
+                // FEAT_LSE
+                todo!()
+            }
             Op::CCMN => {
                 // Conditional Compare Negative; sets NZCV flags to the result of the comparison
                 // of a register value and a negated value if the condition is TRUE, and an
@@ -2660,11 +2648,10 @@ impl BlockTranslator<'_> {
                 self.builder.switch_to_block(merge_block);
                 self.builder.seal_block(merge_block);
             }
-            Op::CDOT => todo!(),
-            Op::CFINV => todo!(),
-            Op::CFP => todo!(),
-            Op::CLASTA => todo!(),
-            Op::CLASTB => todo!(),
+            Op::CFP => {
+                // FEAT_SPECRES
+                todo!()
+            }
             Op::CLREX => monitor!(clrex),
             Op::CLS => {
                 // Count leading sign bits.
@@ -2694,7 +2681,6 @@ impl BlockTranslator<'_> {
             Op::CMGT => todo!(),
             Op::CMHI => todo!(),
             Op::CMHS => todo!(),
-            Op::CMLA => todo!(),
             Op::CMLE => todo!(),
             Op::CMLT => todo!(),
             Op::CMN => {
@@ -2717,19 +2703,10 @@ impl BlockTranslator<'_> {
                 // discard result, only update NZCV flags.
                 self.update_nzcv(nzcv);
             }
-            Op::CMPEQ => todo!(),
-            Op::CMPGE => todo!(),
-            Op::CMPGT => todo!(),
-            Op::CMPHI => todo!(),
-            Op::CMPHS => todo!(),
-            Op::CMPLE => todo!(),
-            Op::CMPLO => todo!(),
-            Op::CMPLS => todo!(),
-            Op::CMPLT => todo!(),
-            Op::CMPNE => todo!(),
-            Op::CMPP => todo!(),
-            Op::CMTST => todo!(),
-            Op::CNOT => todo!(),
+            Op::CMTST => {
+                // FEAT_AdvSIMD
+                todo!()
+            }
             Op::CNT => {
                 // Count bits that are one
                 // [ref:FEAT_CSSC]
@@ -2740,9 +2717,10 @@ impl BlockTranslator<'_> {
                 let value = self.builder.ins().popcnt(value);
                 write_to_register!(target, TypedValue { value, width });
             }
-            Op::COMPACT => todo!(),
-            Op::CPP => todo!(),
-            Op::CPY => todo!(),
+            Op::CPY => {
+                // FEAT_MOPS
+                todo!()
+            }
             Op::CRC32CB | Op::CRC32B => {
                 let target = get_destination_register!();
                 let acc = self.translate_operand(&instruction.operands()[1]);
@@ -2971,8 +2949,6 @@ impl BlockTranslator<'_> {
                 };
                 cs! { neg Rd = target, Rn = value, Rm = value, cond = condition_holds!(invert cond), width = width };
             }
-            Op::CTERMEQ => todo!(),
-            Op::CTERMNE => todo!(),
             Op::DC => {
                 // Data Cache operation
                 match instruction.operands()[0] {
@@ -3014,19 +2990,17 @@ impl BlockTranslator<'_> {
                     _ => {}
                 }
             }
+            Op::DRPS => todo!(),
             Op::DCPS1 => todo!(),
             Op::DCPS2 => todo!(),
             Op::DCPS3 => todo!(),
-            Op::DECB => todo!(),
-            Op::DECD => todo!(),
-            Op::DECH => todo!(),
-            Op::DECP => todo!(),
-            Op::DECW => todo!(),
-            Op::DGH => todo!(),
+            Op::DGH => {
+                // FEAT_DGH
+                todo!()
+            }
             Op::DMB => {
                 // Data Memory Barrier
             }
-            Op::DRPS => todo!(),
             Op::DSB => {
                 // Data synchronization barrier
             }
@@ -3050,10 +3024,7 @@ impl BlockTranslator<'_> {
             }
             Op::DUPM => todo!(),
             Op::DVP => todo!(),
-            Op::EOR3 => todo!(),
-            Op::EORBT => todo!(),
             Op::EORS => todo!(),
-            Op::EORTB => todo!(),
             Op::EORV => todo!(),
             Op::ERET => {
                 let sigref = {
@@ -3074,10 +3045,14 @@ impl BlockTranslator<'_> {
                     &[self.machine_ptr, pc],
                 );
             }
-            Op::ERETAA => todo!(),
-            Op::ERETAB => todo!(),
-            Op::ESB => todo!(),
-            Op::EXT => todo!(),
+            Op::ESB => {
+                // FEAT_RAS
+                todo!()
+            }
+            Op::EXT => {
+                // FEAT_AdvSIMD
+                todo!()
+            }
             Op::EXTR => {
                 // Extract register extracts a register from a pair of registers.
                 let target = get_destination_register!();
@@ -3108,7 +3083,6 @@ impl BlockTranslator<'_> {
             Op::FACLT => todo!(),
             Op::FADD => todo!(),
             Op::FADDA => todo!(),
-            Op::FADDP => todo!(),
             Op::FADDV => todo!(),
             Op::FCADD => todo!(),
             Op::FCCMP => todo!(),
@@ -3130,20 +3104,15 @@ impl BlockTranslator<'_> {
             Op::FCVTAU => todo!(),
             Op::FCVTL => todo!(),
             Op::FCVTL2 => todo!(),
-            Op::FCVTLT => todo!(),
             Op::FCVTMS => todo!(),
             Op::FCVTMU => todo!(),
-            Op::FCVTN => todo!(),
             Op::FCVTN2 => todo!(),
             Op::FCVTNS => todo!(),
-            Op::FCVTNT => todo!(),
             Op::FCVTNU => todo!(),
             Op::FCVTPS => todo!(),
             Op::FCVTPU => todo!(),
-            Op::FCVTX => todo!(),
             Op::FCVTXN => todo!(),
             Op::FCVTXN2 => todo!(),
-            Op::FCVTXNT => todo!(),
             Op::FCVTZS => todo!(),
             Op::FCVTZU => todo!(),
             Op::FDIV => todo!(),
@@ -3151,31 +3120,22 @@ impl BlockTranslator<'_> {
             Op::FDUP => todo!(),
             Op::FEXPA => todo!(),
             Op::FJCVTZS => todo!(),
-            Op::FLOGB => todo!(),
             Op::FMAD => todo!(),
             Op::FMADD => todo!(),
             Op::FMAX => todo!(),
             Op::FMAXNM => todo!(),
-            Op::FMAXNMP => todo!(),
             Op::FMAXNMV => todo!(),
-            Op::FMAXP => todo!(),
             Op::FMAXV => todo!(),
             Op::FMIN => todo!(),
             Op::FMINNM => todo!(),
-            Op::FMINNMP => todo!(),
             Op::FMINNMV => todo!(),
-            Op::FMINP => todo!(),
             Op::FMINV => todo!(),
             Op::FMLA => todo!(),
             Op::FMLAL => todo!(),
             Op::FMLAL2 => todo!(),
-            Op::FMLALB => todo!(),
-            Op::FMLALT => todo!(),
             Op::FMLS => todo!(),
             Op::FMLSL => todo!(),
             Op::FMLSL2 => todo!(),
-            Op::FMLSLB => todo!(),
-            Op::FMLSLT => todo!(),
             Op::FMMLA => todo!(),
             Op::FMOPA => todo!(),
             Op::FMOPS => todo!(),
@@ -3221,10 +3181,7 @@ impl BlockTranslator<'_> {
             Op::FTMAD => todo!(),
             Op::FTSMUL => todo!(),
             Op::FTSSEL => todo!(),
-            Op::GMI => todo!(),
             Op::HINT => todo!(),
-            Op::HISTCNT => todo!(),
-            Op::HISTSEG => todo!(),
             Op::HLT => {
                 return ControlFlow::Break(None);
             }
@@ -3303,7 +3260,6 @@ impl BlockTranslator<'_> {
             Op::INDEX => todo!(),
             Op::INS => todo!(),
             Op::INSR => todo!(),
-            Op::IRG => todo!(),
             Op::ISB => {
                 // Instruction synchronization barrier
                 return self.r#yield(ExitRequestID::Yield);
@@ -3673,9 +3629,6 @@ impl BlockTranslator<'_> {
             Op::LSRR => todo!(),
             Op::LSRV => todo!(),
             Op::MAD => todo!(),
-            Op::MATCH => todo!(),
-            Op::MLA => todo!(),
-            Op::MLS => todo!(),
             Op::MNEG => {
                 // Alias of MSUB
                 let destination = get_destination_register!();
@@ -3793,7 +3746,6 @@ impl BlockTranslator<'_> {
             }
             Op::NAND => todo!(),
             Op::NANDS => todo!(),
-            Op::NBSL => todo!(),
             Op::NEG => {
                 let target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
@@ -3823,7 +3775,6 @@ impl BlockTranslator<'_> {
                 );
                 self.update_nzcv(nzcv);
             }
-            Op::NMATCH => todo!(),
             Op::NOR => todo!(),
             Op::NORS => todo!(),
             Op::NOT => todo!(),
@@ -3879,28 +3830,21 @@ impl BlockTranslator<'_> {
             }
             Op::PFALSE => todo!(),
             Op::PFIRST => todo!(),
-            Op::PMUL => todo!(),
             Op::PMULL => todo!(),
             Op::PMULL2 => todo!(),
-            Op::PMULLB => todo!(),
-            Op::PMULLT => todo!(),
             Op::PNEXT => todo!(),
-            Op::PRFB | Op::PRFD | Op::PRFH | Op::PRFW | Op::PRFUM | Op::PRFM => {
+            Op::CPP | Op::PRFB | Op::PRFD | Op::PRFH | Op::PRFW | Op::PRFUM | Op::PRFM => {
                 // Prefetch Memory
                 // NOP
             }
             Op::PSB => todo!(),
             Op::PSSBB => todo!(),
             Op::PTEST => todo!(),
-            Op::PTRUE => todo!(),
             Op::PTRUES => todo!(),
             Op::PUNPKHI => todo!(),
             Op::PUNPKLO => todo!(),
             Op::RADDHN => todo!(),
             Op::RADDHN2 => todo!(),
-            Op::RADDHNB => todo!(),
-            Op::RADDHNT => todo!(),
-            Op::RAX1 => todo!(),
             Op::RBIT => {
                 let target = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
@@ -4028,7 +3972,6 @@ impl BlockTranslator<'_> {
                 write_to_register!(target, TypedValue { value, width });
             }
             Op::REVB => todo!(),
-            Op::REVD => todo!(),
             Op::REVH => todo!(),
             Op::REVW => todo!(),
             Op::RMIF => todo!(),
@@ -4044,38 +3987,21 @@ impl BlockTranslator<'_> {
             Op::RORV => todo!(),
             Op::RSHRN => todo!(),
             Op::RSHRN2 => todo!(),
-            Op::RSHRNB => todo!(),
-            Op::RSHRNT => todo!(),
             Op::RSUBHN => todo!(),
             Op::RSUBHN2 => todo!(),
-            Op::RSUBHNB => todo!(),
-            Op::RSUBHNT => todo!(),
-            Op::SABA => todo!(),
             Op::SABAL => todo!(),
             Op::SABAL2 => todo!(),
-            Op::SABALB => todo!(),
-            Op::SABALT => todo!(),
             Op::SABD => todo!(),
             Op::SABDL => todo!(),
             Op::SABDL2 => todo!(),
-            Op::SABDLB => todo!(),
-            Op::SABDLT => todo!(),
-            Op::SADALP => todo!(),
             Op::SADDL => todo!(),
             Op::SADDL2 => todo!(),
-            Op::SADDLB => todo!(),
-            Op::SADDLBT => todo!(),
             Op::SADDLP => todo!(),
-            Op::SADDLT => todo!(),
             Op::SADDLV => todo!(),
             Op::SADDV => todo!(),
             Op::SADDW => todo!(),
             Op::SADDW2 => todo!(),
-            Op::SADDWB => todo!(),
-            Op::SADDWT => todo!(),
             Op::SB => todo!(),
-            Op::SBCLB => todo!(),
-            Op::SBCLT => todo!(),
             Op::SBFIZ => {
                 let destination = get_destination_register!();
                 let value = self.translate_operand(&instruction.operands()[1]);
@@ -4170,7 +4096,6 @@ impl BlockTranslator<'_> {
                 let value = sign_extend_bitfield!(value, wmask, width);
                 write_to_register!(destination, TypedValue { value, width },);
             }
-            Op::SCLAMP => todo!(),
             Op::SCVTF => todo!(),
             Op::SDIVR => todo!(),
             Op::SDOT => todo!(),
@@ -4201,17 +4126,11 @@ impl BlockTranslator<'_> {
             Op::SHA512H2 => todo!(),
             Op::SHA512SU0 => todo!(),
             Op::SHA512SU1 => todo!(),
-            Op::SHADD => todo!(),
             Op::SHL => todo!(),
             Op::SHLL => todo!(),
             Op::SHLL2 => todo!(),
             Op::SHRN => todo!(),
             Op::SHRN2 => todo!(),
-            Op::SHRNB => todo!(),
-            Op::SHRNT => todo!(),
-            Op::SHSUB => todo!(),
-            Op::SHSUBR => todo!(),
-            Op::SLI => todo!(),
             Op::SM3PARTW1 => todo!(),
             Op::SM3PARTW2 => todo!(),
             Op::SM3SS1 => todo!(),
@@ -4219,8 +4138,6 @@ impl BlockTranslator<'_> {
             Op::SM3TT1B => todo!(),
             Op::SM3TT2A => todo!(),
             Op::SM3TT2B => todo!(),
-            Op::SM4E => todo!(),
-            Op::SM4EKEY => todo!(),
             Op::SMADDL => {
                 // [ref:needs_unit_test]
                 let destination = get_destination_register!();
@@ -4235,20 +4152,14 @@ impl BlockTranslator<'_> {
                 write_to_register!(destination, TypedValue { value, width });
             }
             Op::SMAX => todo!(),
-            Op::SMAXP => todo!(),
             Op::SMAXV => todo!(),
             Op::SMC => todo!(),
             Op::SMIN => todo!(),
-            Op::SMINP => todo!(),
             Op::SMINV => todo!(),
             Op::SMLAL => todo!(),
             Op::SMLAL2 => todo!(),
-            Op::SMLALB => todo!(),
-            Op::SMLALT => todo!(),
             Op::SMLSL => todo!(),
             Op::SMLSL2 => todo!(),
-            Op::SMLSLB => todo!(),
-            Op::SMLSLT => todo!(),
             Op::SMMLA => todo!(),
             Op::SMOPA => todo!(),
             Op::SMOPS => todo!(),
@@ -4306,12 +4217,6 @@ impl BlockTranslator<'_> {
                 write_to_register!(destination, TypedValue { value, width });
             }
             Op::SMULL2 => todo!(),
-            Op::SMULLB => todo!(),
-            Op::SMULLT => todo!(),
-            Op::SPLICE => todo!(),
-            Op::SQABS => todo!(),
-            Op::SQADD => todo!(),
-            Op::SQCADD => todo!(),
             Op::SQDECB => todo!(),
             Op::SQDECD => todo!(),
             Op::SQDECH => todo!(),
@@ -4319,84 +4224,34 @@ impl BlockTranslator<'_> {
             Op::SQDECW => todo!(),
             Op::SQDMLAL => todo!(),
             Op::SQDMLAL2 => todo!(),
-            Op::SQDMLALB => todo!(),
-            Op::SQDMLALBT => todo!(),
-            Op::SQDMLALT => todo!(),
             Op::SQDMLSL => todo!(),
             Op::SQDMLSL2 => todo!(),
-            Op::SQDMLSLB => todo!(),
-            Op::SQDMLSLBT => todo!(),
-            Op::SQDMLSLT => todo!(),
-            Op::SQDMULH => todo!(),
             Op::SQDMULL => todo!(),
             Op::SQDMULL2 => todo!(),
-            Op::SQDMULLB => todo!(),
-            Op::SQDMULLT => todo!(),
             Op::SQINCB => todo!(),
             Op::SQINCD => todo!(),
             Op::SQINCH => todo!(),
             Op::SQINCP => todo!(),
             Op::SQINCW => todo!(),
-            Op::SQNEG => todo!(),
-            Op::SQRDCMLAH => todo!(),
-            Op::SQRDMLAH => todo!(),
-            Op::SQRDMLSH => todo!(),
-            Op::SQRDMULH => todo!(),
-            Op::SQRSHL => todo!(),
-            Op::SQRSHLR => todo!(),
-            Op::SQRSHRN => todo!(),
             Op::SQRSHRN2 => todo!(),
-            Op::SQRSHRNB => todo!(),
-            Op::SQRSHRNT => todo!(),
-            Op::SQRSHRUN => todo!(),
             Op::SQRSHRUN2 => todo!(),
-            Op::SQRSHRUNB => todo!(),
-            Op::SQRSHRUNT => todo!(),
-            Op::SQSHL => todo!(),
-            Op::SQSHLR => todo!(),
-            Op::SQSHLU => todo!(),
             Op::SQSHRN => todo!(),
             Op::SQSHRN2 => todo!(),
-            Op::SQSHRNB => todo!(),
-            Op::SQSHRNT => todo!(),
             Op::SQSHRUN => todo!(),
             Op::SQSHRUN2 => todo!(),
-            Op::SQSHRUNB => todo!(),
-            Op::SQSHRUNT => todo!(),
-            Op::SQSUB => todo!(),
-            Op::SQSUBR => todo!(),
             Op::SQXTN => todo!(),
             Op::SQXTN2 => todo!(),
-            Op::SQXTNB => todo!(),
-            Op::SQXTNT => todo!(),
             Op::SQXTUN => todo!(),
             Op::SQXTUN2 => todo!(),
-            Op::SQXTUNB => todo!(),
-            Op::SQXTUNT => todo!(),
-            Op::SRHADD => todo!(),
-            Op::SRI => todo!(),
-            Op::SRSHL => todo!(),
-            Op::SRSHLR => todo!(),
-            Op::SRSHR => todo!(),
-            Op::SRSRA => todo!(),
             Op::SSBB => todo!(),
             Op::SSHL => todo!(),
             Op::SSHLL => todo!(),
             Op::SSHLL2 => todo!(),
-            Op::SSHLLB => todo!(),
-            Op::SSHLLT => todo!(),
             Op::SSHR => todo!(),
-            Op::SSRA => todo!(),
             Op::SSUBL => todo!(),
             Op::SSUBL2 => todo!(),
-            Op::SSUBLB => todo!(),
-            Op::SSUBLBT => todo!(),
-            Op::SSUBLT => todo!(),
-            Op::SSUBLTB => todo!(),
             Op::SSUBW => todo!(),
             Op::SSUBW2 => todo!(),
-            Op::SSUBWB => todo!(),
-            Op::SSUBWT => todo!(),
             Op::ST1 => todo!(),
             Op::ST1B => todo!(),
             Op::ST1D => todo!(),
@@ -4597,11 +4452,8 @@ impl BlockTranslator<'_> {
             Op::STZ2G => todo!(),
             Op::STZG => todo!(),
             Op::STZGM => todo!(),
-            Op::SUBG => todo!(),
             Op::SUBHN => todo!(),
             Op::SUBHN2 => todo!(),
-            Op::SUBHNB => todo!(),
-            Op::SUBHNT => todo!(),
             Op::SUBP => todo!(),
             Op::SUBPS => todo!(),
             Op::SUBR => todo!(),
@@ -4610,7 +4462,6 @@ impl BlockTranslator<'_> {
             Op::SUMOPS => todo!(),
             Op::SUNPKHI => todo!(),
             Op::SUNPKLO => todo!(),
-            Op::SUQADD => todo!(),
             Op::SWP => todo!(),
             Op::SWPA => todo!(),
             Op::SWPAB => todo!(),
@@ -4650,7 +4501,6 @@ impl BlockTranslator<'_> {
             Op::SXTL2 => todo!(),
             Op::SYS => todo!(),
             Op::SYSL => todo!(),
-            Op::TBL => todo!(),
             Op::TBNZ => {
                 let value = self.translate_operand(&instruction.operands()[0]);
                 let bit_field = match instruction.operands()[1] {
@@ -4676,7 +4526,6 @@ impl BlockTranslator<'_> {
                 let is_not_zero_value = self.builder.ins().uextend(I64, is_not_zero_value);
                 self.branch_if_non_zero(is_not_zero_value, label);
             }
-            Op::TBX => todo!(),
             Op::TBZ => {
                 let value = self.translate_operand(&instruction.operands()[0]);
                 let bit_field = match instruction.operands()[1] {
@@ -4733,28 +4582,18 @@ impl BlockTranslator<'_> {
             }
             Op::TSTART => todo!(),
             Op::TTEST => todo!(),
-            Op::UABA => todo!(),
             Op::UABAL => todo!(),
             Op::UABAL2 => todo!(),
-            Op::UABALB => todo!(),
-            Op::UABALT => todo!(),
             Op::UABD => todo!(),
             Op::UABDL => todo!(),
             Op::UABDL2 => todo!(),
-            Op::UABDLB => todo!(),
-            Op::UABDLT => todo!(),
-            Op::UADALP => todo!(),
             Op::UADDL => todo!(),
             Op::UADDL2 => todo!(),
-            Op::UADDLB => todo!(),
             Op::UADDLP => todo!(),
-            Op::UADDLT => todo!(),
             Op::UADDLV => todo!(),
             Op::UADDV => todo!(),
             Op::UADDW => todo!(),
             Op::UADDW2 => todo!(),
-            Op::UADDWB => todo!(),
-            Op::UADDWT => todo!(),
             Op::UBFIZ => {
                 let destination = get_destination_register!();
                 let source = self.translate_operand(&instruction.operands()[1]);
@@ -4816,30 +4655,20 @@ impl BlockTranslator<'_> {
                     },
                 );
             }
-            Op::UCLAMP => todo!(),
             Op::UCVTF => todo!(),
             Op::UDF => {
                 return self.throw_undefined();
             }
             Op::UDIVR => todo!(),
             Op::UDOT => todo!(),
-            Op::UHADD => todo!(),
-            Op::UHSUB => todo!(),
-            Op::UHSUBR => todo!(),
             Op::UMAX => todo!(),
-            Op::UMAXP => todo!(),
             Op::UMAXV => todo!(),
             Op::UMIN => todo!(),
-            Op::UMINP => todo!(),
             Op::UMINV => todo!(),
             Op::UMLAL => todo!(),
             Op::UMLAL2 => todo!(),
-            Op::UMLALB => todo!(),
-            Op::UMLALT => todo!(),
             Op::UMLSL => todo!(),
             Op::UMLSL2 => todo!(),
-            Op::UMLSLB => todo!(),
-            Op::UMLSLT => todo!(),
             Op::UMMLA => todo!(),
             Op::UMOPA => todo!(),
             Op::UMOPS => todo!(),
@@ -4913,9 +4742,6 @@ impl BlockTranslator<'_> {
                 write_to_register!(destination, TypedValue { value, width });
             }
             Op::UMULL2 => todo!(),
-            Op::UMULLB => todo!(),
-            Op::UMULLT => todo!(),
-            Op::UQADD => todo!(),
             Op::UQDECB => todo!(),
             Op::UQDECD => todo!(),
             Op::UQDECH => todo!(),
@@ -4926,51 +4752,23 @@ impl BlockTranslator<'_> {
             Op::UQINCH => todo!(),
             Op::UQINCP => todo!(),
             Op::UQINCW => todo!(),
-            Op::UQRSHL => todo!(),
-            Op::UQRSHLR => todo!(),
-            Op::UQRSHRN => todo!(),
             Op::UQRSHRN2 => todo!(),
-            Op::UQRSHRNB => todo!(),
-            Op::UQRSHRNT => todo!(),
-            Op::UQSHL => todo!(),
-            Op::UQSHLR => todo!(),
             Op::UQSHRN => todo!(),
             Op::UQSHRN2 => todo!(),
-            Op::UQSHRNB => todo!(),
-            Op::UQSHRNT => todo!(),
-            Op::UQSUB => todo!(),
-            Op::UQSUBR => todo!(),
             Op::UQXTN => todo!(),
             Op::UQXTN2 => todo!(),
-            Op::UQXTNB => todo!(),
-            Op::UQXTNT => todo!(),
-            Op::URECPE => todo!(),
-            Op::URHADD => todo!(),
-            Op::URSHL => todo!(),
-            Op::URSHLR => todo!(),
-            Op::URSHR => todo!(),
-            Op::URSQRTE => todo!(),
-            Op::URSRA => todo!(),
             Op::USDOT => todo!(),
             Op::USHL => todo!(),
             Op::USHLL => todo!(),
             Op::USHLL2 => todo!(),
-            Op::USHLLB => todo!(),
-            Op::USHLLT => todo!(),
             Op::USHR => todo!(),
             Op::USMMLA => todo!(),
             Op::USMOPA => todo!(),
             Op::USMOPS => todo!(),
-            Op::USQADD => todo!(),
-            Op::USRA => todo!(),
             Op::USUBL => todo!(),
             Op::USUBL2 => todo!(),
-            Op::USUBLB => todo!(),
-            Op::USUBLT => todo!(),
             Op::USUBW => todo!(),
             Op::USUBW2 => todo!(),
-            Op::USUBWB => todo!(),
-            Op::USUBWT => todo!(),
             Op::UUNPKHI => todo!(),
             Op::UUNPKLO => todo!(),
             Op::UXTB => todo!(),
@@ -5003,8 +4801,7 @@ impl BlockTranslator<'_> {
             Op::UXTW => todo!(),
             Op::UZP1 => todo!(),
             Op::UZP2 => todo!(),
-            Op::WFE | Op::WFET => {
-                // [ref:FIXME]
+            Op::WFE => {
                 let false_val = self.builder.ins().iconst(I8, i64::from(false));
                 self.builder.ins().store(
                     TRUSTED_MEMFLAGS,
@@ -5014,42 +4811,298 @@ impl BlockTranslator<'_> {
                 );
                 return self.r#yield(ExitRequestID::Yield);
             }
-            Op::WFI | Op::WFIT => {
-                // [ref:FIXME] WFIT
+            Op::WFI => {
                 return self.r#yield(ExitRequestID::WaitForInterrupt);
             }
-            Op::WHILEGE => todo!(),
-            Op::WHILEGT => todo!(),
-            Op::WHILEHI => todo!(),
-            Op::WHILEHS => todo!(),
-            Op::WHILELE => todo!(),
-            Op::WHILELO => todo!(),
-            Op::WHILELS => todo!(),
-            Op::WHILELT => todo!(),
-            Op::WHILERW => todo!(),
-            Op::WHILEWR => todo!(),
-            Op::WRFFR => todo!(),
-            Op::XAFLAG => todo!(),
-            Op::XAR => todo!(),
-            Op::XTN => todo!(),
-            Op::XTN2 => todo!(),
+            Op::WFIT | Op::WFET => {
+                // FEAT_WFxT
+                return self.throw_undefined();
+            }
+            Op::CFINV => {
+                // FEAT_FlagM
+                todo!()
+            }
+            Op::AXFLAG | Op::XAFLAG => {
+                // FEAT_FlagM2
+                todo!()
+            }
+            Op::XTN | Op::XTN2 => {
+                // FEAT_AdvSIMD
+                todo!()
+            }
             Op::YIELD => {
                 return self.r#yield(ExitRequestID::Yield);
             }
-            Op::ZERO => todo!(),
-            Op::ZIP1 | Op::ZIP2 => {
-                // [ref:have_sve]:
-                // <https://developer.arm.com/documentation/ddi0596/2020-12/SVE-Instructions/ZIP1--ZIP2--predicates---Interleave-elements-from-two-half-predicates->
+            Op::COMPACT | Op::WRFFR => {
+                //FEAT_SVE
                 todo!()
             }
-            Op::CNTB | Op::CNTD | Op::CNTH | Op::CNTW => {
-                // [ref:have_sve]:
-                // <https://developer.arm.com/documentation/ddi0596/2020-12/SVE-Instructions/CNTB--CNTD--CNTH--CNTW--Set-scalar-to-multiple-of-predicate-constraint-element-count->
+            Op::WHILEGE
+            | Op::WHILEGT
+            | Op::WHILEHI
+            | Op::WHILEHS
+            | Op::SABA
+            | Op::SHADD
+            | Op::SHSUB
+            | Op::SHSUBR
+            | Op::SLI
+            | Op::SQABS
+            | Op::SQADD
+            | Op::SQDMULH
+            | Op::SQNEG
+            | Op::SQRDMLAH
+            | Op::SQRDMLSH
+            | Op::SQRDMULH
+            | Op::SQRSHL
+            | Op::SQRSHLR
+            | Op::SQSHL
+            | Op::SQSHLR
+            | Op::SQSHLU
+            | Op::SQSUB
+            | Op::SQSUBR
+            | Op::SRHADD
+            | Op::SRI
+            | Op::SRSHL
+            | Op::SRSHLR
+            | Op::SRSHR
+            | Op::SRSRA
+            | Op::SSRA
+            | Op::SUQADD
+            | Op::UABA
+            | Op::UHADD
+            | Op::UHSUB
+            | Op::UHSUBR
+            | Op::UQADD
+            | Op::UQRSHL
+            | Op::UQRSHLR
+            | Op::UQSHL
+            | Op::UQSHLR
+            | Op::UQSUB
+            | Op::UQSUBR
+            | Op::URECPE
+            | Op::URHADD
+            | Op::URSHL
+            | Op::URSHLR
+            | Op::URSHR
+            | Op::URSQRTE
+            | Op::URSRA
+            | Op::USQADD
+            | Op::USRA
+            | Op::SABALB
+            | Op::SABALT
+            | Op::SABDLB
+            | Op::SABDLT
+            | Op::SADDLB
+            | Op::SADDLT
+            | Op::SADDWB
+            | Op::SADDWT
+            | Op::SMLALB
+            | Op::SMLALT
+            | Op::SMLSLB
+            | Op::SMLSLT
+            | Op::SMULLB
+            | Op::SMULLT
+            | Op::SQDMLALB
+            | Op::SQDMLALT
+            | Op::SQDMLSLB
+            | Op::SQDMLSLT
+            | Op::SQDMULLB
+            | Op::SQDMULLT
+            | Op::SSHLLB
+            | Op::SSHLLT
+            | Op::SSUBLB
+            | Op::SSUBLT
+            | Op::SSUBWB
+            | Op::SSUBWT
+            | Op::UABALB
+            | Op::UABALT
+            | Op::UABDLB
+            | Op::UABDLT
+            | Op::UADDLB
+            | Op::UADDLT
+            | Op::UADDWB
+            | Op::UADDWT
+            | Op::UMLALB
+            | Op::UMLALT
+            | Op::UMLSLB
+            | Op::UMLSLT
+            | Op::UMULLB
+            | Op::UMULLT
+            | Op::USHLLB
+            | Op::USHLLT
+            | Op::USUBLB
+            | Op::USUBLT
+            | Op::USUBWB
+            | Op::USUBWT
+            | Op::ADDHNB
+            | Op::ADDHNT
+            | Op::RADDHNB
+            | Op::RADDHNT
+            | Op::RSHRNB
+            | Op::RSHRNT
+            | Op::RSUBHNB
+            | Op::RSUBHNT
+            | Op::SHRNB
+            | Op::SHRNT
+            | Op::SQRSHRNB
+            | Op::SQRSHRNT
+            | Op::SQRSHRUNB
+            | Op::SQRSHRUNT
+            | Op::SQSHRNB
+            | Op::SQSHRNT
+            | Op::SQSHRUNB
+            | Op::SQSHRUNT
+            | Op::SUBHNB
+            | Op::SUBHNT
+            | Op::UQRSHRNB
+            | Op::UQRSHRNT
+            | Op::UQSHRNB
+            | Op::UQSHRNT
+            | Op::SQXTNB
+            | Op::SQXTNT
+            | Op::SQXTUNB
+            | Op::SQXTUNT
+            | Op::UQXTNB
+            | Op::UQXTNT
+            | Op::ADDP
+            | Op::FADDP
+            | Op::FMAXNMP
+            | Op::FMAXP
+            | Op::FMINNMP
+            | Op::FMINP
+            | Op::SMAXP
+            | Op::SMINP
+            | Op::UMAXP
+            | Op::UMINP
+            | Op::SADALP
+            | Op::UADALP
+            | Op::BCAX
+            | Op::BSL
+            | Op::BSL1N
+            | Op::BSL2N
+            | Op::EOR3
+            | Op::NBSL
+            | Op::XAR
+            | Op::ADCLB
+            | Op::ADCLT
+            | Op::SBCLB
+            | Op::SBCLT
+            | Op::MLA
+            | Op::MLS
+            | Op::CADD
+            | Op::CMLA
+            | Op::SQCADD
+            | Op::SQRDCMLAH
+            | Op::SADDLBT
+            | Op::SQDMLALBT
+            | Op::SQDMLSLBT
+            | Op::SSUBLBT
+            | Op::SSUBLTB
+            | Op::CDOT
+            | Op::FCVTLT
+            | Op::FCVTNT
+            | Op::FCVTX
+            | Op::FCVTXNT
+            | Op::BFCVTN
+            | Op::FCVTN
+            | Op::FMLALB
+            | Op::FMLALT
+            | Op::FMLSLB
+            | Op::FMLSLT
+            | Op::FLOGB
+            | Op::HISTCNT
+            | Op::HISTSEG
+            | Op::MATCH
+            | Op::NMATCH
+            | Op::WHILERW
+            | Op::WHILEWR
+            | Op::BDEP
+            | Op::BEXT
+            | Op::BGRP
+            | Op::EORBT
+            | Op::EORTB
+            | Op::PMUL
+            | Op::PMULLB
+            | Op::PMULLT
+            | Op::SPLICE
+            | Op::TBL
+            | Op::TBX
+            | Op::AESD
+            | Op::AESE
+            | Op::AESIMC
+            | Op::AESMC
+            | Op::RAX1
+            | Op::SM4E
+            | Op::SM4EKEY
+            | Op::SCLAMP
+            | Op::UCLAMP
+            | Op::SQRSHRN
+            | Op::SQRSHRUN
+            | Op::UQRSHRN
+            | Op::CNTP
+            | Op::PTRUE
+            | Op::WHILELE
+            | Op::WHILELO
+            | Op::WHILELS
+            | Op::WHILELT
+            | Op::REVD => {
+                // FEAT_SVE2
                 todo!()
             }
-            Op::CNTP => {
-                // [ref:have_sve]:
-                // <https://developer.arm.com/documentation/ddi0596/2020-12/SVE-Instructions/CNTP--Set-scalar-to-count-of-true-predicate-elements->
+            Op::ADDVA | Op::ADDHA => {
+                // FEAT_SME
+                todo!()
+            }
+            Op::CLASTA
+            | Op::CLASTB
+            | Op::BRKA
+            | Op::BRKAS
+            | Op::BRKB
+            | Op::BRKBS
+            | Op::BRKN
+            | Op::BRKNS
+            | Op::BRKPA
+            | Op::BRKPAS
+            | Op::BRKPB
+            | Op::BRKPBS
+            | Op::ASRR
+            | Op::ASRD
+            | Op::ANDV
+            | Op::ADDVL
+            | Op::ADDPL
+            | Op::ZIP1
+            | Op::ZIP2
+            | Op::CNTB
+            | Op::CNTD
+            | Op::CNTH
+            | Op::CNTW
+            | Op::CMPEQ
+            | Op::CMPGE
+            | Op::CMPGT
+            | Op::CMPHI
+            | Op::CMPHS
+            | Op::CMPLE
+            | Op::CMPLO
+            | Op::CMPLS
+            | Op::CMPLT
+            | Op::CMPNE
+            | Op::CNOT
+            | Op::CTERMEQ
+            | Op::CTERMNE
+            | Op::DECB
+            | Op::DECD
+            | Op::DECH
+            | Op::DECP
+            | Op::DECW => {
+                // FEAT_SVE || FEAT_SME
+                todo!()
+            }
+            Op::BFMLAL | Op::ZERO => {
+                // FEAT_SME2
+                todo!()
+            }
+            Op::CMPP | Op::ADDG | Op::GMI | Op::IRG | Op::SUBG => {
+                // FEAT_MTE
                 todo!()
             }
         }
