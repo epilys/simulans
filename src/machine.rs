@@ -166,6 +166,7 @@ impl Armv8AMachine {
         &mut self,
         bootargs: Option<String>,
         entry_point: Address,
+        fdt_address: Option<Address>,
     ) -> Result<crate::fdt::Fdt, Box<dyn std::error::Error>> {
         // [ref:needs_unit_test]
         let fdt = crate::fdt::FdtBuilder::new(&self.memory)?
@@ -173,11 +174,13 @@ impl Armv8AMachine {
             .bootargs(bootargs)
             .build()?;
 
-        self.load_code(&fdt.bytes, fdt.address)?;
+        let fdt_address = fdt_address.unwrap_or(fdt.address);
+
+        self.load_code(&fdt.bytes, fdt_address)?;
 
         let bootloader = Armv8ABootloader {
             entry_point,
-            fdt_address: fdt.address,
+            fdt_address,
         };
         bootloader.write_to_memory(Address(0x4), self)?;
         self.pc = 0x4;

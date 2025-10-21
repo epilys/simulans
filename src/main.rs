@@ -168,7 +168,11 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     machine.cpu_state.PSTATE_mut().set_EL(args.el());
     // disas(&input, args.entry_point_address().0)?;
     if args.generate_fdt {
-        let fdt = machine.generate_fdt(args.bootargs.take(), args.entry_point_address())?;
+        let fdt = machine.generate_fdt(
+            args.bootargs.take(),
+            args.entry_point_address(),
+            args.fdt_address,
+        )?;
         if let Some(ref dump_dtb) = args.dump_dtb {
             std::fs::write(dump_dtb, &fdt.bytes).map_err(|err| {
                 format!(

@@ -130,6 +130,10 @@ pub struct Args {
     #[arg(short, long, default_value_t = true)]
     pub generate_fdt: bool,
 
+    /// Hexadecimal or decimal value of the address to load the FDT to.
+    #[arg(long, default_value = None, value_parser=maybe_hex)]
+    pub fdt_address: Option<Address>,
+
     /// Maximum exception level.
     #[arg(long, default_value_t = 1, value_parser=elx)]
     max_el: u8,
