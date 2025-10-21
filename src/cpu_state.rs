@@ -467,8 +467,6 @@ pub struct ExecutionState {
     pub control_registers: ControlRegisterFile,
     /// Exit request to be serviced on main execution loop.
     pub exit_request: Arc<Mutex<Option<ExitRequest>>>,
-    /// Architectural features this CPU supports.
-    pub arch_features: ArchFeatures,
 }
 
 impl ExecutionState {
@@ -535,21 +533,5 @@ impl ExecutionState {
             ExceptionLevel::EL2 => self.control_registers.sctlr_el2,
             ExceptionLevel::EL3 => self.control_registers.sctlr_el3,
         }
-    }
-}
-
-bitflags::bitflags! {
-    /// Bitflag of architectural features, currently does not affect emulation at all.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub struct ArchFeatures: u64 {
-        /// Large System Extensions.
-        const FEAT_LSE = 0b00000001;
-    }
-}
-
-/// Default value is `FEAT_LSE`.
-impl Default for ArchFeatures {
-    fn default() -> Self {
-        Self::FEAT_LSE
     }
 }
