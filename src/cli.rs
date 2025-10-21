@@ -5,6 +5,7 @@ use std::{borrow::Cow, num::NonZero, path::PathBuf};
 
 use clap::Parser;
 use simulans::{
+    cpu_state::ExceptionLevel,
     memory::{Address, MemorySize, KERNEL_ADDRESS, PHYS_MEM_START},
     tracing::TraceItem,
 };
@@ -80,6 +81,14 @@ fn memory_size(s: &str) -> Result<MemorySize, Cow<'static, str>> {
     Err(err(()))
 }
 
+fn elx(s: &str) -> Result<u8, Box<dyn std::error::Error + Send + Sync>> {
+    let result = s.parse::<u8>()?;
+    match result {
+        1..=3 => Ok(result),
+        _ => Err("Value must be in 1, 2, 3".into()),
+    }
+}
+
 // SAFETY: Value is non-zero.
 const DEFAULT_MEMORY_SIZE: MemorySize =
     MemorySize(NonZero::new(4 * MemorySize::GiB.get()).unwrap());
@@ -120,6 +129,10 @@ pub struct Args {
     /// Whether to generate an FDT and pass it as `x0` or not.
     #[arg(short, long, default_value_t = true)]
     pub generate_fdt: bool,
+
+    /// Maximum exception level.
+    #[arg(long, default_value_t = 1, value_parser=elx)]
+    max_el: u8,
 
     /// Pass boot arguments to kernel (requires Devicetree generation)
     #[arg(long)]
@@ -207,5 +220,15 @@ impl Args {
     /// memory to the VM.
     pub const fn memory(&self) -> MemorySize {
         self.memory
+    }
+
+    /// Initial/maximum Exception level.
+    pub const fn el(&self) -> ExceptionLevel {
+        match self.max_el {
+            1 => ExceptionLevel::EL1,
+            2 => ExceptionLevel::EL2,
+            3 => ExceptionLevel::EL3,
+            _ => panic!(),
+        }
     }
 }
