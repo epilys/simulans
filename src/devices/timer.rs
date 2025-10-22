@@ -42,14 +42,18 @@ pub enum RegisterID {
 pub extern "C" fn timer_register_write(machine: &Armv8AMachine, register: RegisterID, value: u64) {
     match register {
         RegisterID::CNTP_CTL_EL0 => {
-            machine.timer.cntp_ctl_el0.store(value, Ordering::SeqCst);
+            machine.timer.cntp_ctl_el0.store(value, Ordering::Release);
         }
         RegisterID::CNTP_TVAL_EL0 => {
+            machine
+                .timer
+                .cntp_tval_el0
+                .store(value.try_into().unwrap_or(i32::MAX), Ordering::Release);
             let value = value + machine.timer.cntpct_el0.load(Ordering::SeqCst);
-            machine.timer.cntp_cval_el0.store(value, Ordering::SeqCst);
+            machine.timer.cntp_cval_el0.store(value, Ordering::Release);
         }
         RegisterID::CNTP_CVAL_EL0 => {
-            machine.timer.cntp_cval_el0.store(value, Ordering::SeqCst);
+            machine.timer.cntp_cval_el0.store(value, Ordering::Release);
         }
         RegisterID::CNTV_CTL_EL0 => {
             machine.timer.cntv_ctl_el0.store(value, Ordering::Release);
