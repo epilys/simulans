@@ -12,6 +12,7 @@ use std::{
 pub struct InterruptRequest {
     pub interrupt_id: u16,
     pub cpu_id: Option<u8>,
+    pub signal: bool,
 }
 
 #[derive(Debug, Clone)]

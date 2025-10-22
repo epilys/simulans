@@ -437,6 +437,7 @@ impl PL011Registers {
             _ = generator.irq_sender.try_send(InterruptRequest {
                 interrupt_id: irq,
                 cpu_id: None,
+                signal: true,
             });
         }
     }

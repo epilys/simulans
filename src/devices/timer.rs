@@ -150,7 +150,7 @@ impl GenericTimer {
 
                             let cntp_cval = cntp_cval_el0.load(Ordering::Acquire);
 
-                            if enabled {
+                            let signal = if enabled {
                                 // Timer Condition Met: CVAL <= System Count
                                 let condition_met = cntp_cval <= cntpct_val;
                                 while let Err(current_value) = cntp_ctl_el0.compare_exchange(
@@ -166,18 +166,20 @@ impl GenericTimer {
                                 ) {
                                     cntp_ctl_val = current_value;
                                 }
-                                if condition_met && !imask {
-                                    // signal interrupt
-                                    if matches!(
-                                        generator.irq_sender.try_send(InterruptRequest {
-                                            interrupt_id: ARCH_TIMER_NS_EL1_IRQ,
-                                            cpu_id: None,
-                                        }),
-                                        Err(TrySendError::Disconnected(_))
-                                    ) {
-                                        break;
-                                    }
-                                }
+                                condition_met && !imask
+                            } else {
+                                false
+                            };
+                            // signal interrupt
+                            if matches!(
+                                generator.irq_sender.try_send(InterruptRequest {
+                                    interrupt_id: ARCH_TIMER_NS_EL1_IRQ,
+                                    cpu_id: None,
+                                    signal,
+                                }),
+                                Err(TrySendError::Disconnected(_))
+                            ) {
+                                break;
                             }
                         }
                         {
@@ -189,7 +191,7 @@ impl GenericTimer {
 
                             let cntv_cval = cntv_cval_el0.load(Ordering::Acquire);
 
-                            if enabled {
+                            let signal = if enabled {
                                 // Timer Condition Met: CVAL <= System Count
                                 let condition_met = cntv_cval <= cntpct_val;
                                 while let Err(current_value) = cntv_ctl_el0.compare_exchange(
@@ -205,18 +207,19 @@ impl GenericTimer {
                                 ) {
                                     cntv_ctl_val = current_value;
                                 }
-                                if condition_met && !imask {
-                                    // signal interrupt
-                                    if matches!(
-                                        generator.irq_sender.try_send(InterruptRequest {
-                                            interrupt_id: ARCH_TIMER_VIRT_IRQ,
-                                            cpu_id: None,
-                                        }),
-                                        Err(TrySendError::Disconnected(_))
-                                    ) {
-                                        break;
-                                    }
-                                }
+                                condition_met && !imask
+                            } else {
+                                false
+                            };
+                            if matches!(
+                                generator.irq_sender.try_send(InterruptRequest {
+                                    interrupt_id: ARCH_TIMER_VIRT_IRQ,
+                                    cpu_id: None,
+                                    signal,
+                                }),
+                                Err(TrySendError::Disconnected(_))
+                            ) {
+                                break;
                             }
                         }
                     }

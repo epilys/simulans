@@ -187,10 +187,26 @@ impl GicV2 {
                 );
                 let mut state_lck = state.lock().unwrap();
                 if let Some(cpu_id) = irq.cpu_id {
-                    state_lck.gicd.set_pending(irq.interrupt_id, cpu_id, true);
+                    let is_level_sensitive =
+                        state_lck.gicd.is_level_sensitive(irq.interrupt_id, cpu_id);
+                    if is_level_sensitive {
+                        state_lck
+                            .gicd
+                            .set_pending(irq.interrupt_id, cpu_id, irq.signal);
+                    } else if irq.signal {
+                        state_lck.gicd.set_pending(irq.interrupt_id, cpu_id, true);
+                    }
                 } else {
                     for cpu_id in 0..8 {
-                        state_lck.gicd.set_pending(irq.interrupt_id, cpu_id, true);
+                        let is_level_sensitive =
+                            state_lck.gicd.is_level_sensitive(irq.interrupt_id, cpu_id);
+                        if is_level_sensitive {
+                            state_lck
+                                .gicd
+                                .set_pending(irq.interrupt_id, cpu_id, irq.signal);
+                        } else if irq.signal {
+                            state_lck.gicd.set_pending(irq.interrupt_id, cpu_id, true);
+                        }
                     }
                 }
                 state_lck.generate_exceptions(&fiq_signal, &irq_signal);
@@ -1225,6 +1241,18 @@ impl Gicd {
         let mut tmp = self.itargetsr[idx as usize].to_le_bytes();
         tmp[byte_offset as usize] = value;
         self.itargetsr[idx as usize] = u32::from_le_bytes(tmp);
+    }
+
+    pub const fn is_level_sensitive(&self, interrupt_id: u16, cpu_id: u8) -> bool {
+        assert!(interrupt_id < 1024);
+        let idx = interrupt_id / 16;
+        let field = interrupt_id % 16;
+        let reg = if idx == 1 {
+            self.icfgr1[cpu_id as usize]
+        } else {
+            self.icfgr[idx as usize]
+        };
+        get_bits!(reg, off = 2 * field + 1, len = 1) == 0
     }
 
     pub const fn group0_enabled(&self) -> bool {
