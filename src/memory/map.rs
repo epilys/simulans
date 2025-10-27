@@ -3,7 +3,7 @@
 
 //! Virtual machine Memory map
 
-use std::{collections::BTreeMap, ops::Range};
+use std::{cmp::Ordering, collections::BTreeMap, ops::Range};
 
 use crate::{
     interval_tree::IntervalTree,
@@ -114,8 +114,15 @@ impl MemoryMapBuilder {
             device_registry: _,
             interval_tree: _,
         } = self;
+        let regions: Vec<MemoryRegion> = entries.into_values().collect();
+        let index: Vec<((Address, Address), usize)> = regions
+            .iter()
+            .enumerate()
+            .map(|(i, x)| ((x.phys_offset, x.last_addr()), i))
+            .collect();
         MemoryMap {
-            regions: entries.into_values().collect(),
+            regions,
+            index,
             max_size,
         }
     }
@@ -158,6 +165,7 @@ impl Default for MemoryMapBuilder {
 #[derive(Debug)]
 pub struct MemoryMap {
     regions: Vec<MemoryRegion>,
+    index: Vec<((Address, Address), usize)>,
     max_size: MemorySize,
 }
 
@@ -184,24 +192,36 @@ impl MemoryMap {
 
     /// Return reference of region for given address.
     pub fn find_region(&self, addr: Address) -> Option<&MemoryRegion> {
-        let index = match self.regions.binary_search_by_key(&addr, |x| x.phys_offset) {
-            Ok(x) => Some(x),
-            // Within the closest region with starting address < addr
-            Err(x) if (x > 0 && addr.0 <= self.regions[x - 1].last_addr().0) => Some(x - 1),
-            _ => None,
-        };
-        index.and_then(|x| self.regions.get(x))
+        self.index
+            .binary_search_by(|(probe, _)| {
+                if addr < probe.0 {
+                    Ordering::Greater
+                } else if addr > probe.1 {
+                    Ordering::Less
+                } else {
+                    Ordering::Equal
+                }
+            })
+            .ok()
+            .and_then(|i| self.index.get(i))
+            .and_then(|(_, i)| self.regions.get(*i))
     }
 
     /// Return mutable reference of region for given address.
     pub fn find_region_mut(&mut self, addr: Address) -> Option<&mut MemoryRegion> {
-        let index = match self.regions.binary_search_by_key(&addr, |x| x.phys_offset) {
-            Ok(x) => Some(x),
-            // Within the closest region with starting address < addr
-            Err(x) if (x > 0 && addr.0 <= self.regions[x - 1].last_addr().0) => Some(x - 1),
-            _ => None,
-        };
-        index.and_then(|x| self.regions.get_mut(x))
+        self.index
+            .binary_search_by(|(probe, _)| {
+                if addr < probe.0 {
+                    Ordering::Greater
+                } else if addr > probe.1 {
+                    Ordering::Less
+                } else {
+                    Ordering::Equal
+                }
+            })
+            .ok()
+            .and_then(|i| self.index.get(i))
+            .and_then(|(_, i)| self.regions.get_mut(*i))
     }
 
     /// Returns an iterator of memory regions.
