@@ -140,6 +140,10 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     for mem in pl011.into_memory_regions() {
         memory_map_builder.add_region(mem)?;
     }
+    let pl031 = simulans::devices::pl031::PL031State::new(2, Address(0x9010000), &interrupts);
+    for mem in pl031.into_memory_regions() {
+        memory_map_builder.add_region(mem)?;
+    }
     let gicv2 = simulans::devices::gicv2::GicV2::new(
         1,
         Address(0x08000000),

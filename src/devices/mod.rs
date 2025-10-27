@@ -7,6 +7,7 @@
 
 pub mod gicv2;
 pub mod pl011;
+pub mod pl031;
 pub mod timer;
 
 use crate::memory::{MemoryRegion, Width};
