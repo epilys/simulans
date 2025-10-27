@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use crate::{
     devices::{DeviceOps, MemoryTxResult},
     machine::interrupts::{InterruptGenerator, Interrupts},
-    memory::{Address, MemoryRegion, MemorySize, Width},
+    memory::{Address, DeviceID, MemoryRegion, MemorySize, Width},
 };
 
 #[repr(C)]
@@ -27,14 +27,14 @@ pub struct PL031Registers {
 /// PL031 Device Model
 pub struct PL031State {
     /// Device ID.
-    pub device_id: u64,
+    pub device_id: DeviceID,
     address: Address,
     regs: Arc<Mutex<PL031Registers>>,
     irq_generator: InterruptGenerator,
 }
 
 impl crate::devices::Device for PL031State {
-    fn id(&self) -> u64 {
+    fn id(&self) -> DeviceID {
         self.device_id
     }
 
@@ -62,7 +62,7 @@ impl crate::devices::Device for PL031State {
 
 #[derive(Debug)]
 struct PL031MemoryOps {
-    device_id: u64,
+    device_id: DeviceID,
     regs: Arc<Mutex<PL031Registers>>,
     // [ref:TODO]: Implement interrupt/alarm function
     #[allow(dead_code)]
@@ -70,7 +70,7 @@ struct PL031MemoryOps {
 }
 
 impl DeviceOps for PL031MemoryOps {
-    fn id(&self) -> u64 {
+    fn id(&self) -> DeviceID {
         self.device_id
     }
 
@@ -256,7 +256,7 @@ impl crate::devices::DeviceTreeExt for PL031MemoryOps {
 }
 
 impl PL031State {
-    pub fn new(device_id: u64, address: Address, interrupts: &Interrupts) -> Self {
+    pub fn new(device_id: DeviceID, address: Address, interrupts: &Interrupts) -> Self {
         let irq_generator = interrupts.generator.clone();
         Self {
             device_id,

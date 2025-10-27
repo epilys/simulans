@@ -8,6 +8,8 @@ use std::{
     sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender},
 };
 
+use crate::memory::DeviceID;
+
 #[derive(Copy, Clone, Debug)]
 pub struct InterruptRequest {
     pub interrupt_id: u16,
@@ -23,7 +25,7 @@ pub struct InterruptGenerator {
 pub struct Interrupts {
     pub generator: InterruptGenerator,
     generator_rcv: Receiver<InterruptRequest>,
-    subscribers: BTreeMap<u64, Box<dyn Fn(InterruptRequest) + Send + Sync>>,
+    subscribers: BTreeMap<DeviceID, Box<dyn Fn(InterruptRequest) + Send + Sync>>,
     fiq_rcv: Receiver<u8>,
     irq_rcv: Receiver<u8>,
     fiq_sender: FiqSignal,
@@ -115,7 +117,7 @@ impl Interrupts {
 
     pub fn subscribe(
         &mut self,
-        device_id: u64,
+        device_id: DeviceID,
         handler: Box<dyn Fn(InterruptRequest) + Send + Sync>,
     ) {
         // FIXME: what about overridden values?

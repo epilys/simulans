@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, num::NonZero};
 
 pub use vm_fdt::FdtWriter;
 
-use crate::memory::{Address, MemoryMap, MemorySize};
+use crate::memory::{Address, DeviceID, MemoryMap, MemorySize};
 
 /// Maximum allowed size in bytes.
 pub const FDT_MAX_SIZE: u64 = 0x200000;
@@ -85,7 +85,7 @@ impl<'a> FdtBuilder<'a> {
     pub fn build(self) -> Result<Fdt, Box<dyn std::error::Error>> {
         let mut fdt = FdtWriter::new()?;
         let mut stdout_path = None;
-        let mut device_mem_desc: BTreeMap<u64, Vec<DeviceMemoryDescription>> = BTreeMap::new();
+        let mut device_mem_desc: BTreeMap<DeviceID, Vec<DeviceMemoryDescription>> = BTreeMap::new();
 
         for (r, mem_id, ops, dt_ops) in self
             .memory_map

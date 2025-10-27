@@ -15,6 +15,7 @@ use crate::{
 pub struct MemoryMapBuilder {
     interval_tree: IntervalTree<Address>,
     entries: BTreeMap<Address, MemoryRegion>,
+    device_registry: DeviceRegistry,
     max_size: MemorySize,
 }
 
@@ -53,9 +54,15 @@ impl MemoryMapBuilder {
             MemorySize(std::num::NonZero::new(MemorySize::MiB.get() * 1024 * 512).unwrap());
         Self {
             max_size: MAX_SIZE,
+            device_registry: DeviceRegistry::new(),
             entries: BTreeMap::default(),
             interval_tree: IntervalTree::default(),
         }
+    }
+
+    #[inline]
+    pub fn device_registry(&mut self) -> &mut DeviceRegistry {
+        &mut self.device_registry
     }
 
     /// Adds a memory region, takes a mutable reference to `self`.
@@ -104,6 +111,7 @@ impl MemoryMapBuilder {
         let Self {
             entries,
             max_size,
+            device_registry: _,
             interval_tree: _,
         } = self;
         MemoryMap {
@@ -199,5 +207,31 @@ impl MemoryMap {
     /// Returns an iterator of memory regions.
     pub fn iter(&self) -> impl Iterator<Item = &MemoryRegion> {
         self.regions.iter()
+    }
+}
+
+#[derive(Copy, Clone, PartialOrd, Ord, Debug, PartialEq, Eq, Hash)]
+pub struct DeviceID(u64);
+
+#[derive(Debug)]
+pub struct DeviceRegistry {
+    counter: u64,
+}
+
+impl DeviceRegistry {
+    pub fn new() -> Self {
+        Self { counter: 0 }
+    }
+
+    pub fn register(&mut self) -> DeviceID {
+        let id = self.counter;
+        self.counter += 1;
+        DeviceID(id)
+    }
+}
+
+impl Default for DeviceRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -10,12 +10,12 @@ pub mod pl011;
 pub mod pl031;
 pub mod timer;
 
-use crate::memory::{MemoryRegion, Width};
+use crate::memory::{DeviceID, MemoryRegion, Width};
 
 /// Trait for device operations.
 pub trait Device: std::fmt::Debug {
     /// Returns device ID.
-    fn id(&self) -> u64;
+    fn id(&self) -> DeviceID;
     /// Returns device I/O memory regions.
     fn into_memory_regions(self) -> Vec<MemoryRegion>;
 }
@@ -29,7 +29,7 @@ pub trait CharBackendExt: DeviceOps {
 /// Trait for device memory operations.
 pub trait DeviceOps: std::fmt::Debug + Send + Sync {
     /// Returns unique device ID.
-    fn id(&self) -> u64;
+    fn id(&self) -> DeviceID;
     /// Performs a read.
     fn read(&self, address_inside_region: u64, width: Width) -> MemoryTxResult<u64>;
     /// Performs a write.
@@ -66,7 +66,7 @@ pub mod tube {
     use crate::{
         cpu_state::ExitRequest,
         devices::{DeviceOps, MemoryTxResult},
-        memory::{Address, MemoryRegion, MemorySize, Width},
+        memory::{Address, DeviceID, MemoryRegion, MemorySize, Width},
     };
 
     #[derive(Debug)]
@@ -74,20 +74,20 @@ pub mod tube {
     /// tests.
     pub struct Tube {
         /// Unique device ID.
-        pub device_id: u64,
+        pub device_id: DeviceID,
         pub address: Address,
     }
 
     impl Tube {
         /// Create a new tube device that will write request power off if `1` is
         /// written to it
-        pub const fn new(device_id: u64, address: Address) -> Self {
+        pub const fn new(device_id: DeviceID, address: Address) -> Self {
             Self { device_id, address }
         }
     }
 
     impl crate::devices::Device for Tube {
-        fn id(&self) -> u64 {
+        fn id(&self) -> DeviceID {
             self.device_id
         }
 
@@ -105,11 +105,11 @@ pub mod tube {
 
     #[derive(Debug)]
     struct TubeOps {
-        device_id: u64,
+        device_id: DeviceID,
     }
 
     impl DeviceOps for TubeOps {
-        fn id(&self) -> u64 {
+        fn id(&self) -> DeviceID {
             self.device_id
         }
 

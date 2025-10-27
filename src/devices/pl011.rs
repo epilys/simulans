@@ -11,7 +11,7 @@ use crate::{
         interrupts::{InterruptGenerator, InterruptRequest, Interrupts},
         CharBackendWriter,
     },
-    memory::{Address, MemoryRegion, MemorySize, Width},
+    memory::{Address, DeviceID, MemoryRegion, MemorySize, Width},
     tracing,
 };
 
@@ -24,9 +24,9 @@ pub const PL011_FIFO_DEPTH: u32 = 16;
 
 /// Device ID that the UART reports.
 #[derive(Clone, Copy)]
-struct DeviceId(&'static [u8; 8]);
+struct Pl011DeviceId(&'static [u8; 8]);
 
-impl std::ops::Index<u64> for DeviceId {
+impl std::ops::Index<u64> for Pl011DeviceId {
     type Output = u8;
 
     fn index(&self, idx: u64) -> &Self::Output {
@@ -86,18 +86,19 @@ pub struct PL011Registers {
 /// PL011 Device Model
 pub struct PL011State {
     /// Device ID.
-    pub device_id: u64,
+    pub device_id: DeviceID,
     address: Address,
     char_backend: CharBackendWriter,
     irq_generator: InterruptGenerator,
 }
 
 impl PL011State {
-    const DEVICE_ID: DeviceId = DeviceId(&[0x11, 0x10, 0x14, 0x00, 0x0d, 0xf0, 0x05, 0xb1]);
+    const DEVICE_ID: Pl011DeviceId =
+        Pl011DeviceId(&[0x11, 0x10, 0x14, 0x00, 0x0d, 0xf0, 0x05, 0xb1]);
 }
 
 impl crate::devices::Device for PL011State {
-    fn id(&self) -> u64 {
+    fn id(&self) -> DeviceID {
         self.device_id
     }
 
@@ -445,7 +446,7 @@ impl PL011Registers {
 
 #[derive(Debug)]
 struct PL011MemoryOps {
-    device_id: u64,
+    device_id: DeviceID,
     char_backend: CharBackendWriter,
     interrupts: [u16; 6],
     regs: Arc<Mutex<PL011Registers>>,
@@ -453,7 +454,7 @@ struct PL011MemoryOps {
 }
 
 impl DeviceOps for PL011MemoryOps {
-    fn id(&self) -> u64 {
+    fn id(&self) -> DeviceID {
         self.device_id
     }
 
@@ -590,7 +591,7 @@ impl CharBackendExt for PL011MemoryOps {
 
 impl PL011State {
     pub fn new(
-        device_id: u64,
+        device_id: DeviceID,
         address: Address,
         char_backend: CharBackendWriter,
         interrupts: &Interrupts,

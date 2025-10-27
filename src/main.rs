@@ -130,28 +130,32 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     };
     let char_backend = machine::CharBackend::new_stdio();
     let mut interrupts = machine::Interrupts::new();
-    let mut memory_map_builder = MemoryMap::builder().with_region(dram)?;
+    let mut memory_builder = MemoryMap::builder().with_region(dram)?;
     let pl011 = simulans::devices::pl011::PL011State::new(
-        0,
+        memory_builder.device_registry().register(),
         Address(0x9000000),
         char_backend.writer.clone(),
         &interrupts,
     );
     for mem in pl011.into_memory_regions() {
-        memory_map_builder.add_region(mem)?;
+        memory_builder.add_region(mem)?;
     }
-    let pl031 = simulans::devices::pl031::PL031State::new(2, Address(0x9010000), &interrupts);
+    let pl031 = simulans::devices::pl031::PL031State::new(
+        memory_builder.device_registry().register(),
+        Address(0x9010000),
+        &interrupts,
+    );
     for mem in pl031.into_memory_regions() {
-        memory_map_builder.add_region(mem)?;
+        memory_builder.add_region(mem)?;
     }
     let gicv2 = simulans::devices::gicv2::GicV2::new(
-        1,
+        memory_builder.device_registry().register(),
         Address(0x08000000),
         Address(0x08010000),
         &mut interrupts,
     );
     for mem in gicv2.into_memory_regions() {
-        memory_map_builder.add_region(mem)?;
+        memory_builder.add_region(mem)?;
     }
     if args.generate_fdt {
         // Add Boot ROM
@@ -165,9 +169,9 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
             rom.read_only = true;
         }
 
-        memory_map_builder.add_region(boot_rom)?;
+        memory_builder.add_region(boot_rom)?;
     }
-    let memory = memory_map_builder.build();
+    let memory = memory_builder.build();
     let mut machine = machine::Armv8AMachine::new(memory, char_backend, interrupts);
     machine.cpu_state.PSTATE_mut().set_EL(args.el());
     // disas(&input, args.entry_point_address().0)?;

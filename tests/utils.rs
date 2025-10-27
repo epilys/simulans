@@ -65,10 +65,13 @@ pub fn make_test_machine(
     memory_size: MemorySize,
     memory_start: Address,
 ) -> Pin<Box<Armv8AMachine>> {
-    let tube = simulans::devices::tube::Tube::new(0, Address(0x0d800020));
     let mut memory = MemoryMap::builder()
         .with_region(MemoryRegion::new("ram", memory_size, memory_start).unwrap())
         .unwrap();
+    let tube = simulans::devices::tube::Tube::new(
+        memory.device_registry().register(),
+        Address(0x0d800020),
+    );
 
     for mem in tube.into_memory_regions() {
         memory.add_region(mem).unwrap();

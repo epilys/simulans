@@ -15,7 +15,7 @@ use crate::{
     devices::{DeviceOps, DeviceTreeExt, DeviceTreeOps, MemoryTxResult},
     get_bits,
     machine::interrupts::{FiqSignal, InterruptRequest, Interrupts, IrqSignal},
-    memory::{Address, MemoryRegion, MemorySize, Width},
+    memory::{Address, DeviceID, MemoryRegion, MemorySize, Width},
     set_bits, tracing,
 };
 
@@ -149,7 +149,7 @@ fn highest_priority_pending_interrupt(gicd: &Gicd, cpu_id: u8) -> u16 {
 #[derive(Debug)]
 pub struct GicV2 {
     /// Device ID.
-    device_id: u64,
+    device_id: DeviceID,
     dist: Address,
     cpu_if: Address,
     state: Arc<Mutex<State>>,
@@ -160,7 +160,7 @@ impl GicV2 {
     const CPUIF_MEM_ID: u64 = 1;
 
     pub fn new(
-        device_id: u64,
+        device_id: DeviceID,
         dist: Address,
         cpu_if: Address,
         interrupts: &mut Interrupts,
@@ -224,7 +224,7 @@ impl GicV2 {
 }
 
 impl crate::devices::Device for GicV2 {
-    fn id(&self) -> u64 {
+    fn id(&self) -> DeviceID {
         self.device_id
     }
 
@@ -266,14 +266,14 @@ impl crate::devices::Device for GicV2 {
 #[derive(Debug)]
 struct GicV2DistMemoryOps {
     cpu_id: u8,
-    device_id: u64,
+    device_id: DeviceID,
     state: Arc<Mutex<State>>,
 }
 
 // Note: The GICD_IPRIORITYR, GICD_ITARGETSR, GICD_CPENDSGIR, ad GICD_SPENDSGIR
 // registers support byte accesses
 impl DeviceOps for GicV2DistMemoryOps {
-    fn id(&self) -> u64 {
+    fn id(&self) -> DeviceID {
         self.device_id
     }
 
@@ -732,13 +732,13 @@ impl DeviceTreeExt for GicV2DistMemoryOps {
 
 #[derive(Debug)]
 struct GicV2CPUMemoryOps {
-    device_id: u64,
+    device_id: DeviceID,
     cpu_id: u8,
     state: Arc<Mutex<State>>,
 }
 
 impl DeviceOps for GicV2CPUMemoryOps {
-    fn id(&self) -> u64 {
+    fn id(&self) -> DeviceID {
         self.device_id
     }
 

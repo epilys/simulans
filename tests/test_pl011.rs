@@ -26,16 +26,20 @@ fn test_uart_write_str() {
         let buffer = Default::default();
         let char_backend = CharBackend::new_sink(Arc::clone(&buffer));
         let interrupts = Default::default();
+        let mut memory_builder = MemoryMap::builder()
+            .with_region(MemoryRegion::new("ram", DRAM_MEMORY_SIZE, entry_point).unwrap())
+            .unwrap();
         let pl011 = simulans::devices::pl011::PL011State::new(
-            0,
+            memory_builder.device_registry().register(),
             pl011_addr,
             char_backend.writer.clone(),
             &interrupts,
         );
-        let tube = simulans::devices::tube::Tube::new(0, Address(0x0d800020));
-        let memory = MemoryMap::builder()
-            .with_region(MemoryRegion::new("ram", DRAM_MEMORY_SIZE, entry_point).unwrap())
-            .unwrap()
+        let tube = simulans::devices::tube::Tube::new(
+            memory_builder.device_registry().register(),
+            Address(0x0d800020),
+        );
+        let memory = memory_builder
             .with_region(pl011.into_memory_regions().pop().unwrap())
             .unwrap()
             .with_region(tube.into_memory_regions().pop().unwrap())
