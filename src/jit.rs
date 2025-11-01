@@ -4365,7 +4365,38 @@ impl BlockTranslator<'_> {
             Op::SSUBL2 => todo!(),
             Op::SSUBW => todo!(),
             Op::SSUBW2 => todo!(),
-            Op::ST1 => todo!(),
+            Op::ST1 => {
+                let (targets, arrspec) = match instruction.operands()[0] {
+                    bad64::Operand::MultiReg { regs, arrspec } => (regs, arrspec.unwrap()),
+                    other => unexpected_operand!(other),
+                };
+                let element_address = self.translate_operand(&instruction.operands()[1]);
+                let element_width = arrspec.into();
+                for (i, v) in targets.into_iter().enumerate() {
+                    let Some(reg) = v else {
+                        break;
+                    };
+                    let target = self.simd_reg_to_var(&reg, Some(arrspec), true);
+                    let value = self.simd_reg_view_to_value(target, Some(arrspec));
+                    let element_address = self.builder.ins().iadd_imm(
+                        element_address,
+                        i as i64 * i64::from(element_width as i32 / 8),
+                    );
+                    let element_value = self.generate_read(element_address, element_width);
+                    let value = self.set_elem(value, i as i64, element_width, element_value);
+                    write_to_register!(
+                        target,
+                        TypedValue {
+                            value,
+                            width: target.width,
+                        }
+                    );
+                }
+                if let Some(ref mut _wr) = self.writebacks.last_mut() {
+                    todo!()
+                }
+                write_back!();
+            }
             Op::ST1B => todo!(),
             Op::ST1D => todo!(),
             Op::ST1H => todo!(),
