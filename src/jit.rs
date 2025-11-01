@@ -3061,6 +3061,17 @@ impl BlockTranslator<'_> {
                 );
             }
             Op::DUPM => todo!(),
+            Op::UMOV => {
+                let target = get_destination_register!();
+                let (value, arrspec) = match instruction.operands()[1] {
+                    bad64::Operand::Reg { ref reg, arrspec } => {
+                        (self.reg_to_value(reg, arrspec), arrspec.unwrap())
+                    }
+                    other => unexpected_operand!(other),
+                };
+                let width = arrspec.into();
+                write_to_register!(target, TypedValue { value, width });
+            }
             Op::DVP => todo!(),
             Op::EORS => todo!(),
             Op::EORV => todo!(),
@@ -4707,7 +4718,6 @@ impl BlockTranslator<'_> {
             Op::UMMLA => todo!(),
             Op::UMOPA => todo!(),
             Op::UMOPS => todo!(),
-            Op::UMOV => todo!(),
             Op::UMSUBL => {
                 // Unsigned Multiply-Subtract Long
                 // multiplies two 32-bit register values,
