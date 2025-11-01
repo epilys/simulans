@@ -1007,7 +1007,6 @@ pub struct Gicd {
     pub typer: u32,
     /// Distributor Implementer Identification Register.
     pub iidr: u32,
-    _reserved_0: [u32; 0x1D],
     /// Interrupt Group Registers
     pub igroupr: [u32; 32],
     /// `GICD_IGROUPR0` is banked for each processor
@@ -1034,7 +1033,6 @@ pub struct Gicd {
     pub icfgr: [u32; 0x40],
     /// Banked `GICD_ICFGR1` for each processor
     pub icfgr1: [u32; 8],
-    _reserved_1: [u32; 0x80],
     /// Software Generated Interrupt Register.
     pub sgir: u32,
     /// Last valid Interrupt ID read from the `GICC_IAR`.
@@ -1047,7 +1045,6 @@ impl Gicd {
             ctlr: 0,
             typer: 0b11111,
             iidr: 0,
-            _reserved_0: [0; 0x1D],
             igroupr: [0; 32],
             igroupr0: [0; 8],
             enabled_interrupts: [0; 32],
@@ -1062,7 +1059,6 @@ impl Gicd {
             itargetsr: [0; 0x100],
             icfgr: [0; 0x40],
             icfgr1: [0; 8],
-            _reserved_1: [0; 0x80],
             sgir: 0,
             last_acknowledged_interrupt: None,
         }
@@ -1469,10 +1465,8 @@ pub struct Gicc {
     pub aiar: u32,
     /// Aliased Highest Priority Pending Interrupt Register
     pub ahppir: u32,
-    _reserved_0: [u32; 0x34],
     /// CPU Interface Identification Register.
     pub iidr: u32,
-    _reserved_1: [u32; 0x3C0],
     /// Deactivate Interrupt Register.
     pub dir: u32,
 }
@@ -1490,9 +1484,7 @@ impl Gicc {
             abpr: MINIMUM_BINARY_POINT as u32 + 1,
             aiar: 0x000003ff,
             ahppir: 0x000003ff,
-            _reserved_0: [0; 0x34],
             iidr: 0x2 << 16,
-            _reserved_1: [0; 0x3C0],
             dir: 0,
         }
     }
