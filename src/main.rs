@@ -157,6 +157,18 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     for mem in gicv2.into_memory_regions() {
         memory_builder.add_region(mem)?;
     }
+    let virtio_mmio = simulans::devices::virtio_mmio::VirtioMMIO::new(
+        memory_builder.device_registry().register(),
+        17,
+        None,
+        Address(0xa000000),
+        // memory_builder.change_notifier.0.clone(),
+        0x10,
+        &mut interrupts,
+    );
+    for mem in virtio_mmio.into_memory_regions() {
+        memory_builder.add_region(mem)?;
+    }
     if args.generate_fdt {
         // Add Boot ROM
         let mut boot_rom = MemoryRegion::new(

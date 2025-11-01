@@ -34,6 +34,8 @@ tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 uluru = "3.1.0"
 vm-fdt = "0.3.0"
+zerocopy = { version = "=0.8.27", features = ["std"] }
+zerocopy-derive = { version = "=0.8.27" }
 
 [dev-dependencies]
 test-log = { version = "0.2", default-features = false, features = ["trace"] }

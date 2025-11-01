@@ -9,6 +9,7 @@ pub mod gicv2;
 pub mod pl011;
 pub mod pl031;
 pub mod timer;
+pub mod virtio_mmio;
 
 use crate::memory::{DeviceID, MemoryRegion, Width};
 
