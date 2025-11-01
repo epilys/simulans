@@ -42,11 +42,7 @@ impl PartialEq for MmappedMemory {
 impl Eq for MmappedMemory {}
 
 impl MmappedMemory {
-    pub fn new_region(
-        _name: &str,
-        size: MemorySize,
-        phys_offset: Address,
-    ) -> Result<super::MemoryRegion, Errno> {
+    pub fn new_region(_name: &str, size: MemorySize) -> Result<Self, Errno> {
         {
             extern "C" {
                 fn pthread_jit_write_protect_np(_: bool);
@@ -65,14 +61,10 @@ impl MmappedMemory {
             )
             .unwrap()
         };
-        Ok(super::MemoryRegion {
-            phys_offset,
-            size,
-            backing: super::MemoryBacking::Mmap(Self {
-                size: size_u.into(),
-                map,
-                read_only: false,
-            }),
+        Ok(Self {
+            size: size_u.into(),
+            map,
+            read_only: false,
         })
     }
 

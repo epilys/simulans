@@ -106,7 +106,11 @@ impl MemoryRegion {
             tracing::error!("Size {size} cannot fit to offset {phys_offset}, it overflows.");
             return Err(Errno::E2BIG);
         }
-        MmappedMemory::new_region(name, size, phys_offset)
+        Ok(Self {
+            phys_offset,
+            size,
+            backing: super::MemoryBacking::Mmap(MmappedMemory::new_region(name, size)?),
+        })
     }
 
     #[cfg(target_os = "macos")]
@@ -132,7 +136,11 @@ impl MemoryRegion {
         if size.get().checked_add(phys_offset.0).is_none() {
             return Err(Errno::E2BIG);
         }
-        MmappedMemory::new_file_region(name, path, size, phys_offset)
+        Ok(Self {
+            phys_offset,
+            size,
+            backing: super::MemoryBacking::Mmap(MmappedMemory::new_file_region(name, path, size)?),
+        })
     }
 
     /// Creates a new I/O memory region.

@@ -52,8 +52,7 @@ impl MmappedMemory {
         fd: OwnedFd,
         fs_path: Option<PathBuf>,
         size: MemorySize,
-        phys_offset: Address,
-    ) -> Result<super::MemoryRegion, Errno> {
+    ) -> Result<Self, Errno> {
         nix::unistd::ftruncate(&fd, size.get().try_into().unwrap())?;
         // SAFETY: `fd` is a valid file descriptor.
         let mut map = unsafe { memmap2::MmapOptions::new().map_mut(&fd).unwrap() };
@@ -69,39 +68,26 @@ impl MmappedMemory {
         _ = map.advise(memmap2::Advice::DontDump);
         let u_size: usize = size.get().try_into().map_err(|_| Errno::ERANGE)?;
         debug_assert_eq!(map.len(), u_size);
-        Ok(super::MemoryRegion {
-            phys_offset,
-            size,
-            backing: super::MemoryBacking::Mmap(Self {
-                name: name.to_string(),
-                fd,
-                map,
-                fs_path,
-                read_only: false,
-            }),
+        Ok(Self {
+            name: name.to_string(),
+            fd,
+            map,
+            fs_path,
+            read_only: false,
         })
     }
 
     /// Creates a new memfd-backed mmapped memory region.
-    pub fn new_region(
-        name: &str,
-        size: MemorySize,
-        phys_offset: Address,
-    ) -> Result<super::MemoryRegion, Errno> {
+    pub fn new_region(name: &str, size: MemorySize, phys_offset: Address) -> Result<Self, Errno> {
         let fd = memfd::memfd_create(
             CString::new(name).unwrap().as_c_str(),
             memfd::MFdFlags::MFD_CLOEXEC,
         )?;
-        Self::new_from_fd(name, fd, None, size, phys_offset)
+        Self::new_from_fd(name, fd, None, size)
     }
 
     /// Creates a new file-backed mmapped memory region.
-    pub fn new_file_region(
-        name: &str,
-        path: PathBuf,
-        size: MemorySize,
-        phys_offset: Address,
-    ) -> Result<super::MemoryRegion, Errno> {
+    pub fn new_file_region(name: &str, path: PathBuf, size: MemorySize) -> Result<Self, Errno> {
         let file = match std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -115,7 +101,7 @@ impl MmappedMemory {
             }
         };
         let fd = file.into();
-        Self::new_from_fd(name, fd, Some(path), size, phys_offset)
+        Self::new_from_fd(name, fd, Some(path), size)
     }
 
     #[inline]
