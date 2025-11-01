@@ -56,4 +56,27 @@ impl BlockTranslator<'_> {
         let value = self.builder.ins().ishl_imm(value, offset);
         self.builder.ins().bor(simd_value, value)
     }
+
+    pub fn compare_by_element(
+        &mut self,
+        a: Value,
+        b: Value,
+        size: Width,
+        arrspec: Option<ArrSpec>,
+        cond: IntCC,
+    ) -> Value {
+        let element_size = arrspec.map(Width::from).unwrap_or(size);
+        let elements = i64::from(i32::from(size) / i32::from(element_size));
+        let mut value = self.simd_iconst(size, 0);
+        for i in 0..elements {
+            let a = self.get_elem(a, i, element_size);
+            let b = self.get_elem(b, i, element_size);
+            let mut cmp = self.builder.ins().icmp(cond, a, b);
+            if element_size > Width::_8 {
+                cmp = self.builder.ins().uextend(element_size.into(), cmp);
+            }
+            value = self.set_elem(value, i, element_size, cmp);
+        }
+        value
+    }
 }
