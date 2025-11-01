@@ -240,8 +240,6 @@ impl MemoryRegionDescription {
 pub mod ops {
     //! Helper memory I/O functions for JIT code.
 
-    use std::mem::MaybeUninit;
-
     use super::*;
     use crate::{cpu_state::ExitRequest, tracing};
 
@@ -262,14 +260,20 @@ pub mod ops {
                         address = ?guest_address,
                         value = ?tracing::BinaryHex(value),
                     );
+                    // Check that we do not exceed region size
+                    assert!(
+                        address_inside_region as usize + std::mem::size_of::<$size>()
+                        <= self.len() as usize
+                    );
                     match self.backing {
                         MemoryBacking::Mmap(ref mut map @ MmappedMemory { .. }) => {
                             let destination =
                                 // SAFETY: when resolving the guest address to a memory region, we
-                                // essentially performed a bounds check so we know this offset is valid.
+                                // essentially performed a bounds check so we know this offset is
+                                // valid.
                                 unsafe { map.as_mut_ptr().add(address_inside_region as usize) };
-                            // SAFETY: this is safe as long as $size width does not exceed the map's
-                            // size. We don't check for this, so FIXME
+                            // SAFETY: this is safe since we checked that we do not exceed the
+                            // map's size.
                             Ok(unsafe { std::ptr::write_unaligned(destination.cast::<$size>(), value) })
                         }
                         MemoryBacking::Device((_, ref ops)) => {
@@ -288,23 +292,6 @@ pub mod ops {
                             )
                         }
                     }
-
-                }
-            }
-
-            /// Helper memory write struct called from JIT code.
-            pub extern "C" fn $fn(
-                mem_region: &mut MemoryRegion,
-                address_inside_region: u64,
-                value: $size,
-                exception: &mut MaybeUninit<ExitRequest>,
-            ) -> bool {
-                match mem_region.$fn(address_inside_region, value) {
-                    Ok(()) => true,
-                    Err(err) => {
-                        exception.write(err);
-                        false
-                    }
                 }
             }
         };
@@ -322,14 +309,19 @@ pub mod ops {
                         size = stringify!($size),
                         address = ?guest_address,
                     );
+                    // Check that we do not exceed region size
+                    assert!(
+                        address_inside_region as usize + std::mem::size_of::<$size>()
+                        <= self.len() as usize
+                    );
                     let value = match self.backing {
                         MemoryBacking::Mmap(ref map @ MmappedMemory {  .. }) => {
                             let destination =
                                 // SAFETY: when resolving the guest address to a memory region, we
                                 // essentially performed a bounds check so we know this offset is valid.
                                 unsafe { map.as_ptr().add(address_inside_region as usize) };
-                            // SAFETY: this is safe as long as $size width does not exceed the map's
-                            // size. We don't check for this, so FIXME
+                            // SAFETY: this is safe since we checked that we do not exceed the
+                            // map's size.
                             Ok(unsafe { std::ptr::read_unaligned(destination.cast::<$size>()) })
                         }
                         #[allow(clippy::cast_lossless)]
@@ -357,25 +349,6 @@ pub mod ops {
                         returning_value = ?tracing::BinaryHex(value),
                     );
                     Ok(value)
-                }
-            }
-
-            /// Helper memory read struct called from JIT code.
-            pub extern "C" fn $fn(
-                mem_region: &MemoryRegion,
-                address_inside_region: u64,
-                ret: &mut MaybeUninit<$size>,
-                exception: &mut MaybeUninit<ExitRequest>,
-            ) -> bool {
-                match mem_region.$fn(address_inside_region) {
-                    Ok(value) => {
-                        ret.write(value);
-                        true
-                    },
-                    Err(err) => {
-                        exception.write(err);
-                        false
-                    }
                 }
             }
         };
