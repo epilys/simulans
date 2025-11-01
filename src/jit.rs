@@ -4178,7 +4178,32 @@ impl BlockTranslator<'_> {
             Op::SHL => todo!(),
             Op::SHLL => todo!(),
             Op::SHLL2 => todo!(),
-            Op::SHRN => todo!(),
+            Op::SHRN => {
+                let target = get_destination_register!();
+                let target_element_size = Width::from(target.element.unwrap());
+                let (source_reg, source_element_size) = match instruction.operands()[1] {
+                    bad64::Operand::Reg { reg, arrspec } => (reg, Width::from(arrspec.unwrap())),
+                    other => unexpected_operand!(other),
+                };
+                let source_value = self.simd_reg_to_value(&source_reg, None);
+                let elements = i64::from(i32::from(target.width) / i32::from(target_element_size));
+                let shift = self.translate_operand(&instruction.operands()[2]);
+
+                let mut value = self.simd_iconst(target.width, 0);
+                for i in 0..elements {
+                    let elem = self.get_elem(source_value, i, source_element_size);
+                    let elem = self.builder.ins().ireduce(target_element_size.into(), elem);
+                    let elem = self.builder.ins().ushr(elem, shift);
+                    value = self.set_elem(value, i, target_element_size, elem);
+                }
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: target.width,
+                    }
+                );
+            }
             Op::SHRN2 => todo!(),
             Op::SM3PARTW1 => todo!(),
             Op::SM3PARTW2 => todo!(),
