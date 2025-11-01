@@ -2676,13 +2676,55 @@ impl BlockTranslator<'_> {
                 let value = self.builder.ins().clz(value);
                 write_to_register!(target, TypedValue { value, width });
             }
-            Op::CMEQ => todo!(),
-            Op::CMGE => todo!(),
-            Op::CMGT => todo!(),
-            Op::CMHI => todo!(),
-            Op::CMHS => todo!(),
-            Op::CMLE => todo!(),
-            Op::CMLT => todo!(),
+            Op::CMEQ => {
+                let target = get_destination_register!();
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let mut b = self.translate_operand(&instruction.operands()[2]);
+                let width = self.operand_width(&instruction.operands()[1]);
+                let width_2 = self.operand_width(&instruction.operands()[2]);
+                if width != width_2 {
+                    // second operand must be zero, so extend it
+                    assert_eq!(
+                        instruction.operands()[2],
+                        bad64::Operand::Imm32 {
+                            imm: bad64::Imm::Unsigned(0),
+                            shift: None,
+                        }
+                    );
+                    b = self.simd_iconst(width, 0);
+                }
+                let value = self.compare_by_element(a, b, width, target.element, IntCC::Equal);
+                write_to_register!(target, TypedValue { value, width });
+            }
+            Op::CMGT | Op::CMHI | Op::CMHS | Op::CMLE | Op::CMLT | Op::CMGE => {
+                let target = get_destination_register!();
+                let cond = match op {
+                    Op::CMGT => IntCC::SignedGreaterThan,
+                    Op::CMGE => IntCC::SignedGreaterThanOrEqual,
+                    Op::CMLE => IntCC::SignedLessThanOrEqual,
+                    Op::CMLT => IntCC::SignedLessThan,
+                    Op::CMHI => IntCC::UnsignedGreaterThan,
+                    Op::CMHS => IntCC::UnsignedGreaterThanOrEqual,
+                    _ => unreachable!(),
+                };
+                let a = self.translate_operand(&instruction.operands()[1]);
+                let mut b = self.translate_operand(&instruction.operands()[2]);
+                let width = self.operand_width(&instruction.operands()[1]);
+                let width_2 = self.operand_width(&instruction.operands()[2]);
+                if width != width_2 {
+                    // second operand must be zero, so extend it
+                    assert_eq!(
+                        instruction.operands()[2],
+                        bad64::Operand::Imm32 {
+                            imm: bad64::Imm::Unsigned(0),
+                            shift: None,
+                        }
+                    );
+                    b = self.simd_iconst(width, 0);
+                }
+                let value = self.compare_by_element(a, b, width, target.element, cond);
+                write_to_register!(target, TypedValue { value, width });
+            }
             Op::CMN => {
                 // Compare Negative (Alias of ADDS)
                 // [ref:needs_unit_test]
@@ -4519,10 +4561,7 @@ impl BlockTranslator<'_> {
                     bad64::Operand::Label(bad64::Imm::Unsigned(imm)) => imm,
                     other => unexpected_operand!(other),
                 };
-                let is_not_zero_value =
-                    self.builder
-                        .ins()
-                        .icmp_imm(cranelift::prelude::IntCC::NotEqual, result, 0);
+                let is_not_zero_value = self.builder.ins().icmp_imm(IntCC::NotEqual, result, 0);
                 let is_not_zero_value = self.builder.ins().uextend(I64, is_not_zero_value);
                 self.branch_if_non_zero(is_not_zero_value, label);
             }

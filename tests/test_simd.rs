@@ -64,3 +64,30 @@ fn test_simd_mov() {
     assert_hex_eq!(128 machine.cpu_state.vector_registers[5], 0x0001ffff0001ffff_u128);
     assert_hex_eq!(128 machine.cpu_state.vector_registers[6], 0x80808080u64);
 }
+
+#[test_log::test]
+fn test_simd_compares() {
+    const TEST_INPUT: &[u8] = include_bytes!("./inputs/test_simd_compares.bin");
+    utils::disas(TEST_INPUT, 0);
+    const MEMORY_SIZE: MemorySize =
+        MemorySize(NonZero::new((4 * TEST_INPUT.len()) as u64).unwrap());
+    let entry_point = Address(0);
+    let mut machine = utils::make_test_machine(MEMORY_SIZE, entry_point);
+    machine.cpu_state.vector_registers[0] = 0xcc00bb00aa00;
+    machine.cpu_state.vector_registers[1] = 0xcc00bb00aa00;
+    machine.cpu_state.vector_registers[2] = 0xcc00bb00aa00;
+    machine.cpu_state.vector_registers[3] = 0x03_02_01_00_01;
+    machine.cpu_state.vector_registers[4] = 0x03_02_01_00_01 << 64;
+    machine.cpu_state.vector_registers[5] =
+        (1_i64 as u64 as u128) | (((-42_i64) as u64 as u128) << 64);
+    machine.cpu_state.vector_registers[6] =
+        (((-42_i64) as u64) as u128) | (((1_i64 as u64) as u128) << 64);
+    main_loop(&mut machine, entry_point, TEST_INPUT).unwrap();
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[0], 0x0101_0101_0101_0101_0101_0001_0001_0001_u128);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[1], 0x01010101010101010101010101010101_u128);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[2], 0x0_u128);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[3], 0x01_01_01_00_01_u128);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[4], 0x01_01_01_00_01_u128 << 64);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[5], 0x1_u128);
+    assert_hex_eq!(128 machine.cpu_state.vector_registers[6], 0x1_u128 << 64);
+}
