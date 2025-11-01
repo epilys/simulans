@@ -1000,6 +1000,16 @@ impl BlockTranslator<'_> {
                         .bitcast(I32, MEMFLAG_LITTLE_ENDIAN, value)
                 }
                 Some(ArrSpec::SixteenBytes(None)) => value,
+                Some(ArrSpec::OneHalf(Some(lane))) => {
+                    value = self
+                        .builder
+                        .ins()
+                        .bitcast(I16X8, MEMFLAG_LITTLE_ENDIAN, value);
+                    value = self.builder.ins().extractlane(value, lane as u8);
+                    self.builder
+                        .ins()
+                        .bitcast(I16, MEMFLAG_LITTLE_ENDIAN, value)
+                }
                 other => unreachable!("{other:?}"),
             },
             Width::_64 => self.builder.ins().ireduce(I64, value),
@@ -3025,20 +3035,30 @@ impl BlockTranslator<'_> {
             Op::DUP => {
                 // Duplicate general-purpose register to vector
                 let target = get_destination_register!();
-                let value = self.translate_operand(&instruction.operands()[1]);
-                let width = target.width;
-                let value = match target.element {
-                    Some(ArrSpec::TwoDoubles(None)) => self.builder.ins().iconcat(value, value),
-                    Some(ArrSpec::SixteenBytes(None)) => {
-                        let value = self.builder.ins().ireduce(I8, value);
-                        let value = self.builder.ins().splat(I8X16, value);
-                        self.builder
-                            .ins()
-                            .bitcast(I128, MEMFLAG_LITTLE_ENDIAN, value)
+                let target_element_size = Width::from(target.element.unwrap());
+                let elem = {
+                    let mut elem = self.translate_operand(&instruction.operands()[1]);
+                    let width = self.operand_width(&instruction.operands()[1]);
+                    if width > target_element_size {
+                        elem = self.builder.ins().ireduce(target_element_size.into(), elem);
+                    } else if width < target_element_size {
+                        elem = self.builder.ins().uextend(target_element_size.into(), elem);
                     }
-                    other => unimplemented!("{other:?}"),
+                    elem
                 };
-                write_to_register!(target, TypedValue { value, width });
+                let elements = i64::from(i32::from(target.width) / i32::from(target_element_size));
+
+                let mut value = self.simd_iconst(target.width, 0);
+                for i in 0..elements {
+                    value = self.set_elem(value, i, target_element_size, elem);
+                }
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: target.width,
+                    }
+                );
             }
             Op::DUPM => todo!(),
             Op::DVP => todo!(),
