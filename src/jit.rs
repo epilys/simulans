@@ -4204,6 +4204,45 @@ impl BlockTranslator<'_> {
                     }
                 );
             }
+            Op::UMAXP => {
+                let target = get_destination_register!();
+                let (a_reg, element_size) = match instruction.operands()[1] {
+                    bad64::Operand::Reg { reg, arrspec } => (reg, Width::from(arrspec.unwrap())),
+                    other => unexpected_operand!(other),
+                };
+                let a_value = self.simd_reg_to_value(&a_reg, None);
+                let b_reg = match instruction.operands()[2] {
+                    bad64::Operand::Reg { reg, arrspec: _ } => reg,
+                    other => unexpected_operand!(other),
+                };
+                let b_value = self.simd_reg_to_value(&b_reg, None);
+                let elements = i64::from(i32::from(target.width) / i32::from(element_size));
+
+                let mut value = self.simd_iconst(target.width, 0);
+                for i in 0..elements {
+                    let a_idx = 2 * i;
+                    let b_idx = 2 * i + 1;
+                    let a = if a_idx < elements {
+                        self.get_elem(a_value, a_idx, element_size)
+                    } else {
+                        self.get_elem(b_value, a_idx - elements, element_size)
+                    };
+                    let b = if b_idx < elements {
+                        self.get_elem(a_value, b_idx, element_size)
+                    } else {
+                        self.get_elem(b_value, b_idx - elements, element_size)
+                    };
+                    let max = self.builder.ins().umax(a, b);
+                    value = self.set_elem(value, i, element_size, max);
+                }
+                write_to_register!(
+                    target,
+                    TypedValue {
+                        value,
+                        width: target.width,
+                    }
+                );
+            }
             Op::SHRN2 => todo!(),
             Op::SM3PARTW1 => todo!(),
             Op::SM3PARTW2 => todo!(),
@@ -5042,7 +5081,6 @@ impl BlockTranslator<'_> {
             | Op::FMINP
             | Op::SMAXP
             | Op::SMINP
-            | Op::UMAXP
             | Op::UMINP
             | Op::SADALP
             | Op::UADALP
