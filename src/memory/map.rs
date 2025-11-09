@@ -162,7 +162,7 @@ impl Default for MemoryMapBuilder {
 ///     "last address"
 /// );
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MemoryMap {
     regions: Vec<MemoryRegion>,
     index: Vec<((Address, Address), usize)>,
@@ -253,5 +253,211 @@ impl DeviceRegistry {
 impl Default for DeviceRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl vm_memory::guest_memory::GuestMemory for MemoryMap {
+    type R = MemoryRegion;
+
+    fn num_regions(&self) -> usize {
+        self.len()
+    }
+
+    fn find_region(&self, addr: vm_memory::guest_memory::GuestAddress) -> Option<&Self::R> {
+        self.find_region(Address(addr.0))
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Self::R> {
+        self.iter()
+    }
+}
+
+impl vm_memory::guest_memory::GuestMemoryRegion for MemoryRegion {
+    type B = ();
+
+    fn len(&self) -> vm_memory::guest_memory::GuestUsize {
+        self.len() as u64
+    }
+
+    fn start_addr(&self) -> vm_memory::guest_memory::GuestAddress {
+        vm_memory::guest_memory::GuestAddress(self.start_addr().0)
+    }
+
+    fn bitmap(&self) -> &Self::B {
+        &()
+    }
+
+    fn get_host_address(
+        &self,
+        addr: vm_memory::guest_memory::MemoryRegionAddress,
+    ) -> Result<*mut u8, vm_memory::guest_memory::Error> {
+        assert!(addr.0 < self.len() as u64);
+        // SAFETY: we checked that addr.0 is within bounds
+        Ok(unsafe {
+            self.as_mmap()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .map
+                .as_mut_ptr()
+                .add(addr.0 as usize)
+        })
+    }
+
+    fn get_slice(
+        &self,
+        offset: vm_memory::guest_memory::MemoryRegionAddress,
+        count: usize,
+    ) -> Result<
+        vm_memory::VolatileSlice<'_, vm_memory::bitmap::BS<'_, Self::B>>,
+        vm_memory::guest_memory::Error,
+    > {
+        assert!(offset.0 + (count as u64) < self.len() as u64);
+        let ptr = self.get_host_address(offset)?;
+        // SAFETY: we checked that slice offset and count is within bounds
+        Ok(unsafe { vm_memory::volatile_memory::VolatileSlice::new(ptr, count) })
+    }
+}
+
+impl vm_memory::bytes::Bytes<vm_memory::guest_memory::MemoryRegionAddress> for MemoryRegion {
+    type E = vm_memory::guest_memory::Error;
+
+    fn write(
+        &self,
+        buf: &[u8],
+        addr: vm_memory::guest_memory::MemoryRegionAddress,
+    ) -> Result<usize, Self::E> {
+        let addr = addr.0;
+
+        let len = buf
+            .len()
+            .min((self.len() - addr as usize).saturating_sub(buf.len()));
+
+        for (i, b) in buf.iter().take(len).enumerate() {
+            self.write_8(addr + i as u64, *b).unwrap();
+        }
+        Ok(len)
+    }
+
+    fn read(
+        &self,
+        buf: &mut [u8],
+        addr: vm_memory::guest_memory::MemoryRegionAddress,
+    ) -> Result<usize, Self::E> {
+        let addr = addr.0;
+
+        let len = buf
+            .len()
+            .min((self.len() - addr as usize).saturating_sub(buf.len()));
+
+        for (i, b) in buf.iter_mut().take(len).enumerate() {
+            *b = self.read_8(addr + i as u64).unwrap();
+        }
+        Ok(len)
+    }
+
+    fn write_slice(
+        &self,
+        _buf: &[u8],
+        _addr: vm_memory::guest_memory::MemoryRegionAddress,
+    ) -> Result<(), Self::E> {
+        todo!()
+    }
+
+    fn read_slice(
+        &self,
+        _buf: &mut [u8],
+        _addr: vm_memory::guest_memory::MemoryRegionAddress,
+    ) -> Result<(), Self::E> {
+        todo!()
+    }
+
+    fn read_from<F>(
+        &self,
+        _: vm_memory::guest_memory::MemoryRegionAddress,
+        _: &mut F,
+        _: usize,
+    ) -> std::result::Result<
+        usize,
+        <Self as vm_memory::Bytes<vm_memory::guest_memory::MemoryRegionAddress>>::E,
+    >
+    where
+        F: std::io::Read,
+    {
+        todo!()
+    }
+
+    fn read_exact_from<F>(
+        &self,
+        _: vm_memory::guest_memory::MemoryRegionAddress,
+        _: &mut F,
+        _: usize,
+    ) -> std::result::Result<
+        (),
+        <Self as vm_memory::Bytes<vm_memory::guest_memory::MemoryRegionAddress>>::E,
+    >
+    where
+        F: std::io::Read,
+    {
+        todo!()
+    }
+
+    fn write_to<F>(
+        &self,
+        _: vm_memory::guest_memory::MemoryRegionAddress,
+        _: &mut F,
+        _: usize,
+    ) -> std::result::Result<
+        usize,
+        <Self as vm_memory::Bytes<vm_memory::guest_memory::MemoryRegionAddress>>::E,
+    >
+    where
+        F: std::io::Write,
+    {
+        todo!()
+    }
+
+    fn write_all_to<F>(
+        &self,
+        _: vm_memory::guest_memory::MemoryRegionAddress,
+        _: &mut F,
+        _: usize,
+    ) -> std::result::Result<
+        (),
+        <Self as vm_memory::Bytes<vm_memory::guest_memory::MemoryRegionAddress>>::E,
+    >
+    where
+        F: std::io::Write,
+    {
+        todo!()
+    }
+
+    fn store<T: vm_memory::bytes::AtomicAccess>(
+        &self,
+        val: T,
+        addr: vm_memory::guest_memory::MemoryRegionAddress,
+        // [ref:atomics]
+        _order: core::sync::atomic::Ordering,
+    ) -> Result<(), Self::E> {
+        for (i, b) in val.as_slice().iter().enumerate() {
+            self.write_8(addr.0 + i as u64, *b).unwrap();
+        }
+        Ok(())
+    }
+
+    fn load<T: vm_memory::bytes::AtomicAccess>(
+        &self,
+        addr: vm_memory::guest_memory::MemoryRegionAddress,
+        // [ref:atomics]
+        _order: core::sync::atomic::Ordering,
+    ) -> Result<T, Self::E> {
+        // SAFETY: T is also ByteValued so it is PDT
+        let val: T = unsafe { std::mem::zeroed() };
+        let bytes_no = val.as_slice().len();
+        let mut bytes = vec![];
+        for i in 0..bytes_no {
+            bytes.push(self.read_8(addr.0 + i as u64).unwrap());
+        }
+        Ok(*T::from_slice(&bytes).unwrap())
     }
 }
