@@ -46,7 +46,7 @@ pub enum SysReg {
     ID_AA64SMFR0_EL1,
     /// `GMID_EL1`, Multiple tag transfer ID Register
     GMID_EL1,
-    /// [ref:TODO]: `ID_AA64DFR0_EL1` `AArch64` Debug Feature Register 0
+    /// `ID_AA64DFR0_EL1` `AArch64` Debug Feature Register 0
     ID_AA64DFR0_EL1,
     /// `ID_AA64MMFR1_EL1`, `AArch64` Memory Model Feature Register 1
     ID_AA64MMFR1_EL1,
