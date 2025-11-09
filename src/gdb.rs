@@ -273,6 +273,7 @@ impl GdbStubRunner {
                     );
                     return Err(TargetError::NonFatal);
                 };
+                let mmapped_region = mmapped_region.lock().unwrap();
                 let r: &[u8] =
                     &mmapped_region.as_ref()[address_inside_region.try_into().unwrap()..];
                 let r = &r[..max_bytes.min(r.len())];
@@ -326,7 +327,7 @@ impl GdbStubRunner {
                     .memory
                     .find_region_mut(phys_offset)
                     .unwrap()
-                    .as_mmap_mut()
+                    .as_mmap()
                 else {
                     tracing::event!(
                         target: tracing::TraceItem::Gdb.as_str(),
@@ -336,6 +337,7 @@ impl GdbStubRunner {
                     );
                     return Err(TargetError::NonFatal);
                 };
+                let mut mmapped_region = mmapped_region.lock().unwrap();
                 let r: &mut [u8] = &mut mmapped_region.as_mut()[address_inside_region as usize..];
                 let max_len = value.len().min(r.len());
                 let r = &mut r[..max_len];
@@ -1020,7 +1022,7 @@ impl GdbStubRunner {
                         .filter_map(|r| Some((r.as_mmap()?, r)))
                     {
                         entries.push(GdbMemoryMap {
-                            read_only: mmap.read_only,
+                            read_only: mmap.lock().unwrap().read_only,
                             start: region.start_addr().0,
                             length: (region.last_addr() - region.start_addr()).0,
                         });

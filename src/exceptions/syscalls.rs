@@ -42,7 +42,7 @@ fn print_char_buf(machine: &crate::machine::Armv8AMachine, addr: u64) -> Option<
     } = machine
         .translate_address(Address(addr), Address(addr), false, accessdesc)
         .ok()?;
-    let mmapped_region = mem_region.as_mmap()?;
+    let mmapped_region = mem_region.as_mmap()?.lock().unwrap();
     let r: &[u8] = &mmapped_region.as_ref()[address_inside_region.try_into().unwrap()..];
     let max_bytes = 1048;
     let r = &r[..max_bytes.min(r.len())];

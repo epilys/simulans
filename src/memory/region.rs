@@ -5,7 +5,11 @@
 
 #![allow(clippy::len_without_is_empty)]
 
-use std::{cmp::Ordering, ops::Range, path::PathBuf};
+use std::{
+    ops::Range,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -23,30 +27,31 @@ use crate::{
     memory::{Address, MemorySize, Width},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// Kind of memory backing.
 pub enum MemoryBacking {
     /// A mmapped region.
-    Mmap(MmappedMemory),
+    Mmap(Arc<Mutex<MmappedMemory>>),
     /// Device memory.
-    Device((u64, Box<dyn DeviceOps>)),
+    Device((u64, Arc<dyn DeviceOps>)),
 }
 
-impl PartialEq for MemoryBacking {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Mmap(ref a), Self::Mmap(ref b)) => a == b,
-            (Self::Device((ref id_a, ref a)), Self::Device((ref id_b, ref b))) => {
-                (id_a, a.id()) == (id_b, b.id())
-            }
-            _ => false,
-        }
-    }
-}
-
-impl Eq for MemoryBacking {}
+//impl PartialEq for MemoryBacking {
+//    fn eq(&self, other: &Self) -> bool {
+//        match (self, other) {
+//            (Self::Mmap(ref a), Self::Mmap(ref b)) => a == b,
+//            (Self::Device((ref id_a, ref a)), Self::Device((ref id_b, ref b)))
+// => {                (id_a, a.id()) == (id_b, b.id())
+//            }
+//            _ => false,
+//        }
+//    }
+//}
+//
+//impl Eq for MemoryBacking {}
 
 /// A virtual machine memory region.
+#[derive(Clone)]
 pub struct MemoryRegion {
     /// Offset from start of physical address space.
     pub phys_offset: Address,
@@ -65,29 +70,6 @@ impl std::fmt::Debug for MemoryRegion {
             .finish_non_exhaustive()
     }
 }
-
-impl Ord for MemoryRegion {
-    fn cmp(&self, other: &Self) -> Ordering {
-        let a = Range::<Address>::from(self);
-        let b = Range::<Address>::from(other);
-        (a.start, a.end).cmp(&(b.start, b.end))
-    }
-}
-
-impl PartialOrd for MemoryRegion {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for MemoryRegion {
-    fn eq(&self, other: &Self) -> bool {
-        (self.phys_offset, self.size, &self.backing)
-            == (other.phys_offset, other.size, &other.backing)
-    }
-}
-
-impl Eq for MemoryRegion {}
 
 impl From<&MemoryRegion> for Range<Address> {
     fn from(mr: &MemoryRegion) -> Self {
@@ -109,7 +91,9 @@ impl MemoryRegion {
         Ok(Self {
             phys_offset,
             size,
-            backing: super::MemoryBacking::Mmap(MmappedMemory::new_region(name, size)?),
+            backing: super::MemoryBacking::Mmap(Arc::new(Mutex::new(MmappedMemory::new_region(
+                name, size,
+            )?))),
         })
     }
 
@@ -139,7 +123,9 @@ impl MemoryRegion {
         Ok(Self {
             phys_offset,
             size,
-            backing: super::MemoryBacking::Mmap(MmappedMemory::new_file_region(name, path, size)?),
+            backing: super::MemoryBacking::Mmap(Arc::new(Mutex::new(
+                MmappedMemory::new_file_region(name, path, size)?,
+            ))),
         })
     }
 
@@ -156,7 +142,7 @@ impl MemoryRegion {
         Ok(Self {
             phys_offset,
             size,
-            backing: MemoryBacking::Device((id, ops)),
+            backing: MemoryBacking::Device((id, ops.into())),
         })
     }
 
@@ -197,17 +183,8 @@ impl MemoryRegion {
 
     #[inline]
     /// Returns reference to mmapped memory.
-    pub const fn as_mmap(&self) -> Option<&MmappedMemory> {
+    pub const fn as_mmap(&self) -> Option<&Arc<Mutex<MmappedMemory>>> {
         if let MemoryBacking::Mmap(ref inner) = self.backing {
-            return Some(inner);
-        }
-        None
-    }
-
-    #[inline]
-    /// Returns mutable reference to mmapped memory.
-    pub const fn as_mmap_mut(&mut self) -> Option<&mut MmappedMemory> {
-        if let MemoryBacking::Mmap(ref mut inner) = self.backing {
             return Some(inner);
         }
         None
@@ -255,7 +232,7 @@ pub mod ops {
         (write $fn:ident: $size:ty) => {
             impl MemoryRegion {
                 pub fn $fn(
-                    &mut self,
+                    &self,
                     address_inside_region: u64,
                     value: $size,
                 ) -> Result<(), ExitRequest> {
@@ -274,7 +251,8 @@ pub mod ops {
                         <= self.len() as usize
                     );
                     match self.backing {
-                        MemoryBacking::Mmap(ref mut map @ MmappedMemory { .. }) => {
+                        MemoryBacking::Mmap(ref map) => {
+                            let mut map = map.lock().unwrap();
                             let destination =
                                 // SAFETY: when resolving the guest address to a memory region, we
                                 // essentially performed a bounds check so we know this offset is
@@ -323,7 +301,8 @@ pub mod ops {
                         <= self.len() as usize
                     );
                     let value = match self.backing {
-                        MemoryBacking::Mmap(ref map @ MmappedMemory {  .. }) => {
+                        MemoryBacking::Mmap(ref map) => {
+                            let map = map.lock().unwrap();
                             let destination =
                                 // SAFETY: when resolving the guest address to a memory region, we
                                 // essentially performed a bounds check so we know this offset is valid.

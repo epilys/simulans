@@ -83,7 +83,7 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
             if tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE)
             {
                 if let Ok(code_area) = code_area(machine, virtual_pc, physical_pc) {
-                    let input = &code_area[..(tb.end as usize - tb.start as usize + 4)];
+                    let input = &code_area.as_slice()[..(tb.end as usize - tb.start as usize + 4)];
                     if let Ok(s) = crate::disas(input, virtual_pc) {
                         tracing::event!(
                             target: tracing::TraceItem::InAsm.as_str(),
@@ -112,7 +112,7 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
     };
 
     let block = match JitContext::new(machine_addr, &machine.debug_monitor.hw_breakpoints, jit)
-        .compile(code_area, virtual_pc, physical_pc.0)
+        .compile(code_area.as_slice(), virtual_pc, physical_pc.0)
     {
         Ok(b) => b,
         err @ Err(_) => {
@@ -121,7 +121,7 @@ pub extern "C" fn lookup_block(jit: &mut Jit, machine: &mut Armv8AMachine) -> En
         }
     };
     if tracing::event_enabled!(target: tracing::TraceItem::InAsm.as_str(), tracing::Level::TRACE) {
-        let input = &code_area[..(block.end as usize - block.start as usize + 4)];
+        let input = &code_area.as_slice()[..(block.end as usize - block.start as usize + 4)];
         if let Ok(s) = crate::disas(input, virtual_pc) {
             tracing::event!(
                 target: tracing::TraceItem::InAsm.as_str(),
@@ -169,10 +169,10 @@ pub fn translate_code_address(
 }
 
 fn code_area(
-    machine: &Armv8AMachine,
+    machine: &'_ Armv8AMachine,
     virtual_pc: u64,
     physical_pc: Address,
-) -> Result<&[u8], Box<dyn std::error::Error>> {
+) -> Result<CodeArea<'_>, Box<dyn std::error::Error>> {
     let mem_region = machine.memory.find_region(physical_pc).unwrap();
     let pc_offset = physical_pc.0 - mem_region.phys_offset.0;
     let Some(mmapped_region) = mem_region.as_mmap() else {
@@ -182,7 +182,21 @@ fn code_area(
         )
         .into());
     };
-    Ok(&mmapped_region.as_ref()[pc_offset.try_into().unwrap()..])
+    Ok(CodeArea {
+        guard: mmapped_region.lock().unwrap(),
+        offset: pc_offset.try_into().unwrap(),
+    })
+}
+
+struct CodeArea<'machine> {
+    guard: std::sync::MutexGuard<'machine, crate::memory::MmappedMemory>,
+    offset: usize,
+}
+
+impl<'machine> CodeArea<'machine> {
+    fn as_slice(&self) -> &[u8] {
+        &self.guard.as_ref()[self.offset..]
+    }
 }
 
 pub struct Jit {

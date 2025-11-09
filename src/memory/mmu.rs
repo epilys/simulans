@@ -1139,8 +1139,9 @@ pub extern "C" fn mem_zero(
                 return false;
             }
         };
-        let mem_region = machine.memory.find_region_mut(physical).unwrap();
-        if let Some(mmap) = mem_region.as_mmap_mut() {
+        let mem_region = machine.memory.find_region(physical).unwrap();
+        if let Some(mmap) = mem_region.as_mmap() {
+            let mut mmap = mmap.lock().unwrap();
             if mmap[address_inside_region as usize..].len() >= size as usize {
                 mmap[address_inside_region as usize..][..size as usize].fill(0);
                 return true;

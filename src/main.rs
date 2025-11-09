@@ -159,14 +159,14 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     }
     if args.generate_fdt {
         // Add Boot ROM
-        let mut boot_rom = MemoryRegion::new(
+        let boot_rom = MemoryRegion::new(
             "boot-rom",
             MemorySize::new(64 * MemorySize::MiB.get()).unwrap(),
             Address(0x0),
         )?;
-        if let Some(rom) = boot_rom.as_mmap_mut() {
+        if let Some(rom) = boot_rom.as_mmap() {
             // Read by gdbstub's memory map XML method.
-            rom.read_only = true;
+            rom.lock().unwrap().read_only = true;
         }
 
         memory_builder.add_region(boot_rom)?;

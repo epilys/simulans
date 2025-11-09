@@ -128,7 +128,7 @@ impl<'a> FdtBuilder<'a> {
             };
             // Skip boot rom
             // [ref:TODO]: add DRAM memory type
-            if mmap.read_only {
+            if mmap.lock().unwrap().read_only {
                 continue;
             }
             let mem_reg_prop = [region.start_addr().0, region.len() as u64];

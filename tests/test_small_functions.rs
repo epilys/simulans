@@ -77,6 +77,7 @@ fn test_load_stores() {
     let mem = machine.memory.find_region(entry_point).unwrap();
     let phys_offset = mem.phys_offset.0 as usize;
     let mem = mem.as_mmap().unwrap();
+    let mem = mem.lock().unwrap();
     assert_eq!(mem.as_ref()[stack_post as usize - phys_offset - 0x10], 0xef);
     assert_eq!(
         mem.as_ref()[stack_post as usize - phys_offset - 0x10 + 1],
@@ -115,6 +116,7 @@ fn test_load_stores_2() {
     let mem = machine.memory.find_region(entry_point).unwrap();
     let phys_offset = mem.phys_offset.0 as usize;
     let mem = mem.as_mmap().unwrap();
+    let mem = mem.lock().unwrap();
     assert_eq!(mem.as_ref()[stack_post as usize - phys_offset - 0x10], 0x34);
     assert_eq!(
         mem.as_ref()[stack_post as usize - phys_offset - 0x10 + 1],

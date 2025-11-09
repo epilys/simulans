@@ -198,7 +198,7 @@ impl Armv8AMachine {
             tracing::info!("Called `load_code` with empty slice which does nothing.");
             return Ok(());
         };
-        let Some(mem_region) = self.memory.find_region_mut(address) else {
+        let Some(mem_region) = self.memory.find_region(address) else {
             return Err(format!(
                 "Cannot load code to address {} which is not covered by a RAM memory region.",
                 address
@@ -223,7 +223,7 @@ impl Armv8AMachine {
             mem_region.size,
             Address(address_inside_region)
         );
-        let Some(mmapped_region) = mem_region.as_mmap_mut() else {
+        let Some(mmapped_region) = mem_region.as_mmap() else {
             return Err(format!(
                 "Cannot load code to address {} which is mapped to device memory",
                 address
@@ -236,6 +236,8 @@ impl Armv8AMachine {
             std::ptr::copy_nonoverlapping(
                 input.as_ptr(),
                 mmapped_region
+                    .lock()
+                    .unwrap()
                     .as_mut_ptr()
                     .add(address_inside_region as usize),
                 input.len(),

@@ -55,6 +55,7 @@ fn test_div() {
     let mem = machine.memory.find_region(entry_point).unwrap();
     let phys_offset = mem.phys_offset.0 as usize;
     let mem = mem.as_mmap().unwrap();
+    let mem = mem.lock().unwrap();
     assert_eq!(
         mem.as_ref()[stack_post as usize - phys_offset + 0x18 - 0x10],
         11
