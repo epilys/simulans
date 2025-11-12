@@ -73,6 +73,10 @@ impl Armv8AMachine {
     }
 
     fn poll(&mut self) -> bool {
+        if let Ok(req) = self.memory.request_notifier.1.try_recv() {
+            req.route(&self.memory);
+        }
+
         let (f_mask, i_mask) = {
             let daif = self.cpu_state.PSTATE().DAIF();
             (daif.F(), daif.I())

@@ -26,6 +26,22 @@ pub trait CharBackendExt: DeviceOps {
     fn receive(&self, buf: &[u8]);
 }
 
+pub trait VirtioExt: DeviceOps {
+    #[allow(clippy::too_many_arguments)]
+    fn queue_set_ready(
+        &self,
+        queue_selection: u32,
+        size: u32,
+        size_max: u32,
+        desc_address: u64,
+        driver_area_address: u64,
+        device_area_address: u64,
+        m: &crate::memory::MemoryMap,
+    );
+    fn queue_set_not_ready(&self, queue_selection: u32, m: &crate::memory::MemoryMap);
+    fn queue_notify(&self, queue_selection: u32, m: &crate::memory::MemoryMap);
+}
+
 /// Trait for device memory operations.
 pub trait DeviceOps: std::fmt::Debug + Send + Sync {
     /// Returns unique device ID.
@@ -46,11 +62,18 @@ pub trait DeviceOps: std::fmt::Debug + Send + Sync {
         // disabled by default
         None
     }
+
+    #[inline(always)]
+    fn supports_virtio(&'_ self) -> Option<VirtioOps<'_>> {
+        // disabled by default
+        None
+    }
 }
 
 pub use crate::fdt::DeviceTreeExt;
 pub type CharBackendOps<'a> = &'a dyn CharBackendExt;
 pub type DeviceTreeOps<'a> = &'a dyn DeviceTreeExt;
+pub type VirtioOps<'a> = &'a dyn VirtioExt;
 
 impl PartialEq for &dyn DeviceOps {
     fn eq(&self, other: &Self) -> bool {

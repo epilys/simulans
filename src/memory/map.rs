@@ -3,7 +3,12 @@
 
 //! Virtual machine Memory map
 
-use std::{cmp::Ordering, collections::BTreeMap, ops::Range};
+use std::{
+    cmp::Ordering,
+    collections::BTreeMap,
+    ops::Range,
+    sync::{mpsc, Arc},
+};
 
 use crate::{
     interval_tree::IntervalTree,
@@ -17,6 +22,74 @@ pub struct MemoryMapBuilder {
     entries: BTreeMap<Address, MemoryRegion>,
     device_registry: DeviceRegistry,
     max_size: MemorySize,
+    pub request_notifier: (mpsc::Sender<ServiceRequest>, mpsc::Receiver<ServiceRequest>),
+}
+
+pub type ServiceRequestNotifier = mpsc::Sender<ServiceRequest>;
+
+#[derive(Debug)]
+pub enum ServiceRequest {
+    VirtioQueueReady {
+        device_id: DeviceID,
+        queue_selection: u32,
+        size: u32,
+        size_max: u32,
+        desc_address: u64,
+        driver_area_address: u64,
+        device_area_address: u64,
+    },
+    VirtioQueueNotReady {
+        device_id: DeviceID,
+        queue_selection: u32,
+    },
+    VirtioQueueNotify {
+        device_id: DeviceID,
+        queue_selection: u32,
+    },
+}
+
+impl ServiceRequest {
+    pub fn route(self, map: &MemoryMap) {
+        match self {
+            Self::VirtioQueueReady {
+                device_id,
+                queue_selection,
+                size,
+                size_max,
+                desc_address,
+                driver_area_address,
+                device_area_address,
+            } => {
+                let dev = map.find_device_by_id(device_id, 0).unwrap();
+                let dev = dev.supports_virtio().unwrap();
+                dev.queue_set_ready(
+                    queue_selection,
+                    size,
+                    size_max,
+                    desc_address,
+                    driver_area_address,
+                    device_area_address,
+                    map,
+                );
+            }
+            Self::VirtioQueueNotReady {
+                device_id,
+                queue_selection,
+            } => {
+                let dev = map.find_device_by_id(device_id, 0).unwrap();
+                let dev = dev.supports_virtio().unwrap();
+                dev.queue_set_not_ready(queue_selection, map);
+            }
+            Self::VirtioQueueNotify {
+                device_id,
+                queue_selection,
+            } => {
+                let dev = map.find_device_by_id(device_id, 0).unwrap();
+                let dev = dev.supports_virtio().unwrap();
+                dev.queue_notify(queue_selection, map);
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -57,6 +130,7 @@ impl MemoryMapBuilder {
             device_registry: DeviceRegistry::new(),
             entries: BTreeMap::default(),
             interval_tree: IntervalTree::default(),
+            request_notifier: mpsc::channel(),
         }
     }
 
@@ -113,6 +187,7 @@ impl MemoryMapBuilder {
             max_size,
             device_registry: _,
             interval_tree: _,
+            request_notifier,
         } = self;
         let regions: Vec<MemoryRegion> = entries.into_values().collect();
         let index: Vec<((Address, Address), usize)> = regions
@@ -124,6 +199,7 @@ impl MemoryMapBuilder {
             regions,
             index,
             max_size,
+            request_notifier,
         }
     }
 }
@@ -162,11 +238,12 @@ impl Default for MemoryMapBuilder {
 ///     "last address"
 /// );
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MemoryMap {
     regions: Vec<MemoryRegion>,
     index: Vec<((Address, Address), usize)>,
     max_size: MemorySize,
+    pub request_notifier: (mpsc::Sender<ServiceRequest>, mpsc::Receiver<ServiceRequest>),
 }
 
 impl MemoryMap {
@@ -222,6 +299,25 @@ impl MemoryMap {
             .ok()
             .and_then(|i| self.index.get(i))
             .and_then(|(_, i)| self.regions.get_mut(*i))
+    }
+
+    pub fn find_device_by_id(
+        &self,
+        device_id: DeviceID,
+        region_id: u64,
+    ) -> Option<Arc<dyn crate::devices::DeviceOps>> {
+        self.regions.iter().find_map(|d| {
+            let crate::memory::MemoryBacking::Device((ref id, ref inner)) = d.backing else {
+                return None;
+            };
+            if *id != region_id {
+                return None;
+            }
+            if inner.id() != device_id {
+                return None;
+            }
+            Some(Arc::clone(inner))
+        })
     }
 
     /// Returns an iterator of memory regions.
