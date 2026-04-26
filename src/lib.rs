@@ -130,6 +130,8 @@ pub mod memory;
 #[macro_use]
 pub mod tracing;
 
+pub mod virtio;
+
 /// Returns bytes as a disassembled string for debugging.
 pub fn disas(input: &[u8], starting_address: u64) -> Result<String, Box<dyn std::error::Error>> {
     use std::fmt::Write;
