@@ -122,6 +122,10 @@ pub struct Args {
     #[arg(long, default_value = None, value_name = "FILE")]
     pub memory_backend: Option<PathBuf>,
 
+    /// Expose a virtio-rtc device to guest.
+    #[arg(long, default_value_t = false)]
+    pub virtio_rtc: bool,
+
     /// Path to binary file containing aarch64 instructions (NOT an ELF file!)
     #[arg(value_name = "BINARY")]
     pub binary: PathBuf,

@@ -3,6 +3,8 @@
 
 //! VIRTIO device backend implementations
 
+pub mod virtio_rtc;
+
 pub const VIRTIO_F_VERSION_1: u32 = 32;
 
 pub trait VirtioBackend: std::fmt::Debug + Send + Sync + 'static {
