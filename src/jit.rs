@@ -355,7 +355,7 @@ impl<'j> JitContext<'j> {
         );
         let set_exception_func = builder.ins().iconst(
             I64,
-            crate::machine::helper_set_exit_request as usize as u64 as i64,
+            crate::machine::helper_set_exit_request as *const () as u64 as i64,
         );
 
         let mut trans = BlockTranslator {
@@ -1441,7 +1441,7 @@ impl BlockTranslator<'_> {
                 let load_excl = self
                     .builder
                     .ins()
-                    .iconst(I64, crate::cpu_state::load_excl as usize as u64 as i64);
+                    .iconst(I64, crate::cpu_state::load_excl as *const () as u64 as i64);
                 let monitor_addr = self.builder.ins().iadd_imm(
                     self.machine_ptr,
                     std::mem::offset_of!(Armv8AMachine, cpu_state.monitor) as i64,
@@ -1465,7 +1465,7 @@ impl BlockTranslator<'_> {
                 let store_excl = self
                     .builder
                     .ins()
-                    .iconst(I64, crate::cpu_state::store_excl as usize as u64 as i64);
+                    .iconst(I64, crate::cpu_state::store_excl as *const () as u64 as i64);
                 let monitor_addr = self.builder.ins().iadd_imm(
                     self.machine_ptr,
                     std::mem::offset_of!(Armv8AMachine, cpu_state.monitor) as i64,
@@ -1514,7 +1514,7 @@ impl BlockTranslator<'_> {
                 let clrex = self
                     .builder
                     .ins()
-                    .iconst(I64, crate::cpu_state::clrex as usize as u64 as i64);
+                    .iconst(I64, crate::cpu_state::clrex as *const () as u64 as i64);
                 let monitor_addr = self.builder.ins().iadd_imm(
                     self.machine_ptr,
                     std::mem::offset_of!(Armv8AMachine, cpu_state.monitor) as i64,
@@ -2511,7 +2511,7 @@ impl BlockTranslator<'_> {
                 };
                 let func = self.builder.ins().iconst(
                     I64,
-                    crate::exceptions::aarch64_software_breakpoint as usize as u64 as i64,
+                    crate::exceptions::aarch64_software_breakpoint as *const () as u64 as i64,
                 );
                 let pc = self.builder.ins().iconst(I64, self.address as i64);
                 return self.emit_indirect_noreturn(
@@ -2968,7 +2968,7 @@ impl BlockTranslator<'_> {
                         let mem_zero = self
                             .builder
                             .ins()
-                            .iconst(I64, crate::memory::mmu::mem_zero as usize as u64 as i64);
+                            .iconst(I64, crate::memory::mmu::mem_zero as *const () as u64 as i64);
                         let call = self.builder.ins().call_indirect(
                             sigref,
                             mem_zero,
@@ -3035,7 +3035,7 @@ impl BlockTranslator<'_> {
                 };
                 let func = self.builder.ins().iconst(
                     I64,
-                    crate::exceptions::aarch64_exception_return as usize as u64 as i64,
+                    crate::exceptions::aarch64_exception_return as *const () as u64 as i64,
                 );
                 let pc = self.builder.ins().iconst(I64, self.address as i64);
                 return self.emit_indirect_noreturn(
@@ -3207,7 +3207,7 @@ impl BlockTranslator<'_> {
                 };
                 let func = self.builder.ins().iconst(
                     I64,
-                    crate::exceptions::aarch64_call_hypervisor as usize as u64 as i64,
+                    crate::exceptions::aarch64_call_hypervisor as *const () as u64 as i64,
                 );
                 let next_pc = self.builder.ins().iconst(I64, self.address as i64 + 4);
                 return self.emit_indirect_noreturn(
@@ -3239,7 +3239,7 @@ impl BlockTranslator<'_> {
                 };
                 let func = self.builder.ins().iconst(
                     I64,
-                    crate::exceptions::aarch64_call_supervisor as usize as u64 as i64,
+                    crate::exceptions::aarch64_call_supervisor as *const () as u64 as i64,
                 );
                 let next_pc = self.builder.ins().iconst(I64, self.address as i64 + 4);
                 return self.emit_indirect_noreturn(
@@ -4563,7 +4563,7 @@ impl BlockTranslator<'_> {
                 let func = self
                     .builder
                     .ins()
-                    .iconst(I64, crate::memory::mmu::tlbi as usize as u64 as i64);
+                    .iconst(I64, crate::memory::mmu::tlbi as *const () as u64 as i64);
                 let call = self
                     .builder
                     .ins()
@@ -5153,7 +5153,7 @@ impl BlockTranslator<'_> {
         let func = self
             .builder
             .ins()
-            .iconst(I64, set_exit_request as usize as u64 as i64);
+            .iconst(I64, set_exit_request as *const () as u64 as i64);
         let next_pc = self.builder.ins().iconst(I64, self.address as i64 + 4);
         let id = self.builder.ins().iconst(I8, i64::from(id as u8));
         let ret = self.emit_indirect_noreturn(self.address, sigref, func, &[self.machine_ptr, id]);
@@ -5171,7 +5171,7 @@ impl BlockTranslator<'_> {
         };
         let func = self.builder.ins().iconst(
             I64,
-            crate::exceptions::aarch64_undefined as usize as u64 as i64,
+            crate::exceptions::aarch64_undefined as *const () as u64 as i64,
         );
         let pc = self.builder.ins().iconst(I64, self.address as i64);
         self.emit_indirect_noreturn(self.address, sigref, func, &[self.machine_ptr, pc])
@@ -5215,7 +5215,7 @@ impl BlockTranslator<'_> {
         let translate_func = self
             .builder
             .ins()
-            .iconst(I64, lookup_block as usize as u64 as i64);
+            .iconst(I64, lookup_block as *const () as u64 as i64);
         self.builder.ins().return_(&[translate_func]);
     }
 

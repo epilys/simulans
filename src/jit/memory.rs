@@ -187,23 +187,23 @@ impl MemOpsTable {
     fn write(&self, width: Width) -> (i64, &codegen::ir::SigRef) {
         match width {
             Width::_8 => (
-                crate::memory::mmu::ops::write_8 as usize as u64 as i64,
+                crate::memory::mmu::ops::write_8 as *const () as u64 as i64,
                 &self.write_sigrefs[0],
             ),
             Width::_16 => (
-                crate::memory::mmu::ops::write_16 as usize as u64 as i64,
+                crate::memory::mmu::ops::write_16 as *const () as u64 as i64,
                 &self.write_sigrefs[1],
             ),
             Width::_32 => (
-                crate::memory::mmu::ops::write_32 as usize as u64 as i64,
+                crate::memory::mmu::ops::write_32 as *const () as u64 as i64,
                 &self.write_sigrefs[2],
             ),
             Width::_64 => (
-                crate::memory::mmu::ops::write_64 as usize as u64 as i64,
+                crate::memory::mmu::ops::write_64 as *const () as u64 as i64,
                 &self.write_sigrefs[3],
             ),
             Width::_128 => (
-                crate::memory::mmu::ops::write_128 as usize as u64 as i64,
+                crate::memory::mmu::ops::write_128 as *const () as u64 as i64,
                 &self.write_sigrefs[4],
             ),
         }
@@ -215,23 +215,23 @@ impl MemOpsTable {
     fn read(&self, width: Width) -> (i64, &codegen::ir::SigRef) {
         match width {
             Width::_8 => (
-                crate::memory::mmu::ops::read_8 as usize as u64 as i64,
+                crate::memory::mmu::ops::read_8 as *const () as u64 as i64,
                 &self.read_sigrefs[0],
             ),
             Width::_16 => (
-                crate::memory::mmu::ops::read_16 as usize as u64 as i64,
+                crate::memory::mmu::ops::read_16 as *const () as u64 as i64,
                 &self.read_sigrefs[1],
             ),
             Width::_32 => (
-                crate::memory::mmu::ops::read_32 as usize as u64 as i64,
+                crate::memory::mmu::ops::read_32 as *const () as u64 as i64,
                 &self.read_sigrefs[2],
             ),
             Width::_64 => (
-                crate::memory::mmu::ops::read_64 as usize as u64 as i64,
+                crate::memory::mmu::ops::read_64 as *const () as u64 as i64,
                 &self.read_sigrefs[3],
             ),
             Width::_128 => (
-                crate::memory::mmu::ops::read_128 as usize as u64 as i64,
+                crate::memory::mmu::ops::read_128 as *const () as u64 as i64,
                 &self.read_sigrefs[4],
             ),
         }

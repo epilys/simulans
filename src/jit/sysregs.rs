@@ -200,7 +200,7 @@ impl BlockTranslator<'_> {
         let callee = self
             .builder
             .ins()
-            .iconst(I64, timer::timer_register_read as usize as i64);
+            .iconst(I64, timer::timer_register_read as *const () as i64);
         let call = self
             .builder
             .ins()
@@ -221,7 +221,7 @@ impl BlockTranslator<'_> {
         let callee = self
             .builder
             .ins()
-            .iconst(I64, timer::timer_register_write as usize as i64);
+            .iconst(I64, timer::timer_register_write as *const () as i64);
         let call =
             self.builder
                 .ins()
@@ -386,7 +386,7 @@ impl SystemRegister for SP {
             sig.returns.push(AbiParam::new(I64));
             jit.builder.import_signature(sig)
         };
-        let callee = jit.builder.ins().iconst(I64, read_sp as usize as i64);
+        let callee = jit.builder.ins().iconst(I64, read_sp as *const () as i64);
         let call = jit
             .builder
             .ins()
@@ -407,7 +407,7 @@ impl SystemRegister for SP {
             sig.params.push(AbiParam::new(I64));
             jit.builder.import_signature(sig)
         };
-        let callee = jit.builder.ins().iconst(I64, write_sp as usize as i64);
+        let callee = jit.builder.ins().iconst(I64, write_sp as *const () as i64);
         let call = jit
             .builder
             .ins()
@@ -438,7 +438,7 @@ macro_rules! impl_sp_elx {
                         sig.returns.push(AbiParam::new(I64));
                         jit.builder.import_signature(sig)
                     };
-                    let callee = jit.builder.ins().iconst(I64, read_sp_elx as usize as i64);
+                    let callee = jit.builder.ins().iconst(I64, read_sp_elx as *const () as i64);
                     let sp_var = jit.registers[&bad64::Reg::SP];
                     let sp_val = jit.builder.use_var(sp_var);
                     let call = jit
@@ -463,7 +463,7 @@ macro_rules! impl_sp_elx {
                         sig.returns.push(AbiParam::new(I8));
                         jit.builder.import_signature(sig)
                     };
-                    let callee = jit.builder.ins().iconst(I64, write_sp_elx as usize as i64);
+                    let callee = jit.builder.ins().iconst(I64, write_sp_elx as *const () as i64);
                     let call = jit
                         .builder
                         .ins()
@@ -597,7 +597,7 @@ impl SystemRegister for SPSel {
             sig.returns.push(AbiParam::new(I64));
             jit.builder.import_signature(sig)
         };
-        let callee = jit.builder.ins().iconst(I64, update_sp as usize as i64);
+        let callee = jit.builder.ins().iconst(I64, update_sp as *const () as i64);
         let sp_var = jit.registers[&bad64::Reg::SP];
         let sp_val = jit.builder.use_var(sp_var);
         let new_sp = jit.indirect_call(
@@ -628,7 +628,7 @@ impl SystemRegister for RNDRRS {
             sig.returns.push(AbiParam::new(I64));
             jit.builder.import_signature(sig)
         };
-        let callee = jit.builder.ins().iconst(I64, rand as usize as i64);
+        let callee = jit.builder.ins().iconst(I64, rand as *const () as i64);
         let call = jit.builder.ins().call_indirect(sigref, callee, &[]);
         let nzcv = jit.builder.ins().iconst(I64, 0);
         NZCV::generate_write(jit, nzcv);
