@@ -226,7 +226,7 @@ impl DeviceOps for PL031MemoryOps {
 
 impl crate::devices::DeviceTreeExt for PL031MemoryOps {
     fn kind(&self) -> Option<crate::fdt::NodeKind> {
-        Some(crate::fdt::NodeKind::Stdout("pl031".to_string()))
+        None
     }
 
     fn insert(
