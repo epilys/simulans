@@ -171,6 +171,20 @@ fn run_app(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
             memory_builder.add_region(mem)?;
         }
     }
+    if let Some(ref path) = args.virtio_scsi {
+        let virtio_mmio = simulans::devices::virtio_mmio::VirtioMMIO::new(
+            simulans::virtio::virtio_scsi::Scsi::new(path, true),
+            memory_builder.device_registry().register(),
+            None,
+            Address(0xa000200),
+            memory_builder.request_notifier.0.clone(),
+            0x11,
+            &interrupts,
+        );
+        for mem in virtio_mmio.into_memory_regions() {
+            memory_builder.add_region(mem)?;
+        }
+    }
     if args.generate_fdt {
         // Add Boot ROM
         let boot_rom = MemoryRegion::new(

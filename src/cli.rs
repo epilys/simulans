@@ -126,6 +126,9 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub virtio_rtc: bool,
 
+    #[arg(long)]
+    pub virtio_scsi: Option<PathBuf>,
+
     /// Path to binary file containing aarch64 instructions (NOT an ELF file!)
     #[arg(value_name = "BINARY")]
     pub binary: PathBuf,

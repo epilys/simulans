@@ -4,6 +4,7 @@
 //! VIRTIO device backend implementations
 
 pub mod virtio_rtc;
+pub mod virtio_scsi;
 
 pub const VIRTIO_F_VERSION_1: u32 = 32;
 
