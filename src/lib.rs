@@ -111,7 +111,8 @@
     clippy::multiple_crate_versions,
     clippy::missing_const_for_fn,
     clippy::cognitive_complexity,
-    clippy::tuple_array_conversions
+    clippy::tuple_array_conversions,
+    clippy::significant_drop_tightening
 )]
 
 #[cfg(not(target_pointer_width = "64"))]
