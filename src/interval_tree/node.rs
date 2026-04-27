@@ -43,8 +43,8 @@ pub type Range<K> = (Bound<K>, Bound<K>);
 pub struct Node<K> {
     pub key: Range<K>,
     pub value: Bound<K>, // Max end-point.
-    pub left: Option<Box<Node<K>>>,
-    pub right: Option<Box<Node<K>>>,
+    pub left: Option<Box<Self>>,
+    pub right: Option<Box<Self>>,
 }
 
 impl<K> fmt::Display for Node<K>
