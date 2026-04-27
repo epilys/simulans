@@ -999,6 +999,15 @@ fn addr_top(
     }
 }
 
+const fn sextend(msbit: u32, val: u64) -> u64 {
+    assert!(msbit > 1);
+    let val: i64 = val as i64;
+    let mask: i64 = 1 << (msbit - 1);
+    let val: i64 = val & ((1 << msbit) - 1);
+    let val: i64 = (val ^ mask) - mask;
+    val as u64
+}
+
 // Return the virtual address with tag bits removed.
 //
 // This is typically used when the address will be stored to the program
@@ -1016,9 +1025,7 @@ fn aarch64_branch_addr(
     } else if (matches!(el, ExceptionLevel::EL0 | ExceptionLevel::EL1)/* || IsInHost() */)
         && get_bits!(vaddress.0, off = msbit, len = 1) == 1
     {
-        // sign extend:
-        let mask = u64::MAX & !(2_u64.pow(msbit) - 1);
-        Address(mask | vaddress.0)
+        Address(sextend(msbit, get_bits!(vaddress.0, off = 0, len = msbit)))
     } else {
         Address(get_bits!(vaddress.0, off = 0, len = msbit))
     }
