@@ -1002,13 +1002,13 @@ mod registers {
     /// frame as follows:
     pub enum WordLength {
         /// b11 = 8 bits
-        _8Bits = 0b11,
+        _8 = 0b11,
         /// b10 = 7 bits
-        _7Bits = 0b10,
+        _7 = 0b10,
         /// b01 = 6 bits
-        _6Bits = 0b01,
+        _6 = 0b01,
         /// b00 = 5 bits.
-        _5Bits = 0b00,
+        _5 = 0b00,
     }
 
     /// Control Register, `UARTCR`
