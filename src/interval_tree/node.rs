@@ -52,52 +52,37 @@ where
     K: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use std::borrow::Cow;
+
         let start = match self.key.0 {
-            Included(ref x) => format!("[{}", x),
-            Excluded(ref x) => format!("]{}", x),
-            Unbounded => String::from("]-∞"),
+            Included(ref x) => Cow::Owned(format!("[{}", x)),
+            Excluded(ref x) => Cow::Owned(format!("]{}", x)),
+            Unbounded => Cow::Borrowed("]-∞"),
         };
         let end = match self.key.1 {
-            Included(ref x) => format!("{}]", x),
-            Excluded(ref x) => format!("{}[", x),
-            Unbounded => "∞[".to_string(),
+            Included(ref x) => Cow::Owned(format!("{}]", x)),
+            Excluded(ref x) => Cow::Owned(format!("{}[", x)),
+            Unbounded => Cow::Borrowed("∞["),
         };
         let value = match self.value {
-            Included(ref x) => format!("{}]", x),
-            Excluded(ref x) => format!("{}[", x),
-            Unbounded => String::from("∞"),
+            Included(ref x) => Cow::Owned(format!("{}]", x)),
+            Excluded(ref x) => Cow::Owned(format!("{}[", x)),
+            Unbounded => Cow::Borrowed("∞"),
         };
 
-        if self.left.is_none() && self.right.is_none() {
-            write!(f, " {{ {},{} ({}) }} ", start, end, value)
-        } else if self.left.is_none() {
-            write!(
-                f,
-                " {{ {},{} ({}) right:{}}} ",
-                start,
-                end,
-                value,
-                self.right.as_ref().unwrap()
-            )
-        } else if self.right.is_none() {
-            write!(
-                f,
-                " {{ {},{} ({}) left:{}}} ",
-                start,
-                end,
-                value,
-                self.left.as_ref().unwrap()
-            )
-        } else {
-            write!(
-                f,
-                " {{ {},{} ({}) left:{}right:{}}} ",
-                start,
-                end,
-                value,
-                self.left.as_ref().unwrap(),
-                self.right.as_ref().unwrap()
-            )
+        match (self.left.as_ref(), self.right.as_ref()) {
+            (None, None) => {
+                write!(f, " {{ {},{} ({}) }} ", start, end, value)
+            }
+            (None, Some(r)) => {
+                write!(f, " {{ {start},{end} ({value}) right:{r}}} ")
+            }
+            (Some(l), None) => {
+                write!(f, " {{ {start},{end} ({value}) left:{l}}} ",)
+            }
+            (Some(l), Some(r)) => {
+                write!(f, " {{ {start},{end} ({value}) left:{l} right:{r}}} ",)
+            }
         }
     }
 }
