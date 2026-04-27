@@ -49,7 +49,7 @@ enum BlockExit {
 /// It can be either a JIT compiled translation block, or a special emulator
 /// function.
 pub struct Entry(
-    pub for<'a, 'b> extern "C" fn(jit: &'a mut Jit, machine: &'b mut Armv8AMachine) -> Entry,
+    pub for<'a, 'b> extern "C" fn(jit: &'a mut Jit, machine: &'b mut Armv8AMachine) -> Self,
 );
 
 /// Lookup [`machine.pc`] in cached translation blocks
