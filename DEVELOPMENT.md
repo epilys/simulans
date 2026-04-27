@@ -181,6 +181,9 @@ Needless to say, it's not easy.
 
 For Cranelift, the JIT can dump its IR representation when translating a block when you enable `--trace-items cranelift_jit`.
 
+For associating the printed IR (e.g. from verification error panics) to source code, you can use `set_srcloc` e.g. with: `self.builder.set_srcloc(cranelift::codegen::ir::SourceLoc::new(line!()))`
+which will print each IR line prefixed with the output of `line!()` as a hex number.
+
 ### Debugging native JITed code
 
 For native code, you can run the code under gdb.
